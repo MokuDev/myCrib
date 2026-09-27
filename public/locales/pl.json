@@ -3909,9 +3909,7 @@
         "mobileNavigate": "Nawiguj przez pasek na dole i „Więcej”.",
         "mobileCreate": "Nowe elementy dodasz przyciskiem + w prawym dolnym rogu.",
         "mobileSearch": "Wyszukiwanie otworzysz przez „Więcej” → Szukaj.",
-        "mobileSettings": "Ustawienia znajdziesz w „Więcej”.",
-        "guideLink": "Podręcznik użytkownika",
-        "guideHint": "Prowadzony przez społeczność, we własnym repozytorium - może być opóźniony wobec wydania."
+        "mobileSettings": "Ustawienia znajdziesz w „Więcej”."
     },
     "changelog": {
         "title": "Zmiany",

@@ -2782,16 +2782,6 @@ function showHelpModal() {
     </div>
     <div class="modal-panel__body">
       <div class="shortcuts-list">${rows}</div>
-      <!-- Nutzerhandbuch aus der Community (#799). Es lebt in einem fremden
-           Repository und in fremder Regie - deshalb steht die Herkunft im
-           Linktext und nicht nur im Hinweis darunter: wer hier klickt,
-           verlaesst das Projekt, und das soll er vorher wissen. -->
-      <p class="help-guide">
-        <a href="https://kyrodan.github.io/yuvomi-docs/" target="_blank" rel="noopener noreferrer">
-          ${esc(t('help.guideLink'))}
-        </a>
-        <span class="help-guide__hint">${esc(t('help.guideHint'))}</span>
-      </p>
     </div>
   `);
 

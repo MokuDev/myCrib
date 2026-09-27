@@ -3909,9 +3909,7 @@
         "mobileNavigate": "Navigiere über die Leiste unten und „Mehr“.",
         "mobileCreate": "Mit dem +-Knopf unten rechts legst du Neues an.",
         "mobileSearch": "Suche öffnest du über „Mehr“ → Suchen.",
-        "mobileSettings": "Einstellungen findest du unter „Mehr“.",
-        "guideLink": "Nutzerhandbuch",
-        "guideHint": "Aus der Community, in einem eigenen Repository - kann hinter einem Release zurückliegen."
+        "mobileSettings": "Einstellungen findest du unter „Mehr“."
     },
     "changelog": {
         "title": "Änderungsverlauf",

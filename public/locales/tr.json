@@ -3909,9 +3909,7 @@
         "mobileNavigate": "Alttaki çubuk ve „Daha fazla” ile gezinin.",
         "mobileCreate": "Sağ alttaki + düğmesiyle yeni öğe oluşturun.",
         "mobileSearch": "Aramayı „Daha fazla” → Ara ile açın.",
-        "mobileSettings": "Ayarları „Daha fazla” altında bulursunuz.",
-        "guideLink": "Kullanıcı kılavuzu",
-        "guideHint": "Toplulukça, ayrı bir depoda tutuluyor - bir sürümün gerisinde kalabilir."
+        "mobileSettings": "Ayarları „Daha fazla” altında bulursunuz."
     },
     "changelog": {
         "title": "Değişiklikler",

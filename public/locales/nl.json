@@ -3909,9 +3909,7 @@
         "mobileNavigate": "Navigeer via de balk onderaan en ‘Meer’.",
         "mobileCreate": "Maak nieuwe items met de +-knop rechtsonder.",
         "mobileSearch": "Open zoeken via ‘Meer’ → Zoeken.",
-        "mobileSettings": "Je vindt instellingen onder ‘Meer’.",
-        "guideLink": "Gebruikershandleiding",
-        "guideHint": "Door de community bijgehouden, in een eigen repository - kan achterlopen op een release."
+        "mobileSettings": "Je vindt instellingen onder ‘Meer’."
     },
     "changelog": {
         "title": "Wijzigingen",

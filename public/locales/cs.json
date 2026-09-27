@@ -3909,9 +3909,7 @@
         "mobileNavigate": "Naviguj přes lištu dole a „Více“.",
         "mobileCreate": "Nové položky vytvoříš tlačítkem + vpravo dole.",
         "mobileSearch": "Vyhledávání otevřeš přes „Více“ → Hledat.",
-        "mobileSettings": "Nastavení najdeš pod „Více“.",
-        "guideLink": "Uživatelská příručka",
-        "guideHint": "Spravuje ji komunita ve vlastním repozitáři - může zaostávat za vydáním."
+        "mobileSettings": "Nastavení najdeš pod „Více“."
     },
     "changelog": {
         "title": "Změny",

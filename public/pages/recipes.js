@@ -1015,7 +1015,7 @@ function fillRecipeDetail(detail, recipe) {
 /* DIE BESTAETIGTE ZUORDNUNG ZU EINER VORRATSZEILE (#1314, Stufe 1).
  *
  * Sie steht im Rezeptdetail, neben der Zutat, und nirgends sonst: eine eigene
- * Zuordnungsseite oeffnet niemand ein zweites Mal (#1314, Punkt 2). Yuvomi
+ * Zuordnungsseite oeffnet niemand ein zweites Mal (#1314, Punkt 2). myCrib
  * schlaegt dabei NICHTS vor - auch dann nicht, wenn eine Vorratszeile genauso
  * heisst. Ein geratener Treffer waere der gepflegte Katalog, eine Ableitung
  * nach der anderen (docs/DECISIONS.md Abschnitt 7).

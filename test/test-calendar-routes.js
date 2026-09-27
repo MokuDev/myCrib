@@ -732,7 +732,7 @@ function seedMovedFixture() {
     // von Hand einer Person zugewiesen, die kein Kalender als Standard fuehrt
     manual:       event('mv-manual', { refId: cals.b, primary: HAND, rows: [HAND] }),
     // von Hand GENAU der Standard-Person von A zugewiesen: der Termin wurde in
-    // Yuvomi bearbeitet (`user_modified`), und das kann kein Umzug gewesen sein
+    // myCrib bearbeitet (`user_modified`), und das kann kein Umzug gewesen sein
     manualSame:   event('mv-manual-same', { refId: cals.b, primary: MARIA.id, rows: [MARIA.id], userModified: 1 }),
     twoPeople:    event('mv-two', { refId: cals.b, primary: MARIA.id, rows: [MARIA.id, ADMIN.id] }),
     otherPrimary: event('mv-other-primary', { refId: cals.b, primary: ADMIN.id, rows: [MARIA.id] }),

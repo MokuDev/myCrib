@@ -156,7 +156,7 @@ function parseUntilDate(str) {
 // RFC 5545 kennt drei Schreibweisen, und nur die erste meint einen ganzen Tag:
 //   YYYYMMDD          - ein Datum. Die Serie endet mit diesem Tag, und zwar
 //                       ganz. So schreiben Ganztagsserien ihr Ende, und so
-//                       schreibt es auch Yuvomis eigener Serienschnitt
+//                       schreibt es auch myCribs eigener Serienschnitt
 //                       (calendar-occurrence-overrides.js: der Vortag).
 //   YYYYMMDDTHHMMSSZ  - ein ZEITPUNKT in UTC.
 //   YYYYMMDDTHHMMSS   - eine Ortszeit ohne Zone. RFC 5545 verlangt bei einem
@@ -170,7 +170,7 @@ function parseUntilDate(str) {
 // Europe/Berlin -, nicht auf den Vortag. Wer davon nur den Datumsteil liest,
 // laesst den Schnitttag eingeschlossen; weil die neue Serie an genau diesem Tag
 // beginnt, stand der Termin dort zweimal. Jeder andere Tag war richtig, und
-// Yuvomis eigene Serien fielen nie darauf, weil sie den Vortag schreiben.
+// myCribs eigene Serien fielen nie darauf, weil sie den Vortag schreiben.
 const UNTIL_RE = /^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/;
 
 /**
@@ -366,7 +366,7 @@ function nextOccurrence(baseDateStr, rrule, {
       // UTC am 1. Februar, und die Rechnung machte daraus den 27. Februar lokal.
       // Ohne sie laeuft die Serie auf ihrem festen UTC-Tag weiter, und der
       // gleichbleibende Versatz trifft den lokalen Monatsletzten von selbst.
-      // Yuvomis eigene Termine sind davon nicht betroffen: sie tragen keine
+      // myCribs eigene Termine sind davon nicht betroffen: sie tragen keine
       // fremde Zone, also stimmt ihr UTC-Tag mit dem lokalen ueberein.
       //
       // WAS DAS NICHT LOEST: ueber eine Sommerzeitumstellung hinweg trifft der
@@ -784,7 +784,7 @@ function seriesStartFor(dateKey, rrule, { utcDiffersFromLocal = false } = {}) {
   // serialisiert "jeden Werktag" als Serie, deren Start auf ein Wochenende
   // fallen kann, und die Expansion ueberspringt ihn (#549). Diese Entscheidung
   // ist aelter und gilt weiter - hier geht es allein um die Angaben, die
-  // Yuvomi selbst erzeugt und die sonst nach draussen uneindeutig waeren.
+  // myCrib selbst erzeugt und die sonst nach draussen uneindeutig waeren.
   const parsedForStart = parseRRule(rrule);
   if (parsedForStart?.bymonthday !== -1 && !parsedForStart?.bydayOrdinal) return dateKey;
   if (matchesRRuleByday(tag, rrule, { utcDiffersFromLocal })) return dateKey;

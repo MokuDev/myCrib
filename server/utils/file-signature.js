@@ -3,7 +3,7 @@
  * Zweck: Prueft, ob der Inhalt eines Uploads zu dem Typ passt, als der er
  *        deklariert wurde.
  *
- * WARUM DAS NOETIG IST. Jeder Upload-Pfad in Yuvomi nimmt eine data-URL entgegen
+ * WARUM DAS NOETIG IST. Jeder Upload-Pfad in myCrib nimmt eine data-URL entgegen
  * und glaubt bisher deren Praefix: `data:application/pdf;base64,...` galt als PDF,
  * weil dort "application/pdf" steht. Diese Angabe kommt aus dem Browser des
  * Absenders und laesst sich mit einem einzigen HTTP-Request frei setzen.

@@ -137,7 +137,7 @@ const MAX_WEBHOOK_TEMPLATE_LENGTH = 4096;
 // Anfuehrungszeichen, Backslash, Zeilenumbruch. Waeren sie harmlos, ginge die
 // Gegenprobe unten durch und der Fehler kaeme erst bei der ersten Zustellung.
 const WEBHOOK_TEMPLATE_SAMPLE = Object.freeze({
-  title: 'Yuvomi "Test"',
+  title: 'myCrib "Test"',
   body: 'Zeile 1\nZeile 2 \\ Ende',
   url: '/tasks',
   tag: 'reminder-1',

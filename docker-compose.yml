@@ -10,7 +10,7 @@ services:
     volumes:
       - ${DATA_DIR:-./data}:/data
       - ${BACKUP_DIR:-./backups}:/backups
-      # Drop Yuvomi modules into ./modules, or set MODULES_DIR=/path/to/modules in
+      # Drop myCrib modules into ./modules, or set MODULES_DIR=/path/to/modules in
       # .env. The app reads that name inside the container too, so environment:
       # below pins it to /app/modules; the .env value only moves the mount source.
       - ${MODULES_DIR:-./modules}:/app/modules

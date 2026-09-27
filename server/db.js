@@ -36,7 +36,7 @@ const DB_KEY = process.env.DB_ENCRYPTION_KEY;
 // Pfad-Auflösung (Legacy-Migration oikos.db → yuvomi.db)
 // --------------------------------------------------------
 //
-// Yuvomi hieß früher „Oikos". Die DB-Datei lag standardmäßig unter `oikos.db`
+// myCrib hieß früher „Oikos". Die DB-Datei lag standardmäßig unter `oikos.db`
 // (bzw. `/data/oikos.db` in allen ausgelieferten Docker-Templates). Damit
 // Bestands-Nutzer beim Update NICHTS von Hand ändern müssen, leiten wir den
 // effektiven Pfad ab:
@@ -204,9 +204,9 @@ function undecryptableDatabaseError() {
     'If you replaced the database file and the key together, changing the key back will not help: '
     + 'the file you put in place does not open with the old key either. Then one of the two is not '
     + `what you think it is. Compare the size and sha256sum of ${DB_PATH} with the original file; `
-    + 'if they differ, copy the file again. If they match, the key Yuvomi was started with is not, '
+    + 'if they differ, copy the file again. If they match, the key myCrib was started with is not, '
     + 'byte for byte, the one the file was written with. Compare it character by character with the '
-    + 'source, and check how it reaches Yuvomi: an environment file is parsed, not copied - '
+    + 'source, and check how it reaches myCrib: an environment file is parsed, not copied - '
     + 'systemd\'s EnvironmentFile, for one, drops a backslash in an unquoted value, reads a quote '
     + 'right after "=" as quoting and trims spaces at both ends.',
   ];
@@ -218,7 +218,7 @@ function undecryptableDatabaseError() {
       + 'main file yet. Do not delete it in that case - it would throw those away and would not fix '
       + 'the key. It is only a cause of this error if you replaced the database file by hand, '
       + 'because then the log belongs to the database you replaced and is still read on open. If '
-      + `that is what happened, stop Yuvomi and move ${DB_PATH}-wal and ${DB_PATH}-shm aside `
+      + `that is what happened, stop myCrib and move ${DB_PATH}-wal and ${DB_PATH}-shm aside `
       + 'before starting again.'
     );
   }
@@ -260,16 +260,16 @@ function unreadableAtStartError(err) {
       + 'check, which a wrong key never does - so changing the key will not help. If the file was '
       + 'copied or downloaded from another machine, the copy most likely stopped short: copy it '
       + 'again from the original and compare its size and sha256sum with the original before '
-      + 'starting Yuvomi.';
+      + 'starting myCrib.';
   }
 
   const lines = [`[DB] ${DB_PATH} could not be read (${detail}).`];
   if (code.startsWith('SQLITE_READONLY') || code.startsWith('SQLITE_CANTOPEN')) {
     lines.push(
-      `Yuvomi needs read and write access to the database file, to ${DB_PATH}-wal and `
+      `myCrib needs read and write access to the database file, to ${DB_PATH}-wal and `
       + `${DB_PATH}-shm next to it and to the directory they are in - even just to read, because `
       + 'SQLite keeps its write-ahead log there. Check the owner and permissions of '
-      + `${path.dirname(DB_PATH)} and of the files in it for the user Yuvomi runs as.`
+      + `${path.dirname(DB_PATH)} and of the files in it for the user myCrib runs as.`
     );
   }
   return lines.join(' ');
@@ -301,7 +301,7 @@ function databaseFileAboutToOpen() {
  * Meldung für eine vorhandene, aber leere Datenbankdatei (#1282).
  *
  * SQLite nimmt eine Datei mit 0 Byte als neue Datenbank, die Migrationen
- * laufen von vorn, und Yuvomi steht als leere Instanz da - genau in dem
+ * laufen von vorn, und myCrib steht als leere Instanz da - genau in dem
  * Moment, in dem jemand gerade Daten bewegt. Gemessen mit diesem Treiber:
  * eine frische Installation hat gar keine Datei, und `journal_mode = WAL`
  * schreibt Seite 1 (4096 Byte) in die Hauptdatei, bevor es überhaupt ein
@@ -331,24 +331,24 @@ function databaseFileAboutToOpen() {
  */
 function emptyDatabaseFileError(filePath) {
   const lines = [
-    `[DB] ${filePath} exists but is empty (0 bytes). Yuvomi refuses to start on it: SQLite would `
-    + 'take an empty file for a new database, and Yuvomi would come up as a fresh, empty instance '
+    `[DB] ${filePath} exists but is empty (0 bytes). myCrib refuses to start on it: SQLite would `
+    + 'take an empty file for a new database, and myCrib would come up as a fresh, empty instance '
     + 'as if your data were gone. Nothing has been written to the file.',
-    'A new installation has no database file at all, and Yuvomi never empties its own. An empty '
+    'A new installation has no database file at all, and myCrib never empties its own. An empty '
     + 'file is left behind by a copy or restore that failed or stopped short - an interrupted '
     + 'transfer, cp onto a full disk, a wrong source path - or by a very first start that was '
     + 'stopped before it had written anything.',
     'If you copied or restored a database to this path, copy it again from the original and '
-    + `compare the size and sha256sum of ${filePath} with the original before starting Yuvomi.`,
+    + `compare the size and sha256sum of ${filePath} with the original before starting myCrib.`,
     'If you want a new, empty instance - you created the file on purpose, or the first start of a '
-    + `new installation was interrupted - delete ${filePath} and start again: Yuvomi then creates `
+    + `new installation was interrupted - delete ${filePath} and start again: myCrib then creates `
     + 'the database itself.',
   ];
   if (filePath === DB_PATH && LEGACY_DB_PATH && regularFileSize(LEGACY_DB_PATH) > 0) {
     lines.push(
       `An older database file from before the rename lies next to it (${LEGACY_DB_PATH}). `
       + `Deleting the empty ${path.basename(DB_PATH)} does not give you a new instance then: on the `
-      + `next start Yuvomi moves ${path.basename(LEGACY_DB_PATH)} to ${path.basename(DB_PATH)} and `
+      + `next start myCrib moves ${path.basename(LEGACY_DB_PATH)} to ${path.basename(DB_PATH)} and `
       + 'starts with the data in it. Move it aside first if that is not what you want.'
     );
   }
@@ -479,14 +479,14 @@ function init({ plaintextBackup = true } = {}) {
   const unknown = unknownMigrationVersions(db);
   if (unknown.length > 0) {
     const detail =
-      `This database was written by a newer Yuvomi: it carries migration ${unknown.join(', ')} ` +
+      `This database was written by a newer myCrib: it carries migration ${unknown.join(', ')} ` +
       `and this build knows up to v${latestKnownVersion()}.`;
     if (!allowNewerSchema()) {
       db.close();
       db = null;
       throw new Error(
         `[DB] ${detail} Running an older version on a newer database is not supported: what it ` +
-        'writes in the meantime can be lost on the next update. Update Yuvomi to the version ' +
+        'writes in the meantime can be lost on the next update. Update myCrib to the version ' +
         'that wrote this database, or restore the backup taken before that update. To start ' +
         'anyway, at your own risk, set DB_ALLOW_NEWER_SCHEMA=1.'
       );
@@ -751,7 +751,7 @@ function removeCreatingFiles(workingPath) {
  *
  * Der Wert 0 ist der, den eine neue Datenbank ohnehin hat - die Datei bekommt
  * also nur ihre Seite 1, keinen Inhalt. Auf einer bereits beschriebenen
- * Arbeitsdatei bleibt sie dadurch, wie sie ist. `user_version` gehört Yuvomi
+ * Arbeitsdatei bleibt sie dadurch, wie sie ist. `user_version` gehört myCrib
  * nicht anderweitig: die Schema-Version steht in `schema_migrations`.
  */
 function writeFirstDatabasePage(workingPath) {
@@ -4407,7 +4407,7 @@ const MIGRATIONS = [
       -- Gegenstück zu v103 für Änderungen: ein bereits nach Google gespiegelter
       -- Termin wurde nach dem ersten Push nie wieder ausgehend angefasst, weil der
       -- Outbound-Zweig nur external_source='local' selektiert. Titel-, Zeit- oder
-      -- Farbänderungen blieben damit in Yuvomi hängen.
+      -- Farbänderungen blieben damit in myCrib hängen.
       --
       -- outbound_dirty ist bewusst NICHT user_modified: das Flag bedeutet
       -- dauerhaft "lokal angefasst, Farbe nicht überschreiben" und würde als
@@ -4614,7 +4614,7 @@ const MIGRATIONS = [
       -- Der Google-Abruf stellt von singleEvents:true auf false um: eine Serie
       -- kommt künftig als EIN Master mit ihrer Wiederholungsregel statt als
       -- hunderte Einzelvorkommen, so wie CalDAV und ICS sie liefern und wie
-      -- Yuvomi Serien lokal führt.
+      -- myCrib Serien lokal führt.
       --
       -- Der gespeicherte syncToken gehört zu den alten Abrufparametern. Google
       -- beantwortet ihn nach der Umstellung mit 410 GONE, was der Sync zwar
@@ -4846,7 +4846,7 @@ const MIGRATIONS = [
       -- Kategorie: eine Aufgabe liegt in genau einer Kategorie (einer Schublade),
       -- trägt aber beliebig viele Tags (Etiketten). CATEGORIES auf category
       -- abzubilden hieße, alle Werte ab dem zweiten zu verlieren und beim Push
-      -- die Tags zu löschen, die der Server kennt und Yuvomi nie gesehen hat.
+      -- die Tags zu löschen, die der Server kennt und myCrib nie gesehen hat.
       --
       -- Freitext statt verwalteter Liste: die Werte kommen von fremden Servern,
       -- eine Registry würde sich bei jedem Sync mit Fremdwerten füllen und in
@@ -5990,7 +5990,7 @@ const MIGRATIONS = [
       -- Widget kommen ohne aus.
       --
       -- Bei calendar_events gehoert das Flag in dieselbe Gruppe wie icon (v53)
-      -- und visibility (v83): Yuvomi-eigene Felder ohne CalDAV-/Google-
+      -- und visibility (v83): myCrib-eigene Felder ohne CalDAV-/Google-
       -- Gegenstueck. Es steht nicht in MIRRORED_FIELDS
       -- (services/calendar-outbound.js), loest also keinen Push aus, und der
       -- Rueckweg schreibt eine feste Spaltenliste, laesst es also stehen - eine
@@ -6148,7 +6148,7 @@ const MIGRATIONS = [
     up: `
       -- Outlook.com spricht kein CalDAV mehr - der einzige Schreibweg ist die
       -- Microsoft Graph API. Neuer Provider "Outlook-Push": one-way
-      -- Yuvomi -> Outlook fuer persoenliche Microsoft-Konten (outlook.com /
+      -- myCrib -> Outlook fuer persoenliche Microsoft-Konten (outlook.com /
       -- M365 Family), Multi-Account wie caldav_accounts.
 
       -- Ein verbundenes Microsoft-Konto. OAuth-Tokens liegen pro Konto-Zeile,
@@ -6204,7 +6204,7 @@ const MIGRATIONS = [
         content_hash        TEXT,
         -- Graph-ETag des Events nach dem letzten eigenen Schreibzugriff. Der Sync
         -- listet je Kalender einmal id+changeKey: weicht der Key ab, wurde der
-        -- Termin in Outlook veraendert und wird auf den Yuvomi-Stand zurueckgesetzt;
+        -- Termin in Outlook veraendert und wird auf den myCrib-Stand zurueckgesetzt;
         -- fehlt die id, wurde er in Outlook geloescht und wird neu angelegt.
         outlook_change_key  TEXT,
         last_pushed_at      TEXT,
@@ -6829,7 +6829,7 @@ const MIGRATIONS = [
       --
       -- Gemeldet war: "It's just an icon and as heavy self-hoster I don't want
       -- to search and fetch icons from somewhere, I would like to have it just
-      -- built-in Yuvomi." Bisher gab es zwei Gesichter - ein hochgeladenes Bild
+      -- built-in myCrib." Bisher gab es zwei Gesichter - ein hochgeladenes Bild
       -- (icon_data, v160) oder den Anfangsbuchstaben auf der gewaehlten Farbe.
       -- Wer weder das eine wollte noch das andere, hatte keine dritte Wahl.
       --
@@ -7154,7 +7154,7 @@ const MIGRATIONS = [
     // crud.js), der Inbound aller drei Anbieter liest es aber als "die Farbe
     // wird ab jetzt lokal gefuehrt". Wer den Titel aendert, friert damit die
     // Farbspalte dauerhaft ein: faerbt danach jemand denselben Termin auf dem
-    // Server, erfaehrt Yuvomi es nie mehr (#899).
+    // Server, erfaehrt myCrib es nie mehr (#899).
     //
     // Und weil dadurch "keine eigene Farbe" (#891) nicht von "wir haben nie eine
     // gelernt" zu unterscheiden war, konnte der Ausgang das Leeren einer Farbe
@@ -8944,7 +8944,7 @@ const MIGRATIONS = [
     description: 'Display accounts: a non-member users row that only a paired device can use (#1208)',
     // EIN DISPLAY IST EINE users-ZEILE, KEIN ZWEITER KONTOTYP. Genau so steht es
     // in docs/DECISIONS.md 4: welche Art Mensch eine Zeile ist, ist eine
-    // Eigenschaft der Zeile, und Yuvomi hat das schon zweimal so beantwortet -
+    // Eigenschaft der Zeile, und myCrib hat das schon zweimal so beantwortet -
     // Hauspersonal per `housekeeping_workers`, Ausgaben-Gaeste per
     // `split_expense_guest_users`. `display_accounts` ist die dritte
     // Markierungstabelle desselben Musters, nicht ein neuer Mechanismus daneben.
@@ -9897,7 +9897,7 @@ function migrate(database = db, migrations = MIGRATIONS) {
 /**
  * Migrationsnummern, die diese Datenbank trägt und dieser Build nicht kennt.
  *
- * Das ist die Signatur einer NEUEREN Yuvomi-Version auf dieser Datei - nach
+ * Das ist die Signatur einer NEUEREN myCrib-Version auf dieser Datei - nach
  * einem Rollback des Images (Umbrel, Unraid) oder mit einem Backup aus einer
  * neueren Installation. `migrate()` sieht nur die Gegenrichtung: es führt
  * nach, was fehlt, und übergeht stumm, was es nicht kennt. Eine ältere App
@@ -10086,8 +10086,8 @@ function undecryptableBackupError(cause) {
       'Backup file could not be read: it has no plain SQLite header, so it is likely encrypted - '
       + 'and DB_ENCRYPTION_KEY is not set on this instance, so there is nothing to decrypt it with. '
       + 'A backup carries the encryption of the instance that wrote it: set DB_ENCRYPTION_KEY to '
-      + "that instance's key and restart Yuvomi, then restore again. If the file was never "
-      + 'encrypted, it is not a valid Yuvomi database.',
+      + "that instance's key and restart myCrib, then restore again. If the file was never "
+      + 'encrypted, it is not a valid myCrib database.',
       'own_key_missing',
       cause
     );
@@ -10099,11 +10099,11 @@ function undecryptableBackupError(cause) {
     + 'line: `scripts/restore-backup.js <file> --backup-key-stdin`, with the key on stdin). It is used only for '
     + "this restore - the backup is re-encrypted with this instance's own key and the entered key "
     + 'is not stored. Do NOT just set DB_ENCRYPTION_KEY to that installation\'s key and restart: '
-    + "this instance's own database is encrypted with the key it has now, so after the swap Yuvomi "
+    + "this instance's own database is encrypted with the key it has now, so after the swap myCrib "
     + 'would not start at all and this dialog would be out of reach. The manual route, which '
-    + 'replaces the database file and sets the key together with Yuvomi stopped, is under '
+    + 'replaces the database file and sets the key together with myCrib stopped, is under '
     + '"CLI / Docker Compose restore" on this page. If both installations really do have the same '
-    + 'key, the file is not a Yuvomi database.',
+    + 'key, the file is not a myCrib database.',
     'backup_key_required',
     cause
   );
@@ -10179,7 +10179,7 @@ function unreadableBackupError(encrypted, cause) {
         cause
       );
     }
-    return new Error('Backup file is not a valid Yuvomi database.', { cause });
+    return new Error('Backup file is not a valid myCrib database.', { cause });
   }
   if (code === 'SQLITE_NOTADB') return undecryptableBackupError(cause);
 
@@ -10266,7 +10266,7 @@ function assertBackupIntact(candidate, encrypted) {
 
 /**
  * Ein Backup pruefen, ohne es einzuspielen: dieselbe Validierung wie vor jedem
- * Restore (lesbar mit dem eigenen Schluessel, Integritaet, Yuvomi-Schema, keine
+ * Restore (lesbar mit dem eigenen Schluessel, Integritaet, myCrib-Schema, keine
  * neuere Version). Liefert die Schema-Version; wirft mit derselben Meldung wie
  * der Restore.
  * @param {string} sourcePath
@@ -10304,16 +10304,16 @@ function validateBackupFile(sourcePath) {
       WHERE type = 'table' AND name = 'schema_migrations'
     `).get();
     if (!row) {
-      throw new Error('Backup file is not a valid Yuvomi database.');
+      throw new Error('Backup file is not a valid myCrib database.');
     }
-    // Backup aus einer neueren Yuvomi-Version: ablehnen, bevor irgendetwas
+    // Backup aus einer neueren myCrib-Version: ablehnen, bevor irgendetwas
     // kopiert wird. Eingespielt liefe diese App stumm gegen ein Schema, das
     // sie nicht kennt; der richtige erste Schritt ist das Update.
     const unknown = unknownMigrationVersions(candidate);
     if (unknown.length > 0) {
       throw new Error(
-        `Backup was written by a newer Yuvomi (schema v${unknown[unknown.length - 1]}; this ` +
-        `version knows up to v${latestKnownVersion()}). Update Yuvomi first, then restore.`
+        `Backup was written by a newer myCrib (schema v${unknown[unknown.length - 1]}; this ` +
+        `version knows up to v${latestKnownVersion()}). Update myCrib first, then restore.`
       );
     }
     return candidate.prepare('SELECT MAX(version) AS version FROM schema_migrations').get()?.version ?? 0;
@@ -10388,7 +10388,7 @@ function foreignKeyReadError(cause, { keyProven = false } = {}) {
       'Backup file could not be decrypted with the backup key you entered. It has to be exactly '
       + 'the DB_ENCRYPTION_KEY of the installation that wrote this backup - every character counts, '
       + 'including spaces at either end. Nothing on this instance was changed. If the key is right, '
-      + 'the file is not a Yuvomi database or was cut short before it got here.',
+      + 'the file is not a myCrib database or was cut short before it got here.',
       'backup_key_wrong',
       cause
     );
@@ -10449,7 +10449,7 @@ async function rekeyForeignBackup(sourcePath, oldKey) {
       'A backup key was given, but DB_ENCRYPTION_KEY is not set on this instance. A restore with a '
       + "backup key re-encrypts the backup with this instance's own key; without one it would have "
       + 'to be stored decrypted, and this restore refuses that. Set DB_ENCRYPTION_KEY on this '
-      + 'instance (for example to a value from `openssl rand -hex 32`) and restart Yuvomi - its '
+      + 'instance (for example to a value from `openssl rand -hex 32`) and restart myCrib - its '
       + 'current database is encrypted with it on that start - then restore again with the backup '
       + 'key. Nothing on this instance was changed.',
       'own_key_missing'
@@ -10572,7 +10572,7 @@ async function waitForQuietOrGiveUp() {
   if (quiet) return;
   const seconds = Math.round(restoreWaitTimeoutMs() / 1000);
   throw restoreError(
-    `Yuvomi is still busy: a sync, a backup or a request had not finished after ${seconds} seconds, `
+    `myCrib is still busy: a sync, a backup or a request had not finished after ${seconds} seconds, `
     + 'so the restore did not start. Nothing on this instance was changed. Try again in a moment.',
     'restore_busy'
   );
@@ -10617,7 +10617,7 @@ async function restoreFromFileUnlocked(sourcePath, { backupKey }) {
       `Backup file ${sourcePath} is the active database itself (DB_PATH). Restoring it onto itself `
       + 'would drop the changes that are still only in its write-ahead log. Nothing on this instance '
       + 'was changed. Restore a backup file instead - download one under Settings, Backup, or copy '
-      + 'the database file while Yuvomi is stopped.'
+      + 'the database file while myCrib is stopped.'
     );
   }
   const oldKey = backupKeyBytes(backupKey);
@@ -10799,8 +10799,8 @@ async function adoptDatabaseAttributes(filePath) {
         throw new Error(
           `Could not give ${filePath} the owner of the current database (uid ${previous.uid}, gid `
           + `${previous.gid}; it belongs to uid ${staged.uid}, gid ${staged.gid}): ${err?.code ?? err}. `
-          + 'Yuvomi would not be able to write the restored database. Nothing on this instance was '
-          + 'changed. Run the restore as the user Yuvomi runs as, or as root.',
+          + 'myCrib would not be able to write the restored database. Nothing on this instance was '
+          + 'changed. Run the restore as the user myCrib runs as, or as root.',
           { cause: err }
         );
       }
@@ -11072,8 +11072,8 @@ function rollbackFailedError(restoreErr, rollbackErr, { swapped, rolledBack, rol
   ];
   if (swapped && !rolledBack && rollbackPath) {
     lines.push(
-      `The database from before the restore is kept at ${rollbackPath}. Stop Yuvomi, move that file `
-      + `to ${DB_PATH} (and delete ${DB_PATH}-wal and ${DB_PATH}-shm if they exist), then start Yuvomi again.`
+      `The database from before the restore is kept at ${rollbackPath}. Stop myCrib, move that file `
+      + `to ${DB_PATH} (and delete ${DB_PATH}-wal and ${DB_PATH}-shm if they exist), then start myCrib again.`
     );
   } else if (swapped && !rolledBack) {
     lines.push(
@@ -11081,9 +11081,9 @@ function rollbackFailedError(restoreErr, rollbackErr, { swapped, rolledBack, rol
       + `Delete ${DB_PATH} (with ${DB_PATH}-wal and ${DB_PATH}-shm) to start as a fresh instance, or restore another backup.`
     );
   } else if (rolledBack) {
-    lines.push(`The database from before the restore is back at ${DB_PATH}, but it could not be opened again. Restart Yuvomi.`);
+    lines.push(`The database from before the restore is back at ${DB_PATH}, but it could not be opened again. Restart myCrib.`);
   } else {
-    lines.push(`The restore never replaced ${DB_PATH}; the database there is the one from before, but it could not be opened again. Restart Yuvomi.`);
+    lines.push(`The restore never replaced ${DB_PATH}; the database there is the one from before, but it could not be opened again. Restart myCrib.`);
   }
   return new Error(lines.join(' '), { cause: restoreErr });
 }

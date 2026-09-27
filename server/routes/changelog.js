@@ -25,7 +25,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 const FAILURE_BACKOFF_MS = 5 * 60 * 1000;
 const REQUEST_HEADERS = {
   Accept: 'application/vnd.github+json',
-  'User-Agent': 'Yuvomi/1.0 (+https://github.com/ulsklyc/yuvomi)',
+  'User-Agent': 'myCrib/1.0 (+https://github.com/ulsklyc/yuvomi)',
   'X-GitHub-Api-Version': '2022-11-28',
 };
 

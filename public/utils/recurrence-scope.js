@@ -14,7 +14,7 @@ import { parseLocalDateKey, addLocalDays } from './date.js';
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}/;
 
 /**
- * Trägt eine Serie Yuvomi selbst, oder gehört sie einem anderen Kalender?
+ * Trägt eine Serie myCrib selbst, oder gehört sie einem anderen Kalender?
  *
  * Die Frage entscheidet über den Löschumfang, deshalb steht sie hier neben der
  * Scope-Arithmetik statt in der Seite: nur eine LOKALE Serie lässt sich in „nur

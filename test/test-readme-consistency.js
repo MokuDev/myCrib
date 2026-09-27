@@ -1,6 +1,6 @@
 /**
  * Modul: README als Landingpage - Drift- und Struktur-Guard
- * Zweck: Yuvomi hat DREI handgepflegte Verkaufsflaechen, die dasselbe Produkt
+ * Zweck: myCrib hat DREI handgepflegte Verkaufsflaechen, die dasselbe Produkt
  *        beschreiben: `README.md`, `README.de.md` und `docs/index.html`. Die
  *        Critique vom 2026-08-16 hat fuenf bereits eingetretene Einwegdrifts
  *        gefunden - jedes Mal war die Homepage weiter und die README nicht

@@ -40,7 +40,7 @@ function assertEqual(a, b, msg) {
 console.log('\n[Google Calendar Test] Datumskonvertierung + RRULE-Präfix\n');
 
 // --------------------------------------------------------
-// googleAllDayEndToInclusive – Google exklusiv → Yuvomi inklusiv
+// googleAllDayEndToInclusive – Google exklusiv → myCrib inklusiv
 // --------------------------------------------------------
 test('googleAllDayEndToInclusive: 2-Tage-Event (Jan 1–2)', () => {
   assertEqual(googleAllDayEndToInclusive('2026-01-03'), '2026-01-02');
@@ -59,7 +59,7 @@ test('googleAllDayEndToInclusive: null → null', () => {
 });
 
 // --------------------------------------------------------
-// localAllDayEndToExclusive – Yuvomi inklusiv → Google exklusiv
+// localAllDayEndToExclusive – myCrib inklusiv → Google exklusiv
 // --------------------------------------------------------
 test('localAllDayEndToExclusive: Jan 2 → Jan 3', () => {
   assertEqual(localAllDayEndToExclusive('2026-01-02'), '2026-01-03');
@@ -167,7 +167,7 @@ test('localEventToGoogle: all-day UNTIL wird auf reines DATE reduziert', () => {
 
 // --------------------------------------------------------
 // localEventToGoogle – RFC-3339-konforme dateTime (Sekunden)
-// Regression: Issue #217 – Yuvomi speichert getimte Events als
+// Regression: Issue #217 – myCrib speichert getimte Events als
 // "YYYY-MM-DDTHH:MM" (ohne Sekunden). Google verlangt RFC 3339 mit
 // Sekunden, sonst "Bad Request" bzw. (bei Wiederholung) "Invalid
 // recurrence rule".
@@ -320,7 +320,7 @@ test('nearestColorId: minimal verschobene Farbe trifft dieselbe ID', () => {
   assertEqual(nearestColorId('#DD2228', GOOGLE_EVENT_PALETTE), '11');
 });
 
-test('nearestColorId: Yuvomi-Preset-Blau → Blueberry (9)', () => {
+test('nearestColorId: myCrib-Preset-Blau → Blueberry (9)', () => {
   assertEqual(nearestColorId('#007AFF', GOOGLE_EVENT_PALETTE), '9');
 });
 
@@ -352,7 +352,7 @@ test('localEventToGoogle: eine GELEERTE Farbe wird ausdruecklich geleert (#891/#
   // NICHT weggelassen, sondern null - und der Unterschied ist der ganze Punkt.
   // Der Update-Push ist ein `events.patch`, und ein PATCH fasst nur die Felder
   // an, die im Body STEHEN. Ein fehlendes colorId hiesse "nicht anfassen":
-  // Google behielte seine alte Farbe, waehrend Yuvomi die der zugewiesenen
+  // Google behielte seine alte Farbe, waehrend myCrib die der zugewiesenen
   // Person zeigt, und die beiden blieben dauerhaft verschieden.
   //
   // Bis v2.48.0 war das folgenlos, weil `color` NOT NULL war und dieser Zweig
@@ -371,7 +371,7 @@ test('localEventToGoogle: eine NIE gelernte Farbe loescht Googles Farbe NICHT (#
   // Die Gegenprobe zum Test darueber und der Grund fuer #899: bis dahin ging das
   // null bei JEDEM farblosen Termin hinaus, auch bei einem, der nie eine Farbe
   // hatte. Ein Termin kommt ohne colorId herein (lokal NULL), jemand faerbt ihn
-  // spaeter in Google, und die naechste beliebige Bearbeitung in Yuvomi raeumte
+  // spaeter in Google, und die naechste beliebige Bearbeitung in myCrib raeumte
   // dessen Farbe ab - ohne dass sie hier je jemand angefasst haette.
   const g = localEventToGoogle(
     { title: 'Nie gefaerbt', all_day: 1, start_datetime: '2026-06-03', color_modified: 0 },
@@ -483,7 +483,7 @@ test('Re-Sync überschreibt Farbe NICHT nach lokalem Umfärben (color_modified =
 
 test('Eine Titeländerung friert die Farbe NICHT ein (#899)', () => {
   // Der Repro aus #899 auf Googles Seite: ein Termin kommt ohne colorId herein,
-  // der Nutzer aendert in Yuvomi nur den TITEL - das setzt user_modified = 1 -,
+  // der Nutzer aendert in myCrib nur den TITEL - das setzt user_modified = 1 -,
   // und danach faerbt ihn jemand in Google. Solange das Farb-Gatter an
   // user_modified hing, kam diese Farbe nie an.
   const fresh = { ...gEvent, id: 'evt-title-edit' };
@@ -620,7 +620,7 @@ test('Re-Sync mit geändertem Titel kommt weiterhin an', () => {
 // --------------------------------------------------------
 // Zeitzone einer Google-Serie (#829)
 //
-// Google liefert die IANA-Zone neben der Zeit (start.timeZone), Yuvomi hat sie
+// Google liefert die IANA-Zone neben der Zeit (start.timeZone), myCrib hat sie
 // nicht mitgeschrieben. Ohne tzid wiederholt expandRecurringEvents den festen
 // Offset des ersten Vorkommens - ueber die Sommer-/Winterzeit-Grenze steht die
 // Serie dann eine Stunde falsch. Fuer CalDAV/Apple war das als #549 laengst

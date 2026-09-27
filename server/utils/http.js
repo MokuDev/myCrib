@@ -115,7 +115,7 @@ export function headersForRedirect(headers, from, to) {
 // Dekompression (siehe decodeBody) rohe/korrupte Bytes liefern. Aufrufer, die einen
 // dieser Header selbst (case-insensitiv) setzen, überschreiben den Default.
 const DEFAULT_HEADERS = {
-  'User-Agent': 'Yuvomi (+https://github.com/ulsklyc/yuvomi)',
+  'User-Agent': 'myCrib (+https://github.com/ulsklyc/yuvomi)',
   Accept: '*/*',
   'Accept-Encoding': 'gzip, deflate, br',
 };

@@ -178,7 +178,7 @@ test('GET /database: lädt eine valide SQLite-Backup-Datei herunter', async () =
   assert.equal(r.status, 200);
   assert.ok(r.buf.length > 0, 'Body nicht leer');
   assert.equal(r.buf.subarray(0, 16).toString('latin1').startsWith('SQLite format 3'), true);
-  // Muss eine echte Yuvomi-DB sein (schema_migrations vorhanden) → für den späteren
+  // Muss eine echte myCrib-DB sein (schema_migrations vorhanden) → für den späteren
   // Restore-Roundtrip wiederverwendbar.
   assert.ok(r.buf.length < 4 * 1024 * 1024, 'Schema-Backup liegt unter dem 4mb-Limit');
 });
@@ -358,11 +358,11 @@ test('POST /restore: ein zweiter Restore, waehrend der erste laeuft → 409 rest
 });
 
 // ── Downgrade-Schutz (Leitlinien-Audit 03.09.2026, Nebenbefund N1) ──────────────
-// Ein Backup aus einer NEUEREN Yuvomi-Version traegt Migrationsnummern, die
+// Ein Backup aus einer NEUEREN myCrib-Version traegt Migrationsnummern, die
 // dieser Build nicht kennt. Bis hierher pruefte der Restore nur, ob
 // schema_migrations existiert: das Backup waere eingespielt worden, und die
 // App liefe stumm gegen ein Schema, das sie nicht kennt.
-test('POST /restore: Backup aus einer neueren Yuvomi-Version → 400, Live-DB unangetastet', async () => {
+test('POST /restore: Backup aus einer neueren myCrib-Version → 400, Live-DB unangetastet', async () => {
   const versionBefore = dbmod.currentVersion();
   const dl = await call('GET', '/database', { actor: ADM });
   assert.equal(dl.status, 200);
@@ -377,7 +377,7 @@ test('POST /restore: Backup aus einer neueren Yuvomi-Version → 400, Live-DB un
 
   const r = await call('POST', '/restore', { actor: ADM, raw: fs.readFileSync(futurePath) });
   assert.equal(r.status, 400);
-  assert.match(r.body.error, /newer Yuvomi/i);
+  assert.match(r.body.error, /newer myCrib/i);
   assert.match(r.body.error, /999999/);
   // Nichts kopiert: Version und Nutzbarkeit der Live-DB unveraendert.
   assert.equal(dbmod.currentVersion(), versionBefore);

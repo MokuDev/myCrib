@@ -248,7 +248,7 @@ test('buildScheduleFeed liefert ein valides VCALENDAR-Gerüst auch ohne Einträg
   const ics = scheduleIcs.buildScheduleFeed(db, alice);
   assert.match(ics, /^BEGIN:VCALENDAR\r\n/);
   assert.match(ics, /END:VCALENDAR\r\n$/);
-  assert.match(ics, /X-WR-CALNAME:Yuvomi Schedule/);
+  assert.match(ics, /X-WR-CALNAME:myCrib Schedule/);
 });
 
 // --------------------------------------------------------

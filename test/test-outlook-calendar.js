@@ -219,7 +219,7 @@ describe('Datums- und Payload-Konvertierung', () => {
 
 // Antwort der Drift-Erkennung (GET .../events?$select=id,changeKey) aus den
 // aktuellen Link-Zeilen bauen - Default "kein Drift": remote sieht exakt so
-// aus, wie Yuvomi zuletzt geschrieben hat.
+// aus, wie myCrib zuletzt geschrieben hat.
 function remoteListFor(calendarId) {
   return db.prepare(
     'SELECT outlook_event_id AS id, outlook_change_key AS changeKey FROM outlook_event_links WHERE outlook_calendar_id = ?'

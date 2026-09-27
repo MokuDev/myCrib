@@ -148,7 +148,7 @@ function rowControlsHtml(row) {
  *
  * 1. Das Symbol ist FEST `eye-off`. Vorher wechselte es zwischen `eye` und
  *    `eye-off` und drehte damit das Register der ganzen App um: `eye` heisst in
- *    Yuvomi überall "zeig mir das" (Dokumentenvorschau, Gesundheit, Backup), es
+ *    myCrib überall "zeig mir das" (Dokumentenvorschau, Gesundheit, Backup), es
  *    ist eine HANDLUNG. Als Zustandsanzeige auf einem Knopf, dessen Beschriftung
  *    eine Handlung ansagt, war es rückwärts lesbar.
  * 2. Der zugängliche Name ist STABIL und nennt sein Modul. Vorher trug der Knopf

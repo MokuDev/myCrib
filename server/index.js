@@ -104,7 +104,7 @@ import { createServiceWorkerResponseLoader } from './utils/service-worker.js';
 
 const log     = createLogger('Server');
 const logSync = createLogger('Sync');
-const logYuvomi = createLogger('Yuvomi');
+const logmyCrib = createLogger('myCrib');
 
 const { version: APP_VERSION } = JSON.parse(
   readFileSync(new URL('../package.json', import.meta.url), 'utf-8')
@@ -122,7 +122,7 @@ const getServiceWorkerResponse = createServiceWorkerResponseLoader(
 // Das prüft die Build-Revision schon beim Start und liefert in der Entwicklung
 // nach einer sw.js-Änderung dennoch die neue Quelle ohne manuellen Neustart.
 getServiceWorkerResponse();
-const DEFAULT_APP_NAME = 'Yuvomi';
+const DEFAULT_APP_NAME = 'myCrib';
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -433,7 +433,7 @@ app.get('/feed/calendar/:token.ics', feedLimiter, (req, res) => {
     if (!userId) return res.status(404).type('text/plain').send('Not found');
     const ics = icsExport.buildFeed(db.get(), userId);
     res.set('Cache-Control', 'private, no-store');
-    res.set('Content-Disposition', 'inline; filename="yuvomi.ics"');
+    res.set('Content-Disposition', 'inline; filename="mycrib.ics"');
     res.type('text/calendar; charset=utf-8').send(ics);
   } catch (err) {
     log.error('', err);
@@ -452,7 +452,7 @@ app.get('/feed/inventory-deadlines/:token.ics', feedLimiter, (req, res) => {
     if (!userId) return res.status(404).type('text/plain').send('Not found');
     const ics = inventoryDeadlinesIcs.buildInventoryDeadlinesFeed(db.get());
     res.set('Cache-Control', 'private, no-store');
-    res.set('Content-Disposition', 'inline; filename="yuvomi-inventory-deadlines.ics"');
+    res.set('Content-Disposition', 'inline; filename="mycrib-inventory-deadlines.ics"');
     res.type('text/calendar; charset=utf-8').send(ics);
   } catch (err) {
     log.error('', err);
@@ -479,7 +479,7 @@ app.get('/feed/cycle/:token.ics', feedLimiter, (req, res) => {
     if (!userId) return res.status(404).type('text/plain').send('Not found');
     const ics = cycleIcs.buildCycleFeed(db.get(), userId);
     res.set('Cache-Control', 'private, no-store');
-    res.set('Content-Disposition', 'inline; filename="yuvomi-cycle.ics"');
+    res.set('Content-Disposition', 'inline; filename="mycrib-cycle.ics"');
     res.type('text/calendar; charset=utf-8').send(ics);
   } catch (err) {
     log.error('', err);
@@ -497,7 +497,7 @@ app.get('/feed/schedule/:token.ics', feedLimiter, (req, res) => {
     if (!userId) return res.status(404).type('text/plain').send('Not found');
     const ics = scheduleIcs.buildScheduleFeed(db.get(), userId);
     res.set('Cache-Control', 'private, no-store');
-    res.set('Content-Disposition', 'inline; filename="yuvomi-schedule.ics"');
+    res.set('Content-Disposition', 'inline; filename="mycrib-schedule.ics"');
     res.type('text/calendar; charset=utf-8').send(ics);
   } catch (err) {
     log.error('', err);
@@ -515,7 +515,7 @@ app.get('/feed/waste/:token.ics', feedLimiter, (req, res) => {
     if (!userId) return res.status(404).type('text/plain').send('Not found');
     const ics = wasteIcs.buildWasteFeed(db.get(), userId);
     res.set('Cache-Control', 'private, no-store');
-    res.set('Content-Disposition', 'inline; filename="yuvomi-waste.ics"');
+    res.set('Content-Disposition', 'inline; filename="mycrib-waste.ics"');
     res.type('text/calendar; charset=utf-8').send(ics);
   } catch (err) {
     log.error('', err);
@@ -799,8 +799,8 @@ const server = app.listen(PORT, BIND_ADDRESS, () => {
   // einen freien Port, und genau der gehoert ins Log. Fuer den Regelfall
   // (PORT=3000, kein BIND_ADDRESS) steht dort weiterhin wortgleich dieselbe Zeile.
   const boundTo = BIND_ADDRESS ? ` (bound to ${BIND_ADDRESS})` : '';
-  logYuvomi.info(`Server running on port ${server.address()?.port ?? PORT}${boundTo} | Version ${APP_VERSION}`);
-  logYuvomi.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
+  logmyCrib.info(`Server running on port ${server.address()?.port ?? PORT}${boundTo} | Version ${APP_VERSION}`);
+  logmyCrib.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
 
   // Ein Sicherheitsschalter, der still nicht greift, ist schlimmer als keiner:
   // der Betreiber glaubt, das Anmeldeformular sei zu (#847). Beide Fail-open-
@@ -811,7 +811,7 @@ const server = app.listen(PORT, BIND_ADDRESS, () => {
       .prepare("SELECT 1 FROM users WHERE oidc_sub IS NOT NULL AND role = 'admin' LIMIT 1").get();
   } catch { /* ohne Antwort lieber keine falsche Entwarnung */ }
   const loginWarning = passwordLoginWarning({ hasLinkedSsoAccount: linkedSso });
-  if (loginWarning) logYuvomi.warn(loginWarning);
+  if (loginWarning) logmyCrib.warn(loginWarning);
 
   // Erster Sync nach 10 Sekunden (warten bis DB vollständig initialisiert)
   //

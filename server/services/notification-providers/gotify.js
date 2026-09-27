@@ -1,6 +1,6 @@
 /**
  * Modul: Gotify Notification Provider
- * Zweck: Yuvomi Reminder-Payloads an Gotify senden.
+ * Zweck: myCrib Reminder-Payloads an Gotify senden.
  */
 
 import { guardedFetch } from './guarded-fetch.js';

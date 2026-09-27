@@ -38,13 +38,13 @@
 :root {
   /* --------------------------------------------------------
    * 1. Farben - Neutral-Skala
-   *    Yuvomis WARME Neutral-Rampe. Private --_neutral-* für
+   *    myCribs WARME Neutral-Rampe. Private --_neutral-* für
    *    Dark-Mode-Überschreibungen; öffentliche --neutral-* sind die stabile API.
    *
    * WARUM WARM, UND WARUM DAS EINE KORREKTUR IST (2026-08-10).
    * Bis v2.1.0 stand hier Apples kuehle System-Grau-Rampe (#F2F2F7 systemGray6
    * hell, #0A0A0C dunkel). Sie war der Preis dafuer, den Plattform-Kanon
-   * woertlich zu nehmen - und sie war die eine Uebernahme, die Yuvomi nicht
+   * woertlich zu nehmen - und sie war die eine Uebernahme, die myCrib nicht
    * gutgetan hat: die App stand ab da auf Apples Buehne statt auf ihrer
    * eigenen. Die Rampe ist deshalb warm zurueckgeholt (Hue ~40°, Chroma
    * niedrig), die STRUKTUR aber unveraendert: Grouped-Grund plus Surface,
@@ -321,7 +321,7 @@
    * Logo und Oberflaeche sprachen zwei Farben - und weil zusaetzlich jedes
    * Modul das Chrome umfaerbte (siehe Die-Eine-Stimme-Regel, Abschnitt 4),
    * kam das Indigo ohnehin nur auf dem Dashboard vor. Es gab damit KEINE
-   * Farbe, die app-weit "Yuvomi" hiess.
+   * Farbe, die app-weit "myCrib" hiess.
    *
    * Der Ton ist der Marken-Ton, nicht der alte Token: geprueft gegen die neue
    * warme Buehne, nicht gegen die alte kuehle. Auf dem Grouped-Grund #F5F3ED
@@ -1225,7 +1225,7 @@
    * trägt dazu `vector-effect: non-scaling-stroke`, sonst skalierte der Strich
    * mit der Größe mit).
    *
-   * SIE IST DIE HANDSCHRIFT, und sie war bisher ein Zufall: Yuvomis eigener
+   * SIE IST DIE HANDSCHRIFT, und sie war bisher ein Zufall: myCribs eigener
    * Satz zeichnet mit 1.6 auf viewBox 24, Lucide mit 2 - bei 20px bzw. 16px
    * ergaben beide gerenderte 1,333px, und genau deshalb ist nie aufgefallen,
    * dass die Übereinstimmung an den GRÖSSEN hing und nicht an einer Regel.

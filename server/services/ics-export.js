@@ -217,7 +217,7 @@ function buildVEvent(
   }
   if (ev.all_day) {
     lines.push(`DTSTART;VALUE=DATE:${formatDate(dtstart)}`);
-    // DTEND ist exklusiv: Yuvomi speichert das letzte sichtbare Datum → +1 Tag.
+    // DTEND ist exklusiv: myCrib speichert das letzte sichtbare Datum → +1 Tag.
     const endKey = dtende || dtstart;
     lines.push(`DTEND;VALUE=DATE:${addDaysDateKey(endKey, 1)}`);
   } else if (usesTzid(ev)) {
@@ -367,10 +367,10 @@ function buildFeed(conn, userId, now = new Date(), tz = householdTimeZone(conn))
   const out = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//Calendar Feed//DE',
+    'PRODID:-//myCrib//Calendar Feed//DE',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:Yuvomi',
+    'X-WR-CALNAME:myCrib',
   ];
   // Kalenderzone für die Clients, die den Header auswerten (Google, Thunderbird).
   // Sie ersetzt die TZID-Parameter nicht, sondern deckt den Rest: Termine ohne

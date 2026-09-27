@@ -362,7 +362,7 @@ class YuvomiInstallPrompt extends HTMLElement {
     const icon = document.createElement('img');
     icon.className = 'icon';
     icon.src = '/icons/icon-192.png';
-    icon.alt = 'Yuvomi';
+    icon.alt = 'myCrib';
     icon.width = 40;
     icon.height = 40;
     banner.appendChild(icon);

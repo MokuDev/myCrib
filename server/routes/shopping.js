@@ -1067,7 +1067,7 @@ router.post('/:listId/items', (req, res) => {
 // Body: { userId: number }   Response: { data: { sent: true, items: number } }
 //
 // DER EMPFAENGER IST EINE ID, NIE EINE ADRESSE. Naeme diese Route eine Adresse
-// aus dem Rumpf entgegen, waere Yuvomi fuer jeden angemeldeten Nutzer ein
+// aus dem Rumpf entgegen, waere myCrib fuer jeden angemeldeten Nutzer ein
 // offener Mailversender: beliebiger Text an beliebige Empfaenger, abgeschickt
 // vom SMTP-Server des Haushalts und in dessen Ruf. Die Adresse loest deshalb
 // der Server auf, aus derselben Quelle wie beim Passwort-Reset, und ein

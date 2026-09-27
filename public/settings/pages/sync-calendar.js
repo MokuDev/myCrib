@@ -1101,7 +1101,7 @@ function buildGoogleReadonlyToggle(googleStatus) {
 }
 
 // --------------------------------------------------------------------------
-// Outlook (Microsoft Graph, One-Way-Push Yuvomi → Outlook)
+// Outlook (Microsoft Graph, One-Way-Push myCrib → Outlook)
 // --------------------------------------------------------------------------
 
 function buildOutlookCalendarList(account, calendars, user) {
@@ -1162,7 +1162,7 @@ function buildOutlookCalendarList(account, calendars, user) {
 
 /**
  * Auto-Sync-Steuerung eines Outlook-Kontos: ein Zielkalender (beschreibbar,
- * Empfehlung: dedizierter „Yuvomi"-Kalender) + die Person, deren sichtbare
+ * Empfehlung: dedizierter „myCrib"-Kalender) + die Person, deren sichtbare
  * Termine automatisch gepusht werden. Beides admin-only, Partial-Update via
  * PUT /calendar/outlook/accounts/:id.
  */

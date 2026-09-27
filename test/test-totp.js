@@ -44,7 +44,7 @@ test('HOTP trifft alle Vektoren aus RFC 4226', () => {
 test('TOTP trifft die SHA-1-Vektoren aus RFC 6238', () => {
   const secret = base32Encode(RFC4226_KEY);
   // [Unixzeit in Sekunden, erwarteter achtstelliger Code aus dem RFC].
-  // Der RFC zeigt acht Stellen; Yuvomi nutzt sechs, also die letzten sechs.
+  // Der RFC zeigt acht Stellen; myCrib nutzt sechs, also die letzten sechs.
   const vectors = [
     [59,          '94287082'],
     [1111111109,  '07081804'],
@@ -124,10 +124,10 @@ test('unbrauchbare Eingaben werden abgelehnt, ohne zu werfen', () => {
 
 test('die otpauth-URI traegt Aussteller, Konto und die Parameter', () => {
   const uri = otpauthUri({ secret: 'ABCDEFGH', account: 'anna müller' });
-  assert.match(uri, /^otpauth:\/\/totp\/Yuvomi:/);
+  assert.match(uri, /^otpauth:\/\/totp\/myCrib:/);
   const url = new URL(uri);
   assert.equal(url.searchParams.get('secret'), 'ABCDEFGH');
-  assert.equal(url.searchParams.get('issuer'), 'Yuvomi');
+  assert.equal(url.searchParams.get('issuer'), 'myCrib');
   assert.equal(url.searchParams.get('algorithm'), 'SHA1');
   assert.equal(url.searchParams.get('digits'), '6');
   assert.equal(url.searchParams.get('period'), '30');

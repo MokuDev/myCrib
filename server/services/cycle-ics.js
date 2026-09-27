@@ -93,7 +93,7 @@ function buildCycleFeed(conn, userId, now = new Date()) {
   const out = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//Cycle Feed//DE',
+    'PRODID:-//myCrib//Cycle Feed//DE',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeICSText(translate(locale, 'health.cycle.ics.calendarName'))}`,

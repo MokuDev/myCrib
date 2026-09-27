@@ -1,6 +1,6 @@
 /**
  * Modul: Modul-Icons
- * Zweck: Eigener monoliniger Icon-Set für die Yuvomi-MODUL-ZEICHEN (1.6 Strich auf
+ * Zweck: Eigener monoliniger Icon-Set für die myCrib-MODUL-ZEICHEN (1.6 Strich auf
  * viewBox 24). Jedes Zeichen ist eine BESCHREIBUNG; daraus wird ein SVG-Element
  * (`moduleIconEl`) oder Markup (`moduleIconHTML`) — kein innerHTML.
  *
@@ -352,7 +352,7 @@ export const MODULE_ICON = {
 };
 
 /**
- * Das Zeichen zu einem Icon-Namen als Element — Yuvomis Hand, wo es sie gibt,
+ * Das Zeichen zu einem Icon-Namen als Element — myCribs Hand, wo es sie gibt,
  * sonst Lucide unter demselben Namen.
  * @param {string} name        Icon-Name (Schlüssel dieses Satzes / Lucide)
  * @param {string} [className] Zusätzliche Klasse für das erzeugte Element

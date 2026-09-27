@@ -203,7 +203,7 @@ function buildICS(event, householdZone = null) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//Familienplaner//DE',
+    'PRODID:-//myCrib//Familienplaner//DE',
   ];
   // Ein TZID ohne sein VTIMEZONE ist laut RFC 5545 ungueltig.
   if (when.tzid) lines.push(...vtimezoneFor(when.tzid, Number(String(event.start_datetime).slice(0, 4))));

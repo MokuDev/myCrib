@@ -1,6 +1,6 @@
 /**
  * Modul: Outlook Calendar Push (Microsoft Graph)
- * Zweck: One-Way-Push Yuvomi → Outlook.com für persönliche Microsoft-Konten
+ * Zweck: One-Way-Push myCrib → Outlook.com für persönliche Microsoft-Konten
  *        (M365 Family / outlook.com). Multi-Account wie caldav_accounts.
  * Abhängigkeiten: server/db.js, server/services/recurrence.js (kein SDK, plain fetch)
  *
@@ -30,7 +30,7 @@ const GRAPH_BASE = 'https://graph.microsoft.com/v1.0';
 // User.Read wird für GET /me (Anzeigename + E-Mail der Konto-Zeile) benötigt.
 const SCOPES = 'offline_access Calendars.ReadWrite User.Read';
 
-// Die Zone, in der Yuvomi seine zonenlosen Wanduhrzeiten meint. Bis v2.27.0 stand
+// Die Zone, in der myCrib seine zonenlosen Wanduhrzeiten meint. Bis v2.27.0 stand
 // hier fest 'Europe/Berlin' - als "Parität mit dem Google-Outbound" begründet,
 // obwohl der schon damals die Zone des Zielkalenders nahm und nur als RÜCKFALL
 // auf `TZ` ging. Ein Haushalt in Toronto schickte seine Termine damit sechs
@@ -512,7 +512,7 @@ function setCalendarEnabled(accountId, calendarId, enabled) {
 const GRAPH_DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
 /**
- * Yuvomi-RRULE-Subset → Graph-recurrence ({pattern, range}).
+ * myCrib-RRULE-Subset → Graph-recurrence ({pattern, range}).
  * MONTHLY mit BYDAY degradiert bewusst zum absoluten Monatstag (PoC-Grenze).
  * @param {string} rrule - RRULE-Body (mit oder ohne "RRULE:"-Prefix)
  * @param {string} startDate - 'YYYY-MM-DD' (DTSTART-Datum)
@@ -570,7 +570,7 @@ function rruleToGraphRecurrence(rrule, startDate, tz = outlookTimeZone()) {
   return { pattern, range };
 }
 
-// Yuvomi speichert inklusive Ganztags-Enden; Graph verlangt exklusiv
+// myCrib speichert inklusive Ganztags-Enden; Graph verlangt exklusiv
 // (Mitternacht-zu-Mitternacht) — +1 Tag (Muster google-calendar.js).
 function allDayEndToExclusive(dateStr) {
   if (!dateStr) return null;
@@ -731,8 +731,8 @@ async function fetchRemoteEventStates(calendarId, accessToken, fetchImpl = fetch
  * Pusht je Konto die Kandidatenmenge (Auto-Sync + explizite Ziele) in die
  * Zielkalender, löscht Remote-Events, deren lokales Event aus der Menge
  * gefallen ist (gelöscht, Sichtbarkeit verloren, Auto-Sync deaktiviert), und
- * setzt in Outlook veränderte oder gelöschte Termine auf den Yuvomi-Stand
- * zurück (changeKey-Reconciliation - Yuvomi ist Source of Truth).
+ * setzt in Outlook veränderte oder gelöschte Termine auf den myCrib-Stand
+ * zurück (changeKey-Reconciliation - myCrib ist Source of Truth).
  * Kein Inbound. Konto-Fehler brechen nur das jeweilige Konto ab.
  * @param {{fetchImpl?: typeof fetch}} [options] - fetch injizierbar (Tests)
  */
@@ -798,7 +798,7 @@ async function runOutlookSync({ fetchImpl = fetch } = {}) {
       // Drift-Erkennung: je verlinktem Kalender EINMAL id+changeKey listen
       // (eine kleine Anfrage pro Kalender und Lauf). Fehlt ein Event remote,
       // wurde es in Outlook gelöscht; weicht der changeKey ab, wurde es dort
-      // verändert - beides setzt der Push unten auf den Yuvomi-Stand zurück.
+      // verändert - beides setzt der Push unten auf den myCrib-Stand zurück.
       // ------------------------------------------------
       const remoteStates = new Map();
       for (const calId of new Set(linkRows.map((l) => l.outlook_calendar_id))) {
@@ -888,7 +888,7 @@ async function runOutlookSync({ fetchImpl = fetch } = {}) {
             insLink.run(event.id, account.id, calendarId, created.id, hash, created.changeKey ?? null);
             updated++;
           } else if (remoteMissing) {
-            // In Outlook von Hand gelöscht → Yuvomi ist Source of Truth: neu anlegen.
+            // In Outlook von Hand gelöscht → myCrib ist Source of Truth: neu anlegen.
             const created = await graphJson(
               `/me/calendars/${encodeURIComponent(calendarId)}/events`,
               accessToken, { method: 'POST', body: payload }, fetchImpl

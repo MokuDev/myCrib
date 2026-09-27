@@ -2048,14 +2048,14 @@ function shiftOwnedReminders(database, eventId, oldAnchor, newAnchor, tz) {
  * gegen die Uhr, also kam "1 Stunde vorher" nach einer Verschiebung in Google
  * zur alten Zeit - bei einem nach vorn gezogenen Termin erst nach seinem Beginn.
  *
- * DIE VERSCHIEBUNG IST DIESELBE WIE IN YUVOMI: `shiftOwnedReminders()`, also der
+ * DIE VERSCHIEBUNG IST DIESELBE WIE IN MYCRIB: `shiftOwnedReminders()`, also der
  * Abstand der beiden Anker auf der Zeitpunkt-Achse (#1300), fuer jede Zeile des
  * Termins - eigene und geerbte (#921). Ganztag rechnet ueber denselben Anker
  * (09:00 der Haushaltszone), eine Serie haengt ihre Erinnerungen am Master, und
  * ein eingelesenes Einzelvorkommen ist eine eigene Zeile mit eigener ID.
  *
  * DER ZUSTELLSTAND FOLGT DEM DIALOG, NICHT DER SERIEN-ROUTE. Ein eingelesener
- * Termin wird in Yuvomi ueber den Einzeltermin-Weg verschoben, und dort schreibt
+ * Termin wird in myCrib ueber den Einzeltermin-Weg verschoben, und dort schreibt
  * der Dialog die Erinnerungen frisch (`PUT /reminders`), `fanOutEventReminders()`
  * behandelt eine andere Uhrzeit ebenso als neue Auskunft. Deshalb meldet sich
  * eine schon zugestellte oder weggeklickte Erinnerung wieder, wenn sie in die

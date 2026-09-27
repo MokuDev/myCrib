@@ -1,6 +1,6 @@
 /**
  * Modul: DTSTART fuer ausgehende Kalender
- * Zweck: Das Startdatum, das Yuvomi nach draussen schreibt, mit seiner eigenen
+ * Zweck: Das Startdatum, das myCrib nach draussen schreibt, mit seiner eigenen
  *        Wiederholungsregel in Einklang bringen (#986).
  * Abhaengigkeiten: services/recurrence.js, utils/timezone.js
  *
@@ -11,7 +11,7 @@
  * und zeigt den 15. nie. Nach draussen ist es das nicht. RFC 5545 3.8.5.3 nennt
  * die Wiederholungsmenge bei einem unsynchronisierten DTSTART ausdruecklich
  * "undefined" - ein fremder Client darf daraus den 15. Januar UND jeden
- * Monatsletzten machen, also ein Vorkommen mehr, als Yuvomi zeigt.
+ * Monatsletzten machen, also ein Vorkommen mehr, als myCrib zeigt.
  *
  * WARUM NICHT BEIM SCHREIBEN. Genau das wurde in #984 versucht und
  * zurueckgenommen. `start_datetime` beim Speichern zu begradigen heisst, dass
@@ -24,15 +24,15 @@
  *
  * WAS UNANGETASTET BLEIBT. Eine importierte Serie geht Wort fuer Wort zurueck
  * (#756): fremde Kalender duerfen ein unsynchronisiertes DTSTART absichtlich
- * fuehren, und Yuvomi ist beim Round-Trip nicht der Schiedsrichter darueber.
- * Diese Datei gilt allein fuer das, was Yuvomi SELBST erzeugt.
+ * fuehren, und myCrib ist beim Round-Trip nicht der Schiedsrichter darueber.
+ * Diese Datei gilt allein fuer das, was myCrib SELBST erzeugt.
  */
 
 import { seriesStartFor } from './recurrence.js';
 import { utcToWall } from '../utils/timezone.js';
 
 /**
- * Traegt der Termin ein DTSTART, das Yuvomi selbst gesetzt hat?
+ * Traegt der Termin ein DTSTART, das myCrib selbst gesetzt hat?
  *
  * `external_source` ist die Herkunftsspalte: 'local' (oder leer, bei aelteren
  * Zeilen) heisst hier angelegt, alles andere kam ueber einen Sync herein.

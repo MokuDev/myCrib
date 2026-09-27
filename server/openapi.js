@@ -35,9 +35,9 @@ function buildOpenApiSpec(req, appVersion) {
   return {
     openapi: '3.1.0',
     info: {
-      title: 'Yuvomi API',
+      title: 'myCrib API',
       version: appVersion,
-      description: 'OpenAPI documentation for the Yuvomi family organizer backend.',
+      description: 'OpenAPI documentation for the myCrib family organizer backend.',
     },
     servers: [{ url: '/', description: 'Current origin' }],
     tags: apiTags,

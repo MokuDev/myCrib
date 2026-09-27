@@ -20,7 +20,7 @@
 // Das Anlegen dagegen gibt es seit #695. Die alte Begründung ("ohne Zielwahl
 // gäbe es keine Liste, in die es gehörte") stimmte nicht mehr: die Zielwahl gibt
 // es seit v1.79.0 bei den Terminen (#620), und die Oberfläche versprach die
-// Rückrichtung die ganze Zeit über in beide Richtungen. Eine in Yuvomi angelegte
+// Rückrichtung die ganze Zeit über in beide Richtungen. Eine in myCrib angelegte
 // Aufgabe trägt jetzt ihr Ziel selbst (tasks.target_caldav_account_id +
 // target_caldav_list_url, Migration 136) und wird beim nächsten Lauf hochgeladen:
 //
@@ -56,7 +56,7 @@ export const MODULES = {
   tasks: {
     table: 'tasks',
     // Felder, die zum Server gespiegelt werden. Alles andere (Kategorie,
-    // Zuweisung, Punkte, Sichtbarkeit, Unteraufgaben) ist Yuvomi-intern und
+    // Zuweisung, Punkte, Sichtbarkeit, Unteraufgaben) ist myCrib-intern und
     // kennt in VTODO keine Entsprechung, löst also keinen Push aus.
     //
     // `tags_key` ist kein Spaltenname: Tags liegen in task_tags, der
@@ -82,7 +82,7 @@ function moduleDef(module) {
 }
 
 // --------------------------------------------------------
-// Feld-Abbildung Yuvomi → VTODO
+// Feld-Abbildung myCrib → VTODO
 // --------------------------------------------------------
 
 /** RFC-5545-Zeitstempel in UTC, wie ihn COMPLETED und DTSTAMP verlangen. */
@@ -91,7 +91,7 @@ function utcStamp(date = new Date()) {
 }
 
 /**
- * Yuvomi-Priorität → RFC-5545-PRIORITY. Gegenstück zu mapVtodoPriority.
+ * myCrib-Priorität → RFC-5545-PRIORITY. Gegenstück zu mapVtodoPriority.
  *
  * Vier lokale Stufen treffen auf drei Bänder (1-4 hoch, 5 mittel, 6-9 niedrig),
  * deshalb teilen sich `urgent` und `high` das obere Band. Damit `urgent` den
@@ -400,7 +400,7 @@ export function todoUidFor(module, id) {
  * Vollständiges VTODO-Objekt für einen Eintrag, den es auf dem Server noch nicht
  * gibt. Gebaut wird ein Gerüst mit UID und DTSTAMP, das anschließend durch
  * denselben Patcher läuft wie jede spätere Änderung - so gibt es genau EINE
- * Stelle, die Yuvomi-Felder in VTODO-Properties übersetzt. Eine zweite
+ * Stelle, die myCrib-Felder in VTODO-Properties übersetzt. Eine zweite
  * Serialisierung neben icsFieldsForTask wäre die Sorte Doppelung, die
  * auseinanderläuft, sobald ein Feld dazukommt.
  */
@@ -409,7 +409,7 @@ export function buildTodoICS(module, row, uid) {
   const skeleton = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//CalDAV Sync//EN',
+    'PRODID:-//myCrib//CalDAV Sync//EN',
     'BEGIN:VTODO',
     `UID:${uid}`,
     `DTSTAMP:${utcStamp()}`,
@@ -591,7 +591,7 @@ export async function processPendingCreations(client, accountId, module, listsBy
  * Hier angelegte Einkaufsartikel einer gespiegelten Liste hochladen (#831).
  *
  * Ein Einkaufsartikel trägt - anders als eine Aufgabe - kein eigenes Ziel: die
- * Zuordnung Server-Liste ↔ Yuvomi-Liste steht schon in
+ * Zuordnung Server-Liste ↔ myCrib-Liste steht schon in
  * caldav_reminder_selection, und genau sie ist die Zielangabe. Deshalb braucht
  * dieser Weg weder Zielspalten noch eine Migration; Kandidat ist jeder Artikel
  * der zugeordneten Liste, der noch kein Spiegel ist.
@@ -694,7 +694,7 @@ export async function processPendingDeletions(client, accountId, module, objectI
 /**
  * Schiebt lokal bearbeitete Spiegel-Einträge zum Server. Geändert wird das
  * Originalobjekt, nicht ein neu gebautes: sonst verlöre die Aufgabe auf dem
- * Server alles, was Yuvomi nicht kennt (Alarme, Unterlisten, Beziehungen).
+ * Server alles, was myCrib nicht kennt (Alarme, Unterlisten, Beziehungen).
  * CATEGORIES gehört seit #586 nicht mehr dazu - die Tag-Liste ist vollständig
  * gespiegelt und wird deshalb bewusst verwaltet.
  *

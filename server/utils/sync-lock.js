@@ -25,7 +25,7 @@
 // der Weg in eine Verklemmung, für eine Gleichzeitigkeit, die ein Haushalt mit
 // ein bis zwei Konten nicht hat.
 //
-// Die Sperre ist prozesslokal, und genau das ist ihre Voraussetzung: Yuvomi läuft
+// Die Sperre ist prozesslokal, und genau das ist ihre Voraussetzung: myCrib läuft
 // als ein Prozess (ein Container, kein cluster, SQLite auf einem lokalen Volume).
 // Würde je eine zweite Instanz gegen dieselbe Datenbank zugesagt, hielte diese
 // Datei lautlos nichts mehr - dann braucht es ein Lease in der Datenbank.

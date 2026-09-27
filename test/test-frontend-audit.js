@@ -8408,7 +8408,7 @@ function fillColors(token, map, scopedAccent) {
  * Genau die Flaechen, um die es geht: die, die zwischen den Themes die
  * TEXTPOLARITAET wechseln - im Light gesaettigt-dunkel (weiss traegt), im Dark
  * pastellig-hell (weiss traegt nicht). Das ist das Muster der gesamten
- * Yuvomi-Akzentpalette und der Grund, warum eine statische Textfarbe dort
+ * myCrib-Akzentpalette und der Grund, warum eine statische Textfarbe dort
  * zwangslaeufig in einem der beiden Themes falsch liegt.
  *
  * Ruhige Flaechen (Surfaces, Rahmen) kippen nicht: sie sind in beiden Themes
@@ -11971,7 +11971,7 @@ test('Der Sortiergriff nimmt sich die Geste aus der Wischbedienung', () => {
 
 test('Der Modulkopf trägt kein Glas, und das bleibt so', () => {
   // Eine BEGRÜNDETE Abweichung vom Kanon, und deshalb braucht sie einen Guard:
-  // die belegte Liquid-Glass-Linie führt Navigationsleisten transparent. Yuvomi
+  // die belegte Liquid-Glass-Linie führt Navigationsleisten transparent. myCrib
   // stellt den Kopf nahtlos und opak auf den Seitengrund, weil die
   // kollabierende Large-Title-Leiste davon lebt - Glas zeigte am Scroll-Anfang
   // eine Fläche, wo gerade keine sein soll. Dazu kommt der WebKit-Grund, der an
@@ -13246,7 +13246,7 @@ test('jeder Blur kommt aus der --blur-Skala', () => {
  *
  * DAS IST EINE REGEL UND KEINE LISTE, und zwar in beiden Richtungen: jede Regel,
  * die `backdrop-filter` schreibt, schreibt beide Schreibweisen; jede
- * `@supports`-Praeambel, die danach fragt, fragt nach beiden. Yuvomi ist eine
+ * `@supports`-Praeambel, die danach fragt, fragt nach beiden. myCrib ist eine
  * PWA fuer den Homescreen - iOS ist ihr Hauptgeraet, und ein Glas, das dort
  * einzweigig ausfaellt, faellt auf der wichtigsten Plattform aus.
  */

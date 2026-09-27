@@ -159,7 +159,7 @@ test('der Kommentar-Guard erkennt den Schaden, gegen den er gebaut ist', () => {
 
 // ── (2) Substitutionstabelle == README ───────────────────────────────────────
 
-/** Die zehn Zeilen aus der README-Tabelle "Instead of juggling… | Yuvomi gives you". */
+/** Die zehn Zeilen aus der README-Tabelle "Instead of juggling… | myCrib gives you". */
 function readmeSwapRows() {
   const readme = readFileSync(resolve(ROOT, 'README.md'), 'utf8');
   return readme.split('\n')

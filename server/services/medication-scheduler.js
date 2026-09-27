@@ -17,7 +17,7 @@ import { defaultProviders } from './notifications.js';
 import { resolveHouseholdLocale, translate } from '../utils/i18n.js';
 
 const log = createLogger('MedicationScheduler');
-const APP_NAME = 'Yuvomi';
+const APP_NAME = 'myCrib';
 // Fallback-Body, falls der Medikamentenname fehlt: nie den App-Namen wiederholen (#581).
 const FALLBACK_BODY = 'Medication reminder';
 const PROVIDER_TIMEOUT_MS = 8_000;
@@ -138,7 +138,7 @@ async function processDueMedicationsUntracked({
   }
 
   // Herkunft im Titel statt des App-Namens - Begruendung bei REMINDER_TITLE_KEYS
-  // in notifications.js. „Yuvomi / Ibuprofen" sagte nicht, worum es geht;
+  // in notifications.js. „myCrib / Ibuprofen" sagte nicht, worum es geht;
   // „Medikamente / Ibuprofen" tut es, und zwar auf jeder Plattform.
   const originTitle = translate(resolveHouseholdLocale(activeDb), 'health.tabs.meds');
 

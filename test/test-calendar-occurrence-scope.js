@@ -177,7 +177,7 @@ const SINGLE = {
   id: 7, title: 'Zahnarzt', start_datetime: '2026-10-02T09:00', end_datetime: '2026-10-02T10:00',
   all_day: 0, created_by: 1, recurrence_rule: null, assigned_users: [],
 };
-// Eine Serie aus einem CalDAV-Kalender: Yuvomi kann sie nicht zerlegen, sie
+// Eine Serie aus einem CalDAV-Kalender: myCrib kann sie nicht zerlegen, sie
 // speichert wie bisher als Ganzes.
 const EXTERNAL = {
   id: 55, title: 'Vereinstraining', series_id: 55, recurrence_id: '2026-10-02',

@@ -238,7 +238,7 @@ router.get('/loans', (req, res) => {
  * gekürzt, sonst überzahlt ein vollständig nachgetragenes Darlehen sich selbst.
  *
  * ENTSCHEIDEND: budget_entry_id bleibt NULL. Eine regulär abgehakte Rate bucht ins
- * Budget, weil sie GERADE bezahlt wird. Diese hier wurden vor Yuvomi bezahlt und
+ * Budget, weil sie GERADE bezahlt wird. Diese hier wurden vor myCrib bezahlt und
  * liefen nie über den Haushalt - sie als Buchungen anzulegen hieße, vergangene
  * Monate mit Ausgaben zu füllen, die dort nie stattgefunden haben, und Kontostände
  * wie Statistik zu verfälschen.

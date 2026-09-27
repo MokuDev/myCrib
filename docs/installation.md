@@ -1,6 +1,6 @@
 ## Quick Install
 
-Three ways to get Yuvomi running from scratch:
+Three ways to get myCrib running from scratch:
 
 ### Option A — Web Installer (recommended, all platforms)
 
@@ -26,7 +26,7 @@ Running it again on an existing installation is safe, in two ways:
 - **Security keys are never regenerated.** `SESSION_SECRET` and `DB_ENCRYPTION_KEY` already present in your `.env` are kept, so the database stays readable. Remove a key from `.env` if you deliberately want a new one.
 - **Settings the script does not ask about are carried over.** Anything you added by hand or through the web installer — `EMAIL_SMTP_*`, `OIDC_*`, `WEBDAV_BACKUP_*`, `VAPID_SUBJECT`, `LOG_LEVEL` and the rest — is copied from the previous `.env` into the new one, and the script reports how many entries it kept. Only the values the dialog itself asks about are replaced by your answers. The previous file is still backed up to `.env.bak-<timestamp>` first.
 
-> **Base URL.** The script asks for the absolute origin your household will open (default `http://<host>:<port>`) and writes it as `BASE_URL`. Behind a reverse proxy, enter the public address there — for example `https://yuvomi.example.com`. Without it the server sends no password-reset or invitation emails at all, because it deliberately does not trust the request's `Host` header.
+> **Base URL.** The script asks for the absolute origin your household will open (default `http://<host>:<port>`) and writes it as `BASE_URL`. Behind a reverse proxy, enter the public address there — for example `https://myCrib.example.com`. Without it the server sends no password-reset or invitation emails at all, because it deliberately does not trust the request's `Host` header.
 
 Force a specific language with `--lang` (one of `de en es fr it sv el ru tr zh ja ar hi pt uk pl nl cs vi hu ko id fa fil`):
 
@@ -67,7 +67,7 @@ the browser. Headless deployments can instead create it from the container conso
 
 # Installation Guide
 
-Complete setup instructions for Yuvomi - from Docker installation to your first login.
+Complete setup instructions for myCrib - from Docker installation to your first login.
 
 ## Table of Contents
 
@@ -86,7 +86,7 @@ Complete setup instructions for Yuvomi - from Docker installation to your first 
 
 ## Architecture Overview
 
-Yuvomi is a self-hosted family planner that runs as a single Docker container. The Express.js backend serves both the API and the static frontend files. Application data is stored in a SQLCipher-encrypted SQLite database inside a host-mounted data folder, and automated database backups are written to a separate host-mounted backup folder. Optionally, newly uploaded document files can be stored on a mounted host folder or on a WebDAV server instead of inside SQLite.
+myCrib is a self-hosted family planner that runs as a single Docker container. The Express.js backend serves both the API and the static frontend files. Application data is stored in a SQLCipher-encrypted SQLite database inside a host-mounted data folder, and automated database backups are written to a separate host-mounted backup folder. Optionally, newly uploaded document files can be stored on a mounted host folder or on a WebDAV server instead of inside SQLite.
 
 ```
 Browser ──HTTP──▶ Docker Container (Express.js :3000) ──▶ SQLite/SQLCipher (/data/yuvomi.db)
@@ -95,7 +95,7 @@ With HTTPS (recommended for network access):
 Browser ──HTTPS──▶ Nginx (Reverse Proxy) ──HTTP──▶ Docker Container (Express.js :3000) ──▶ SQLite/SQLCipher
 ```
 
-For local-only access, the Docker container is all you need. If you want to access Yuvomi from other devices on your network or the internet, add Nginx as a reverse proxy with SSL.
+For local-only access, the Docker container is all you need. If you want to access myCrib from other devices on your network or the internet, add Nginx as a reverse proxy with SSL.
 
 ---
 
@@ -121,7 +121,7 @@ docker compose version     # Docker Compose version v2.x.x
 ### Podman (alternative to Docker, RHEL / Fedora / CentOS Stream)
 
 RHEL-based distributions ship **Podman** (often rootless) and **SELinux** instead of
-Docker. Yuvomi supports Podman out of the box: both installers auto-detect it, and a
+Docker. myCrib supports Podman out of the box: both installers auto-detect it, and a
 dedicated `podman-compose.yml` adds the SELinux `:Z` volume relabel. Install Podman and
 either the `podman compose` subcommand (Podman 4.1+) or the `podman-compose` package:
 
@@ -164,7 +164,7 @@ engine, so there the iOS version counts, not the browser.
 | **Everything as designed** | 117 | 129 | 17.5 | 17.5 |
 | **Starts, every screen opens, scrolls** | 87 | 79 | 14.1 | 14.5 |
 
-**Below the second row Yuvomi does not work.** Four things set that floor:
+**Below the second row myCrib does not work.** Four things set that floor:
 
 - Every screen is drawn with `replaceChildren()` (Chrome 86, Firefox 78, Safari 14). Without it
   the app shows only its error page.
@@ -175,7 +175,7 @@ engine, so there the iOS version counts, not the browser.
 - The calendar and fasting screens use `||=` and `??=` (Firefox 79). An older Firefox cannot
   load those two screens.
 
-**Between the two rows Yuvomi works but looks or behaves differently.** What is missing up to
+**Between the two rows myCrib works but looks or behaves differently.** What is missing up to
 which version:
 
 | Feature | Chrome | Firefox | Safari | Without it |
@@ -211,7 +211,7 @@ second row from this table, so a change to the floor changes the guard with it.
 
 ## Step-by-Step Installation
 
-There are seven ways to get Yuvomi running. **Option A** (web installer) is recommended for most users — it walks you through every step in your browser. **Option B** (pre-built image) is a quick manual alternative. **Option C** (build from source) is for contributors or custom builds. **Options D–F** install directly from a NAS/home-server app store with no terminal required: **Option D** (TrueNAS SCALE), **Option E** (Umbrel), and **Option F** (Unraid). **Option G** covers Portainer, whether you paste the stack or let it follow this repository via Git.
+There are seven ways to get myCrib running. **Option A** (web installer) is recommended for most users — it walks you through every step in your browser. **Option B** (pre-built image) is a quick manual alternative. **Option C** (build from source) is for contributors or custom builds. **Options D–F** install directly from a NAS/home-server app store with no terminal required: **Option D** (TrueNAS SCALE), **Option E** (Umbrel), and **Option F** (Unraid). **Option G** covers Portainer, whether you paste the stack or let it follow this repository via Git.
 
 ---
 
@@ -236,12 +236,12 @@ node tools/installer/install-server.js
 
 Open your browser and navigate to **http://localhost:8090**. The wizard detects your browser language (24 languages supported), verifies that a container engine is available (Docker with Compose v2, or Podman with `podman compose` / `podman-compose`), and reports an existing `.env` file as well as a running container before you start. When it finds one, the **simple setup is disabled** and you continue with the advanced setup: the simple path writes fixed values for host, port, `SESSION_SECURE` and `TRUST_PROXY`, which would silently downgrade an installation that already runs behind a reverse proxy. The wizard then guides you through:
 
-- Basics - domain/IP, HTTP host port (`OIKOS_HTTP_PORT`), timezone (`TZ`, which pre-sets the household zone; that one is changeable later under Settings → Personal → Appearance → Region), how Yuvomi is exposed (`SESSION_SECURE`, `TRUST_PROXY`) and the public address (`BASE_URL`). The exposure choice follows the host you enter, and the wizard rejects an `http://` address combined with enforced secure cookies - nobody could sign in to that combination. A typed public address only counts once it names a full `http://` or `https://` origin; until then the wizard keeps the address it derives from host and port. A timezone the browser does not recognise (`Europe/Berln`) is refused on the spot instead of silently falling back to UTC
+- Basics - domain/IP, HTTP host port (`OIKOS_HTTP_PORT`), timezone (`TZ`, which pre-sets the household zone; that one is changeable later under Settings → Personal → Appearance → Region), how myCrib is exposed (`SESSION_SECURE`, `TRUST_PROXY`) and the public address (`BASE_URL`). The exposure choice follows the host you enter, and the wizard rejects an `http://` address combined with enforced secure cookies - nobody could sign in to that combination. A typed public address only counts once it names a full `http://` or `https://` origin; until then the wizard keeps the address it derives from host and port. A timezone the browser does not recognise (`Europe/Berln`) is refused on the spot instead of silently falling back to UTC
 - Security key generation (`SESSION_SECRET`, `DB_ENCRYPTION_KEY`) — on a re-run, keys already present in your `.env` are kept rather than regenerated, so running the wizard again on a live installation cannot lock you out of your encrypted database
 - Optional integrations (weather, Google Calendar, Apple CalDAV)
 - Email/SMTP for the "forgot password" flow (`EMAIL_SMTP_*`, `EMAIL_FROM_*`)
 - Storage & backups — the host data folder (`DATA_DIR`), automatic backups, off-site WebDAV backups and the three document storage options. Everything that decides where data lives
-- Advanced settings - Single Sign-On (OIDC), the four home-network permissions for calendar subscriptions, recipe mirrors, waste collection feeds and a WebDAV target (they lift the SSRF protection and are asked as one group), the calendar sync interval, live currency rates and the Web-Push contact. Everything that decides what Yuvomi connects to
+- Advanced settings - Single Sign-On (OIDC), the four home-network permissions for calendar subscriptions, recipe mirrors, waste collection feeds and a WebDAV target (they lift the SSRF protection and are asked as one group), the calendar sync interval, live currency rates and the Web-Push contact. Everything that decides what myCrib connects to
 - Writing your `.env` file (an existing `.env` is backed up to `.env.bak-<timestamp>` first)
 - Starting the container (via Docker or Podman, whichever was detected)
 - Creating your admin account
@@ -250,7 +250,7 @@ The final screen lets you **download a copy of your `.env`** — keep it safe, a
 
 Download the file before you close the tab: the installer server shuts down **5 minutes after your admin account is created**, and after 30 minutes of inactivity otherwise.
 
-The final screen also links to the next three steps on your new instance: inviting your family, choosing which modules to enable, and installing Yuvomi on your phones. Running the wizard again on an installation that already has an admin account is a supported case — it writes your `.env`, restarts the container and takes you to that same screen instead of failing.
+The final screen also links to the next three steps on your new instance: inviting your family, choosing which modules to enable, and installing myCrib on your phones. Running the wizard again on an installation that already has an admin account is a supported case — it writes your `.env`, restarts the container and takes you to that same screen instead of failing.
 
 ---
 
@@ -361,8 +361,8 @@ docker compose logs -f
 You should see output like:
 
 ```
-yuvomi  | [Yuvomi] Server running on port 3000 | Version 2.69.1
-yuvomi  | [Yuvomi] Environment: production
+yuvomi  | [myCrib] Server running on port 3000 | Version 2.69.1
+yuvomi  | [myCrib] Environment: production
 yuvomi  | [Sync] Auto-sync active every 15 minutes.
 ```
 
@@ -370,13 +370,13 @@ Press `Ctrl+C` to stop following the logs (the container keeps running).
 
 ### 5. Create the First Admin Account
 
-On the first visit, Yuvomi detects that no account exists yet and guides you through
+On the first visit, myCrib detects that no account exists yet and guides you through
 creating your admin account directly in the browser (see step 6). The form asks for:
 - **Username** (3–64 characters; letters, numbers, dots, hyphens, underscores)
 - **Display name** (e.g. "Jane Doe")
 - **Password** (minimum 8 characters, with a confirmation field)
 
-After you submit, Yuvomi creates the admin, signs you in automatically, and the setup
+After you submit, myCrib creates the admin, signs you in automatically, and the setup
 form is no longer reachable.
 
 **Headless alternative (CLI):** if you prefer not to use the browser — or are scripting
@@ -386,7 +386,7 @@ a provisioning step — create the admin from the container console instead:
 docker compose exec yuvomi node setup.js
 ```
 
-### 6. Open Yuvomi
+### 6. Open myCrib
 
 Open your browser and navigate to:
 
@@ -400,11 +400,11 @@ Log in with the admin credentials you just created. You can add family members f
 
 ### Option D — TrueNAS SCALE (Community Apps Catalog)
 
-No terminal required. Yuvomi is available directly in the TrueNAS SCALE Community Apps Catalog.
+No terminal required. myCrib is available directly in the TrueNAS SCALE Community Apps Catalog.
 
 #### 1. Open the Apps Catalog
 
-In your TrueNAS SCALE web UI, go to **Apps → Discover Apps** and search for **Yuvomi**.
+In your TrueNAS SCALE web UI, go to **Apps → Discover Apps** and search for **myCrib**.
 
 #### 2. Configure and Install
 
@@ -424,19 +424,19 @@ Once the app status shows **Running**, click **WebUI** in the Apps overview. The
 
 ### Option E — Umbrel (App Store)
 
-No terminal required. Yuvomi is available in the Umbrel App Store — everything runs on, and stays on, your Umbrel.
+No terminal required. myCrib is available in the Umbrel App Store — everything runs on, and stays on, your Umbrel.
 
 #### 1. Open the App Store
 
-In your Umbrel dashboard, open the **App Store** and search for **Yuvomi**.
+In your Umbrel dashboard, open the **App Store** and search for **myCrib**.
 
 #### 2. Install with One Click
 
 Click **Install**. Umbrel pulls the image and starts the container for you — there are no configuration files to edit.
 
-#### 3. Open Yuvomi
+#### 3. Open myCrib
 
-Launch Yuvomi from your Umbrel home screen. The first visit guides you through creating your admin account in the browser.
+Launch myCrib from your Umbrel home screen. The first visit guides you through creating your admin account in the browser.
 
 > **Finish setup right away.** When Umbrel's reverse-proxy authentication is disabled, the unauthenticated first-run setup endpoint is reachable on your LAN until you create the admin account. Complete the first-run setup immediately after installing.
 
@@ -446,11 +446,11 @@ Launch Yuvomi from your Umbrel home screen. The first visit guides you through c
 
 ### Option F — Unraid (Community Apps)
 
-No terminal required. Yuvomi ships as an Unraid Community Applications template.
+No terminal required. myCrib ships as an Unraid Community Applications template.
 
 #### 1. Open Community Applications
 
-In Unraid, open the **Apps** tab (the Community Applications plugin) and search for **Yuvomi**.
+In Unraid, open the **Apps** tab (the Community Applications plugin) and search for **myCrib**.
 
 #### 2. Configure the Template
 
@@ -462,7 +462,7 @@ Click **Install**. In the template, set:
 
 #### 3. Apply and Open
 
-Click **Apply**. Once the container is running, click the Yuvomi icon → **WebUI**. The first visit guides you through creating your admin account in the browser.
+Click **Apply**. Once the container is running, click the myCrib icon → **WebUI**. The first visit guides you through creating your admin account in the browser.
 
 #### Fields locked in Settings
 
@@ -509,7 +509,7 @@ All configuration happens in the `.env` file. The container reads these values o
 |----------|-------------|---------|----------|
 | `PORT` | Port the Express server listens on **inside the container** (rarely changed) | `3000` | No |
 | `BIND_ADDRESS` | Address the Express server listens on. Unset means all interfaces, and a container needs exactly that: the published port only reaches the app this way, so leave it unset for Docker, Podman, Unraid, TrueNAS and Umbrel. Set it to `127.0.0.1` when Node runs directly on the host behind a reverse proxy on that host. It has to be an IP address: a host name, `localhost` included, is refused at startup, because the MCP bridge would resolve it again on every call and could reach another machine with the caller's credentials. An IPv6 address with a zone ID (`fe80::1%eth0`) is refused at startup: no URL can reach it, so the built-in MCP bridge could never call the API back. Not to be confused with `OIKOS_HTTP_BIND`, which decides where the container engine publishes the port. | all interfaces | No |
-| `OIKOS_HTTP_PORT` | Host port that the compose file maps to the container's port 3000. Change this to expose Yuvomi on a different host port; the app inside the container always listens on 3000. | `3000` | No |
+| `OIKOS_HTTP_PORT` | Host port that the compose file maps to the container's port 3000. Change this to expose myCrib on a different host port; the app inside the container always listens on 3000. | `3000` | No |
 | `OIKOS_HTTP_BIND` | Host bind address for the published port (`podman-compose.yml` only). Set to `127.0.0.1` for rootless Podman behind a reverse proxy on the same host. | `0.0.0.0` | No |
 | `TZ` | Container timezone (e.g. `Europe/Berlin`). Affects log timestamps and the automated-backup schedule, and is the **default** for the household zone. Since v2.34.0 the household zone is a setting of its own (Settings → Personal → Appearance → Region), and where both exist the setting wins: `TZ` lives in the compose file, which is out of reach on Umbrel, TrueNAS and Unraid, and it also drives things that have nothing to do with the family calendar. Whichever applies is the zone used wherever a time carries none of its own: the calendar day server-side jobs call "today" (upcoming events, countdowns, recurring split expenses, birthdays), events pushed to Google Calendar when the target calendar reports no zone, events pushed to Outlook, events pushed to a CalDAV server (#938 - before that they carried no zone at all, leaving every server free to read them on its own clock), the due times of CalDAV reminders synced into Tasks, and the times in the exported calendar feed (`/feed/calendar/<token>.ics`), which subscribers read in this zone - a wrong zone shifts every appointment for everyone subscribed. **Since v2.36.0 the app's own display follows it too**, so a device travelling in another zone shows the household's clock rather than its own; that half applies only when the setting is set, since `TZ` alone leaves the display on the browser as before. | `UTC` | No |
 | `NODE_ENV` | Runtime environment | `production` | No |
@@ -542,7 +542,7 @@ Settings → Personal → Notifications.
 
 Admins can also add household Gotify, ntfy, generic HTTP webhook or email channels on the same
 settings page. These channels are configured in the UI and do not require environment variables. The
-Yuvomi backend container or host must be able to reach the configured base URL. HTTPS is recommended;
+myCrib backend container or host must be able to reach the configured base URL. HTTPS is recommended;
 HTTP is accepted as well.
 
 Since v2.64.1 a channel URL must also resolve to a public address, like every other outbound
@@ -582,20 +582,20 @@ Apple applies extra restrictions that do not exist on Android or desktop browser
 
 - **iOS/iPadOS 16.4 or newer** is required.
 - **The app must be installed to the Home Screen.** iOS delivers Web Push only to installed
-  home-screen web apps, never to a Safari tab. Open Yuvomi in Safari, then Share ->
+  home-screen web apps, never to a Safari tab. Open myCrib in Safari, then Share ->
   "Add to Home Screen".
 - **Enable the toggle from inside the home-screen app.** The push subscription belongs to that
   installation, so a toggle enabled in a Safari tab does not carry over.
 - **The certificate must be one iOS trusts.** A self-signed certificate or a private CA without an
   installed profile stops the service worker from registering, which silently disables push. A
   plain `http://` LAN address does not work either.
-- **Check iOS Settings -> Notifications -> Yuvomi**: "Allow Notifications" must be on, and a Focus
+- **Check iOS Settings -> Notifications -> myCrib**: "Allow Notifications" must be on, and a Focus
   mode must not be filtering the app.
 - **The server needs outbound access to `web.push.apple.com`.** In LAN-only or egress-filtered
   deployments the send fails server-side.
 - **The VAPID subject must be routable.** Apple validates the contact URI in the signed token and
   answers `403 BadJwtToken` when it cannot be reached, so push fails on iOS while Android continues
-  to work. Yuvomi derives a usable value from the SMTP sender address or `BASE_URL`; set
+  to work. myCrib derives a usable value from the SMTP sender address or `BASE_URL`; set
   [`VAPID_SUBJECT`](#web-push-optional) explicitly if neither is configured.
 
 If a test notification does not arrive, the server log is the authoritative source. Successful
@@ -628,10 +628,10 @@ makes exactly that field read-only in the settings UI; empty values fall back to
 | `EMAIL_SMTP_USER` | SMTP auth username. | - | No |
 | `EMAIL_SMTP_PASS` | SMTP auth password. | - | No |
 | `EMAIL_FROM_ADDRESS` | Sender email address. | - | No |
-| `EMAIL_FROM_NAME` | Sender display name. | `Yuvomi` | No |
-| `BASE_URL` | Absolute origin used to build password-reset links, invitation links in emails, and calendar export-feed URLs, e.g. `https://yuvomi.example.com`. **Required for password-reset and invitation emails to be sent** — the request `Host` header is never trusted as a fallback, to prevent reset-link poisoning. The invite link shown in the admin UI works without it (it is built from the browser's origin); the export feed falls back to the request's protocol/host when unset. | - | No* |
+| `EMAIL_FROM_NAME` | Sender display name. | `myCrib` | No |
+| `BASE_URL` | Absolute origin used to build password-reset links, invitation links in emails, and calendar export-feed URLs, e.g. `https://myCrib.example.com`. **Required for password-reset and invitation emails to be sent** — the request `Host` header is never trusted as a fallback, to prevent reset-link poisoning. The invite link shown in the admin UI works without it (it is built from the browser's origin); the export feed falls back to the request's protocol/host when unset. | - | No* |
 
-\* Not required to start Yuvomi. Without it (or without SMTP configured) the self-service reset
+\* Not required to start myCrib. Without it (or without SMTP configured) the self-service reset
 cannot deliver a mail, so the login page hides the "Forgot password" link entirely rather than
 offering a dead end — an admin can still reset a member's password directly under
 Settings → Administration → Family.
@@ -646,7 +646,7 @@ optional `DB_ENCRYPTION_KEY`.
 
 Connect a self-hosted Immich server under **Settings → Administration → Immich** to show random
 photos after five minutes without activity. The administration page can test the connection and
-open an immediate preview. An optional album UUID limits the selection; otherwise Yuvomi uses the
+open an immediate preview. An optional album UUID limits the selection; otherwise myCrib uses the
 whole accessible library. The Immich API key needs `asset.read` and `asset.view` permissions.
 
 | Variable | Description | Default | Required |
@@ -667,7 +667,7 @@ security, and troubleshooting.
 |----------|-------------|---------|----------|
 | `DB_PATH` | Path to the SQLite database file inside the container | `/data/yuvomi.db` | No |
 | `DB_ENCRYPTION_KEY` | SQLCipher AES-256 key for encryption at rest. Leave it empty and the database stays unencrypted. Once set there is no way back: it cannot be recovered and cannot be changed on an existing database. The placeholder that `.env.example` ships (`REPLACE_WITH_...`) is refused on a fresh install, because it is printed in this repository and would protect nothing. | - | No, but strongly recommended |
-| `DB_ALLOW_NEWER_SCHEMA` | Emergency switch, normally unset. An older Yuvomi refuses to start on a database a newer version has opened (see [Going back](#going-back)); `1` starts it anyway, at your own risk, with a warning on every start. | - | No |
+| `DB_ALLOW_NEWER_SCHEMA` | Emergency switch, normally unset. An older myCrib refuses to start on a database a newer version has opened (see [Going back](#going-back)); `1` starts it anyway, at your own risk, with a warning on every start. | - | No |
 | `DATA_DIR` | Host directory mounted at `/data` inside the container (set in `.env` or `docker-compose.yml`). | `./data` | No |
 | `MODULES_DIR` | Host directory mounted at `/app/modules` inside the container - the drop-in folder for [third-party modules](../MODULES.md). Like `BACKUP_DIR`, the app also reads this name itself as the directory *inside* the container, which is why `docker-compose.yml`, `podman-compose.yml` and the Quadlet pin it to `/app/modules` there. With Compose the value in `.env` therefore only moves the mount source; the Quadlet keeps its host folder in the unit file, and Portainer uses a named volume. | `./modules` | No |
 | `BACKUP_DIR` | In `.env`/`docker-compose.yml`: the **host** directory mounted at `/backups`. Inside the container the app reads the same name as the **container** path it writes to - the compose files pin it to `/backups`, and the image defaults to `/backups` as well. Only override it inside the container if you mount your backup volume somewhere else. | `./backups` (host) / `/backups` (container) | No |
@@ -682,8 +682,8 @@ security, and troubleshooting.
 >
 > ```yaml
 > volumes:
->   - /mnt/user/appdata/yuvomi/data:/data
->   - /mnt/array/yuvomi-backups:/backups   # host side is yours to choose
+>   - /mnt/user/appdata/myCrib/data:/data
+>   - /mnt/array/myCrib-backups:/backups   # host side is yours to choose
 > ```
 >
 > The same applies to the module drop-in folder at `/app/modules`.
@@ -757,7 +757,7 @@ environment:
 
 Admins can configure **Settings → Sync → Document storage** as the global destination for all
 new document files, including calendar attachments. Existing local documents are not migrated.
-Uploads fail closed: if WebDAV cannot accept the file, Yuvomi rejects the upload instead of silently
+Uploads fail closed: if WebDAV cannot accept the file, myCrib rejects the upload instead of silently
 storing it in SQLite. Disabling WebDAV changes only future uploads; existing WebDAV documents remain
 readable and deletable.
 
@@ -795,7 +795,7 @@ PUT/GET/DELETE roundtrip in the target folder.
 Google Drive is a separate Documents OAuth connection, even when it reuses the same Cloud Console
 client ID and secret as Google Calendar. Enable the **Google Drive API**, add the exact redirect URI
 `https://<YOUR-DOMAIN>/api/v1/documents/storage/google-drive/callback`, and configure the variables
-below. Yuvomi requests only `https://www.googleapis.com/auth/drive.file`; it cannot browse arbitrary
+below. myCrib requests only `https://www.googleapis.com/auth/drive.file`; it cannot browse arbitrary
 Drive files and never creates public permissions.
 
 | Variable | Description | Default | Required |
@@ -816,7 +816,7 @@ the candidate account and an existing Drive-backed file before replacing working
 Disconnect is blocked while Drive is selected or Drive-backed rows exist, and it removes only local
 Drive token state without revoking shared Google credentials.
 
-> **Access and backup boundary:** Yuvomi visibility settings only control access through Yuvomi.
+> **Access and backup boundary:** myCrib visibility settings only control access through myCrib.
 > Anyone with access to the connected Google Drive folder can view all files stored there. SQLite backups contain
 > metadata and Drive file IDs, not binaries. Back up or export the Drive folder separately and restore
 > it with the matching database.
@@ -860,7 +860,7 @@ the same kind, listed in the same table.
 
 > **Note the inverted default.** `DMS_ALLOW_PRIVATE_NETWORK` is the only switch in this family that
 > defaults to `true`. A document management system is self-hosted by definition and normally sits on
-> the same LAN or Docker network as Yuvomi, so blocking private targets by default would break
+> the same LAN or Docker network as myCrib, so blocking private targets by default would break
 > virtually every existing connection. Set it to `false` to enforce the same protection the other
 > integrations have; only an explicit `false` or `0` switches it on, so a typo leaves a working
 > setup working.
@@ -874,11 +874,11 @@ the same kind, listed in the same table.
 | `GOOGLE_REDIRECT_URI` | OAuth callback URL | `https://<YOUR-DOMAIN>/api/v1/calendar/google/callback` | No |
 
 After connecting, enable the calendars to sync under **Settings → Sync**. The sync runs both ways:
-events created, edited, deleted, or moved to another calendar in Yuvomi are applied in Google as
+events created, edited, deleted, or moved to another calendar in myCrib are applied in Google as
 well, and changes made in Google flow back. Outbound changes are attempted immediately and retried
 by the next sync run (`SYNC_INTERVAL_MINUTES`) if Google is unreachable. A calendar is only written
 to when the connected account has write access to it, and the **read-only mode** checkbox stops
-Yuvomi from changing anything in Google while still importing normally.
+myCrib from changing anything in Google while still importing normally.
 
 Recurring appointments are imported as one series with its repeat rule, and cancelled or moved
 occurrences are carried over individually. Upgrading to v1.56.0 makes the first sync run read every
@@ -887,13 +887,13 @@ incremental runs. That run also merges appointments that earlier versions had st
 occurrences back into their series; an occurrence you had assigned to someone or given its own
 colour is kept as a separate entry instead.
 
-Reminders are not part of the sync. Yuvomi does not import the notifications set on an event in
-Google and sends none of its own, so editing an event in Yuvomi leaves its notifications in Google
-as they were. Reminders in Yuvomi are set in Yuvomi for each person and delivered by Yuvomi itself.
+Reminders are not part of the sync. myCrib does not import the notifications set on an event in
+Google and sends none of its own, so editing an event in myCrib leaves its notifications in Google
+as they were. Reminders in myCrib are set in myCrib for each person and delivered by myCrib itself.
 
 ### Outlook Calendar Push — Microsoft Graph (Optional)
 
-One-way push **Yuvomi → Outlook.com** for personal Microsoft accounts (outlook.com, hotmail.com, M365 Family). Outlook.com does not support CalDAV, so this provider uses the Microsoft Graph API. Yuvomi stays the source of truth: pushed events are created/updated/deleted in Outlook, and every sync run also checks the pushed events for remote drift (one cheap `changeKey` listing per calendar) — events edited in Outlook are reset to the Yuvomi state, events deleted in Outlook are re-created. Multiple family accounts can be connected.
+One-way push **myCrib → Outlook.com** for personal Microsoft accounts (outlook.com, hotmail.com, M365 Family). Outlook.com does not support CalDAV, so this provider uses the Microsoft Graph API. myCrib stays the source of truth: pushed events are created/updated/deleted in Outlook, and every sync run also checks the pushed events for remote drift (one cheap `changeKey` listing per calendar) — events edited in Outlook are reset to the myCrib state, events deleted in Outlook are re-created. Multiple family accounts can be connected.
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
@@ -906,15 +906,15 @@ One-way push **Yuvomi → Outlook.com** for personal Microsoft accounts (outlook
 > Microsoft has deprecated creating app registrations *outside a directory* — signing in to Entra with a bare personal account shows a blocking notice. You need an Entra tenant to hold the app: sign up for a **free Azure account** (creates a "Default Directory"; identity verification asks for a credit card, but the app registration and Graph calls stay free). The M365 Developer Program alternative is restricted to Visual Studio Professional/Enterprise subscribers and Microsoft partners. Your family's personal accounts do **not** need to join the tenant — it only hosts the app registration.
 
 1. Sign in at [entra.microsoft.com](https://entra.microsoft.com) with the account that owns the tenant → **Identity → Applications → App registrations → New registration**.
-2. Name: e.g. `Yuvomi Calendar Push`. Supported account types: **"Personal Microsoft accounts only"**.
+2. Name: e.g. `myCrib Calendar Push`. Supported account types: **"Personal Microsoft accounts only"**.
 3. Platform: **Web**, redirect URI: `https://<YOUR-DOMAIN>/api/v1/calendar/outlook/callback` (must be HTTPS, or `http://localhost:3000/...` for local testing). This must match `MS_REDIRECT_URI` exactly.
 4. After creation, copy the **Application (client) ID** → `MS_CLIENT_ID`.
 5. **Certificates & secrets → New client secret** → copy the secret **Value** (shown only once) → `MS_CLIENT_SECRET`. Note the expiry (max. 24 months) — you must create a new secret before it expires.
 6. API permissions are requested dynamically via OAuth scopes (`Calendars.ReadWrite`, `User.Read`, `offline_access` — delegated); no admin consent is needed for personal accounts.
-7. Set the three `MS_*` variables in `.env`, restart Yuvomi, then connect each family member's account under **Settings → Synchronization → More providers → Outlook** (admin only).
-8. After connecting, no calendars are enabled yet. Recommended setup: create a **dedicated calendar in Outlook** (e.g. "Yuvomi"), refresh the calendar list, pick it as the **auto-sync target calendar**, and choose which family member the account belongs to — from then on all Yuvomi events visible to that person are pushed there automatically, with assigned members appended to the title (`Dinner (Anna, Ben)`). Alternatively (or additionally), individual events can pick an explicit Outlook target in the event dialog; an explicit target overrides the auto-sync calendar for that event.
+7. Set the three `MS_*` variables in `.env`, restart myCrib, then connect each family member's account under **Settings → Synchronization → More providers → Outlook** (admin only).
+8. After connecting, no calendars are enabled yet. Recommended setup: create a **dedicated calendar in Outlook** (e.g. "myCrib"), refresh the calendar list, pick it as the **auto-sync target calendar**, and choose which family member the account belongs to — from then on all myCrib events visible to that person are pushed there automatically, with assigned members appended to the title (`Dinner (Anna, Ben)`). Alternatively (or additionally), individual events can pick an explicit Outlook target in the event dialog; an explicit target overrides the auto-sync calendar for that event.
 
-**Limitations (one-way push):** recurring events support Yuvomi's RRULE subset only; excluded single occurrences (EXDATE) are not propagated; no attendees, reminders, attachments, or colors. **Times follow the household zone since v2.34.0 (#829)** - until then `Europe/Berlin` was hard-coded here, justified as parity with the Google outbound sync although that one already read the target calendar's own zone and only fell back to `TZ`; a household in Toronto pushed every appointment six hours out. Refresh tokens for personal accounts expire after ~90 days of inactivity — the account then shows a "reconnect" button.
+**Limitations (one-way push):** recurring events support myCrib's RRULE subset only; excluded single occurrences (EXDATE) are not propagated; no attendees, reminders, attachments, or colors. **Times follow the household zone since v2.34.0 (#829)** - until then `Europe/Berlin` was hard-coded here, justified as parity with the Google outbound sync although that one already read the target calendar's own zone and only fell back to `TZ`; a household in Toronto pushed every appointment six hours out. Refresh tokens for personal accounts expire after ~90 days of inactivity — the account then shows a "reconnect" button.
 
 ### Apple Calendar Sync — Legacy Single-Account (Optional)
 
@@ -933,17 +933,17 @@ One-way push **Yuvomi → Outlook.com** for personal Microsoft accounts (outlook
 | `SYNC_INTERVAL_MINUTES` | Sync interval in minutes for calendars and contacts | `15` | No |
 
 CalDAV and iCloud sync both ways: events created, edited, deleted, or moved to another calendar in
-Yuvomi are applied on the server as well, and changes made there flow back. An outbound change is
+myCrib are applied on the server as well, and changes made there flow back. An outbound change is
 attempted right when you save and retried by the next sync run if the server cannot be reached.
-Editing preserves everything the server holds that Yuvomi does not — attendees, alarms, categories
-and exceptions of a recurring series stay untouched. Alarms are not imported, though, and Yuvomi
+Editing preserves everything the server holds that myCrib does not — attendees, alarms, categories
+and exceptions of a recurring series stay untouched. Alarms are not imported, though, and myCrib
 writes none of its own: an event it creates on the server carries no alarm, and reminders set in
-Yuvomi are delivered by Yuvomi only. Events that were already synced before the
+myCrib are delivered by myCrib only. Events that were already synced before the
 upgrade to v1.52.0 need one sync run before edits and deletions can reach them.
 
 ### Two-Factor Authentication (Optional)
 
-Nothing to configure — there is no environment variable, and Yuvomi never reaches the network for
+Nothing to configure — there is no environment variable, and myCrib never reaches the network for
 this. Each member turns it on for themselves under **Settings → Personal → Account**: scan the QR
 code with any authenticator app (or type the secret by hand), enter the six-digit code once, and
 store the ten recovery codes that appear. They are shown exactly once; afterwards the server only
@@ -961,11 +961,11 @@ on every account page without a second factor — it deliberately does not rejec
 already exist, because in a household where nobody has set it up yet that would lock everyone out,
 including the admin.
 
-**Single sign-on does not skip it.** If you have a second factor set up, Yuvomi asks for the code
+**Single sign-on does not skip it.** If you have a second factor set up, myCrib asks for the code
 after the OIDC provider sends you back — otherwise the household-wide requirement would only bind
 those who sign in with a password.
 
-Time matters: TOTP codes are derived from the clock, and Yuvomi accepts a deviation of ±30 seconds.
+Time matters: TOTP codes are derived from the clock, and myCrib accepts a deviation of ±30 seconds.
 If codes are rejected on a device whose clock drifts, sync the clock rather than the app.
 
 ### SSO / OpenID Connect (Optional)
@@ -976,10 +976,10 @@ Pocket ID documents Yuvomi as one of its [client examples](https://pocket-id.org
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `OIDC_ISSUER` | OIDC provider issuer URL (e.g. `https://authentik.example.com/application/o/yuvomi/`) | - | No |
+| `OIDC_ISSUER` | OIDC provider issuer URL (e.g. `https://authentik.example.com/application/o/myCrib/`) | - | No |
 | `OIDC_CLIENT_ID` | Client ID registered with your OIDC provider | - | No |
 | `OIDC_CLIENT_SECRET` | Client secret for the registered application | - | No |
-| `OIDC_REDIRECT_URI` | OAuth callback URL — must be registered with the provider (e.g. `https://yuvomi.example.com/api/v1/auth/oidc/callback`) | - | No |
+| `OIDC_REDIRECT_URI` | OAuth callback URL — must be registered with the provider (e.g. `https://myCrib.example.com/api/v1/auth/oidc/callback`) | - | No |
 | `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM` | Set to `true` to allow account linking when the IdP omits the `email_verified` claim entirely. Only enable for IdPs fully under your control that never issue unverified addresses (e.g. older Authentik without an explicit `email_verified` property mapping). | - | No |
 | `OIDC_ALLOW_SIGNUP` | Set to `false` so an SSO sign-in never provisions a new account. Sign-in and account linking are unaffected, so the admin creates the account and the user signs in with SSO. Use this when your identity provider serves more people than this household. | `true` | No |
 | `AUTH_ALLOW_PASSWORD_LOGIN` | Set to `false` to make SSO the only way in: the login form, password login and password reset are all switched off. Ignored until all four OIDC variables are set **and** at least one administrator account is linked to the provider, so a typo - or a fresh install - can never lock everyone out. | `true` | No |
@@ -993,7 +993,7 @@ Unverified emails never take over an existing account; without a match a new acc
 
 **Who gets an account.** By default every identity your provider accepts gets one on first sign-in - convenient for a provider you run for this household alone, but a directory is a list of people, not a list of household members. Set `OIDC_ALLOW_SIGNUP=false` and provisioning stops: an unknown identity is turned away with "There is no account here yet for this SSO sign-in" instead of the generic SSO error, while known accounts sign in as before. Linking still happens too, which is what makes the switch usable: create the account under **Settings → Administration → Family** with the member's email address and "SSO sign-in only" switched on, and their first SSO sign-in binds the two together (the provider must report `email_verified: true`, or the account owner links it themselves under **Settings → Account → Single sign-on**).
 
-**Making SSO the only way in.** Even with SSO configured, Yuvomi keeps a second door open: the login form stays, password reset stays, and every account carries a password hash. Set `AUTH_ALLOW_PASSWORD_LOGIN=false` and that door closes - the login page shows nothing but the SSO button, `POST /auth/login` is refused outright (the rule sits on the route, not just on the page), and password reset disappears with it rather than staying as a route that can still send mail. **One exception is offered, and only where it applies (#962):** guests of shared expenses stay exempt from the switch, because they are external people with no entry in your identity provider, so a household that has such guests keeps a second button for them. A household that has none sees no second button - it used to appear regardless, which looked like a hole in the bolt you had just closed.
+**Making SSO the only way in.** Even with SSO configured, myCrib keeps a second door open: the login form stays, password reset stays, and every account carries a password hash. Set `AUTH_ALLOW_PASSWORD_LOGIN=false` and that door closes - the login page shows nothing but the SSO button, `POST /auth/login` is refused outright (the rule sits on the route, not just on the page), and password reset disappears with it rather than staying as a route that can still send mail. **One exception is offered, and only where it applies (#962):** guests of shared expenses stay exempt from the switch, because they are external people with no entry in your identity provider, so a household that has such guests keeps a second button for them. A household that has none sees no second button - it used to appear regardless, which looked like a hole in the bolt you had just closed.
 
 Three things are deliberate:
 
@@ -1004,7 +1004,7 @@ Three things are deliberate:
 
 **Creating an account without a password.** Preparing an account for an SSO user used to mean inventing a password - and the invented password stayed a working credential. With OIDC configured, the "SSO sign-in only" toggle under **Settings → Administration → Family** creates the account without one. Such an account needs an email address, and one that belongs to no other member: an account with no password and no linkable identity could never be signed into, because a matching *username* deliberately never links. This works whether or not `AUTH_ALLOW_PASSWORD_LOGIN` is set, so a household can run mixed: some members with a password, some SSO-only.
 
-**Username of a newly provisioned account.** The name is taken from the first claim that yields something usable: `preferred_username`, then the non-standard `username` claim (Synology DSM SSO sends the plain account name there, where `sub` still carries the directory part), then `sub`. The email address is deliberately not a candidate: a household often shares one address across several members, so it identifies nobody, and its domain part only makes the name unwieldy. Whichever claim wins is reduced to the format every username in Yuvomi follows (`a-z A-Z 0-9 . _ -`, 3 to 64 characters), with accents transliterated and anything else turned into a hyphen. Admins can rename the account afterwards under **Settings → Administration → Family**; sign-in keeps working either way, because the identity hangs on `sub`, not on the name.
+**Username of a newly provisioned account.** The name is taken from the first claim that yields something usable: `preferred_username`, then the non-standard `username` claim (Synology DSM SSO sends the plain account name there, where `sub` still carries the directory part), then `sub`. The email address is deliberately not a candidate: a household often shares one address across several members, so it identifies nobody, and its domain part only makes the name unwieldy. Whichever claim wins is reduced to the format every username in myCrib follows (`a-z A-Z 0-9 . _ -`, 3 to 64 characters), with accents transliterated and anything else turned into a hyphen. Admins can rename the account afterwards under **Settings → Administration → Family**; sign-in keeps working either way, because the identity hangs on `sub`, not on the name.
 
 **Linking an existing account yourself.** A matching *username* deliberately never links: anyone who names themselves `admin` at the identity provider would otherwise take over the local admin account. If neither the `sub` nor a verified email matches, the first SSO sign-in therefore creates a separate account - same name with a numeric suffix (`test1-1`), and the original account's data stays where it is. (A verified email that matches a member account with a password no longer does this: that sign-in is refused and names this card as the way in.) The way to merge the two is to sign in locally and open **Settings → Account → Single sign-on**, where "Link SSO account" runs the same provider flow and binds the resulting `sub` to the account you are signed in as. Being signed in is the point: the session names the local account and the provider names the remote one, which together prove ownership of both. Linking is refused when that `sub` already belongs to another account. The same card removes a link again - except on an account that was created through SSO, because it holds no password and the link is its only way in; set a password first.
 
@@ -1033,7 +1033,7 @@ Built-in cron-based database backup (default: 2 AM daily, keep last 7 copies). S
 | `BACKUP_KEEP` | Number of most-recent backup files to retain | `7` | No |
 | `BACKUP_UPLOAD_LIMIT` | Maximum size of a backup file uploaded for restore through the admin UI (Express body-limit syntax). Raise it when restoring a database larger than the default. | `100mb` | No |
 
-**WebDAV backup target (optional):** After each local backup, Yuvomi can automatically upload the file to any WebDAV-compatible server (Nextcloud, ownCloud, Hetzner Storage Box, Infomaniak kDrive, etc.). Configure in **Settings → Administration → Backup and restore → WebDAV Backup Target**, or via environment variables (env vars take precedence over the UI):
+**WebDAV backup target (optional):** After each local backup, myCrib can automatically upload the file to any WebDAV-compatible server (Nextcloud, ownCloud, Hetzner Storage Box, Infomaniak kDrive, etc.). Configure in **Settings → Administration → Backup and restore → WebDAV Backup Target**, or via environment variables (env vars take precedence over the UI):
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
@@ -1041,16 +1041,16 @@ Built-in cron-based database backup (default: 2 AM daily, keep last 7 copies). S
 | `WEBDAV_BACKUP_URL` | WebDAV server URL (e.g. `https://cloud.example.com/remote.php/dav/files/user/`) | — | No |
 | `WEBDAV_BACKUP_USERNAME` | WebDAV username | — | No |
 | `WEBDAV_BACKUP_PASSWORD` | WebDAV password | — | No |
-| `WEBDAV_BACKUP_PATH` | Remote directory path for backup files | `/yuvomi/backups/` | No |
+| `WEBDAV_BACKUP_PATH` | Remote directory path for backup files | `/myCrib/backups/` | No |
 | `WEBDAV_BACKUP_KEEP` | Number of remote backup files to keep | `7` | No |
 
 ---
 
 ## HTTPS / Reverse Proxy (Nginx)
 
-> **Optional for local access, required for network/internet access.** If you only access Yuvomi on the same machine (localhost), you can skip this section.
+> **Optional for local access, required for network/internet access.** If you only access myCrib on the same machine (localhost), you can skip this section.
 
-When exposing Yuvomi to your local network or the internet, you need HTTPS for security. Nginx acts as a reverse proxy that handles SSL termination and forwards requests to the Docker container.
+When exposing myCrib to your local network or the internet, you need HTTPS for security. Nginx acts as a reverse proxy that handles SSL termination and forwards requests to the Docker container.
 
 ### Install Nginx
 
@@ -1062,14 +1062,14 @@ sudo apt install nginx
 
 ### Configure Nginx
 
-Yuvomi ships with an example configuration. Copy it and replace `deine-domain.de` with
+myCrib ships with an example configuration. Copy it and replace `deine-domain.de` with
 your actual domain — but do **not** enable the site yet: its HTTPS block references a
 certificate that does not exist until the next step, and Nginx refuses to load an
 `ssl` listener without one.
 
 ```bash
-sudo cp nginx.conf.example /etc/nginx/sites-available/yuvomi
-sudo nano /etc/nginx/sites-available/yuvomi   # replace deine-domain.de
+sudo cp nginx.conf.example /etc/nginx/sites-available/myCrib
+sudo nano /etc/nginx/sites-available/myCrib   # replace deine-domain.de
 ```
 
 The configuration includes:
@@ -1096,11 +1096,11 @@ sudo certbot certonly --standalone -d <YOUR-DOMAIN> \
 ```
 
 Now point the site at the new certificate and enable it: uncomment the two
-`ssl_certificate` lines in `/etc/nginx/sites-available/yuvomi`, then link and reload:
+`ssl_certificate` lines in `/etc/nginx/sites-available/myCrib`, then link and reload:
 
 ```bash
-sudo nano /etc/nginx/sites-available/yuvomi   # uncomment ssl_certificate + ssl_certificate_key
-sudo ln -s /etc/nginx/sites-available/yuvomi /etc/nginx/sites-enabled/
+sudo nano /etc/nginx/sites-available/myCrib   # uncomment ssl_certificate + ssl_certificate_key
+sudo ln -s /etc/nginx/sites-available/myCrib /etc/nginx/sites-enabled/
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -1110,7 +1110,7 @@ Verify auto-renewal is active:
 sudo certbot renew --dry-run
 ```
 
-### Update Yuvomi for HTTPS
+### Update myCrib for HTTPS
 
 `docker-compose.yml` reads `SESSION_SECURE` from your `.env` (`${SESSION_SECURE:-false}`), so you no longer need to edit the Compose file. When running behind an HTTPS reverse proxy, set these in `.env`:
 
@@ -1133,7 +1133,7 @@ If you prefer Caddy, certificates are obtained and renewed automatically — the
 reverse proxy is two lines in a `Caddyfile`:
 
 ```
-yuvomi.example.com {
+myCrib.example.com {
     reverse_proxy 127.0.0.1:3000
 }
 ```
@@ -1144,8 +1144,8 @@ Set `SESSION_SECURE=true` and `TRUST_PROXY=1` in `.env` as above, then reload Ca
 
 ## Podman & systemd Autostart (rootless)
 
-On RHEL-based systems you can run Yuvomi as a rootless systemd service via Podman
-[Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html). Yuvomi
+On RHEL-based systems you can run myCrib as a rootless systemd service via Podman
+[Quadlet](https://docs.podman.io/en/latest/markdown/podman-systemd.unit.5.html). myCrib
 ships a ready-made unit at `tools/quadlet/oikos.container`.
 
 ```bash
@@ -1228,7 +1228,7 @@ docker compose up -d --build
 ### Going back
 
 Migrations only run forward. The list is append-only and a CI test keeps it that way, so any
-backup from an older Yuvomi restores into any newer one, and a database that a newer version has
+backup from an older myCrib restores into any newer one, and a database that a newer version has
 opened carries migrations an older version does not know. The way back after a bad update is
 therefore the backup you took before it, or the `.pre-restore-*` copy a restore leaves next to the
 database, never an older image on the current database: an older version refuses to start on a
@@ -1282,19 +1282,19 @@ docker compose up -d "$SERVICE"
 
 If your Compose service is renamed, set `SERVICE` to that name, for example `SERVICE=familyplanner`.
 
-The command first checks the backup the same way a restore from the settings page does (it has to open with this installation's `DB_ENCRYPTION_KEY`, every page is checked, and a backup from a newer Yuvomi is refused) and stops before changing anything if the check fails. If you are switching `DB_ENCRYPTION_KEY` to the key of the installation that wrote the backup, change it in `.env` before running the command, so the check opens the backup with it. The command then copies the backup next to the database and only then moves it over the database file in one step; Yuvomi removes a leftover copy on its next start. `docker compose stop` does not fold the write-ahead log into the database file, so the last changes may still be in `yuvomi.db-wal`: the command moves that file next to the pre-restore copy (as `yuvomi.db.pre-restore-<stamp>-wal`, where SQLite picks it up when the copy is opened) instead of deleting it. If the database file itself is empty (0 bytes, see the start-up message about an empty database file), the log goes to `yuvomi.db.pre-restore-<stamp>.wal-kept` instead: SQLite discards a `-wal` next to an empty file the first time that file is opened, even just for reading. An interrupted restore leaves the old database in place; only if it stops between moving the log and moving the backup in are the last changes found with the pre-restore copy instead. The restored file gets mode `0600` and the owner `node`, whatever mode the backup file had (a backup on read-only media is often `0444`, and a database with that mode could not be written). On a data volume that does not allow changing modes (some SMB or FUSE mounts on a NAS), that step is skipped and the permissions of the mount apply; the command runs as root in the container, so it cannot tell from there whether the file is writable for Yuvomi. `DB_PATH` must be a regular file, not a symlink: the restore replaces the file at that path, so a symlink there would be replaced by the restored file instead of being followed.
+The command first checks the backup the same way a restore from the settings page does (it has to open with this installation's `DB_ENCRYPTION_KEY`, every page is checked, and a backup from a newer myCrib is refused) and stops before changing anything if the check fails. If you are switching `DB_ENCRYPTION_KEY` to the key of the installation that wrote the backup, change it in `.env` before running the command, so the check opens the backup with it. The command then copies the backup next to the database and only then moves it over the database file in one step; myCrib removes a leftover copy on its next start. `docker compose stop` does not fold the write-ahead log into the database file, so the last changes may still be in `yuvomi.db-wal`: the command moves that file next to the pre-restore copy (as `yuvomi.db.pre-restore-<stamp>-wal`, where SQLite picks it up when the copy is opened) instead of deleting it. If the database file itself is empty (0 bytes, see the start-up message about an empty database file), the log goes to `yuvomi.db.pre-restore-<stamp>.wal-kept` instead: SQLite discards a `-wal` next to an empty file the first time that file is opened, even just for reading. An interrupted restore leaves the old database in place; only if it stops between moving the log and moving the backup in are the last changes found with the pre-restore copy instead. The restored file gets mode `0600` and the owner `node`, whatever mode the backup file had (a backup on read-only media is often `0444`, and a database with that mode could not be written). On a data volume that does not allow changing modes (some SMB or FUSE mounts on a NAS), that step is skipped and the permissions of the mount apply; the command runs as root in the container, so it cannot tell from there whether the file is writable for myCrib. `DB_PATH` must be a regular file, not a symlink: the restore replaces the file at that path, so a symlink there would be replaced by the restored file instead of being followed.
 
-For a local CLI restore outside Docker, stop Yuvomi first, set the same environment variables used by the app and run it as the user Yuvomi runs as (or as root; the restored file must stay writable for the user or group that could write the current database, and the restore stops before replacing anything if it cannot make it so):
+For a local CLI restore outside Docker, stop myCrib first, set the same environment variables used by the app and run it as the user myCrib runs as (or as root; the restored file must stay writable for the user or group that could write the current database, and the restore stops before replacing anything if it cannot make it so):
 
 ```bash
 DB_PATH=/path/to/yuvomi.db node --import dotenv/config scripts/restore-backup.js ./yuvomi-backup-20260401.db
 ```
 
-The restore helper validates that the file is a Yuvomi database and undamaged (every page is checked), and refuses one written by a newer Yuvomi than the one running (update first, then restore), before replacing the active database. The replacement is written next to the database file and swapped in with a single rename, so an interrupted restore leaves the old database in place. It also keeps a pre-restore copy next to the database file for emergency rollback. The CLI restore is not coordinated with a running server - a restore from the settings page at the same time, or the server's open connection to the replaced file, would work against it - so run it only while Yuvomi is stopped.
+The restore helper validates that the file is a myCrib database and undamaged (every page is checked), and refuses one written by a newer myCrib than the one running (update first, then restore), before replacing the active database. The replacement is written next to the database file and swapped in with a single rename, so an interrupted restore leaves the old database in place. It also keeps a pre-restore copy next to the database file for emergency rollback. The CLI restore is not coordinated with a running server - a restore from the settings page at the same time, or the server's open connection to the replaced file, would work against it - so run it only while myCrib is stopped.
 
 ### Moving to a new server (backup from another installation)
 
-A backup carries the encryption of the installation that wrote it, so a new installation with a `DB_ENCRYPTION_KEY` of its own cannot open it as it is. Do not swap the new installation's key for the old one: its own database is encrypted with the key it has, and after the swap Yuvomi no longer starts.
+A backup carries the encryption of the installation that wrote it, so a new installation with a `DB_ENCRYPTION_KEY` of its own cannot open it as it is. Do not swap the new installation's key for the old one: its own database is encrypted with the key it has, and after the swap myCrib no longer starts.
 
 Instead, restore with the old installation's key as the **backup key**:
 
@@ -1310,7 +1310,7 @@ The backup is decrypted with the backup key and re-encrypted with this installat
 
 Two limits:
 
-- An installation **without** a `DB_ENCRYPTION_KEY` refuses a backup key rather than storing the backup decrypted. Set a key first (`openssl rand -hex 32`), restart Yuvomi - its current database is encrypted with it on that start - then restore with the backup key.
+- An installation **without** a `DB_ENCRYPTION_KEY` refuses a backup key rather than storing the backup decrypted. Set a key first (`openssl rand -hex 32`), restart myCrib - its current database is encrypted with it on that start - then restore with the backup key.
 - Over plain HTTP the backup key crosses the network unencrypted, and the dialog says so. Use HTTPS, or restore from a machine on the same local network.
 
 ### Automated Backups
@@ -1546,7 +1546,7 @@ After switching a list on, either press "Sync reminders" or wait for the next sc
 (`SYNC_INTERVAL_MINUTES`).
 
 Once a list is enabled for **Tasks**, it also becomes a destination: the task dialog gains a "sync
-target" field, and a task created in Yuvomi with a target set is uploaded on the next run (or right
+target" field, and a task created in myCrib with a target set is uploaded on the next run (or right
 away, on save). Each member sets their own default under **Settings → Personal → Task defaults** -
 which lists the household mirrors is an admin decision, which of them your new tasks go to is
 yours. A task without a target stays local, as every task did before. Lists mapped to **Shopping**
@@ -1555,7 +1555,7 @@ Subtasks are never uploaded on their own, and a task that has already been uploa
 to a different list.
 
 One boundary worth knowing if you use both mirroring and the task lock: a **locked** task is closed
-to everyone but its creator and admins inside Yuvomi, but an **inbound sync still rewrites its
+to everyone but its creator and admins inside myCrib, but an **inbound sync still rewrites its
 mirrored fields**. The sync runs with the household's CalDAV credentials rather than as a member,
 and whoever holds those has full access to the list anyway; the alternative would be to let the
 mirror diverge silently, which is worse. Keep tasks you want locked on a list nobody else can write
@@ -1576,7 +1576,7 @@ can read. Over CalDAV, iCloud still serves the task collections that existed *be
 usually none, sometimes a single orphaned list that the Reminders app itself no longer shows. So an
 iCloud account whose calendars sync perfectly can still offer no usable reminder list, and no
 setting on either side changes that. The reminders page states this on every iCloud
-account. If you want your Apple tasks in Yuvomi, keep them in a CalDAV-backed list (Nextcloud,
+account. If you want your Apple tasks in myCrib, keep them in a CalDAV-backed list (Nextcloud,
 Radicale, Baikal) and subscribe to it from the Reminders app's "Other" account rather than iCloud.
 
 </details>
@@ -1611,12 +1611,12 @@ stops working at once and a new secret has to be created in Entra and written to
 
 A push is not immediate: it happens on the shared sync run (`SYNC_INTERVAL_MINUTES`, 15 minutes by
 default), right after connecting, and whenever an admin triggers it manually. The same applies in
-reverse — deleting an event in Yuvomi removes it from Outlook on the *next* run, not instantly.
+reverse — deleting an event in myCrib removes it from Outlook on the *next* run, not instantly.
 
-Editing a pushed event in Outlook is pointless: Yuvomi is the source of truth and resets it to its
+Editing a pushed event in Outlook is pointless: myCrib is the source of truth and resets it to its
 own state on the next run, and re-creates it if you delete it there. To get rid of an event for
-good, delete it in Yuvomi. Note also that disconnecting an account leaves everything already
-pushed behind in Outlook — clear those events in Yuvomi *before* disconnecting, or delete them by
+good, delete it in myCrib. Note also that disconnecting an account leaves everything already
+pushed behind in Outlook — clear those events in myCrib *before* disconnecting, or delete them by
 hand in Outlook afterwards.
 
 </details>
@@ -1626,7 +1626,7 @@ hand in Outlook afterwards.
 
 Fixed in v2.47.0 (#883). Update and run a sync; the missing events arrive on the next pass.
 
-Before that, Yuvomi discarded any calendar object whose URL did not contain `.ics`. That extension
+Before that, myCrib discarded any calendar object whose URL did not contain `.ics`. That extension
 is pure convention - RFC 4791 prescribes no name for the object resource, and a server is free to
 assign its own. Stalwart, for instance, does so for everything created over JMAP (`NZtPkIOMoK`),
 while objects written by a CalDAV `PUT` keep the client-chosen `<uid>.ics`. In the same calendar,

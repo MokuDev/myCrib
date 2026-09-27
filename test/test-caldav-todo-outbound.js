@@ -11,7 +11,7 @@
  *          - Erledigt liest jeder Client woanders ab: STATUS, COMPLETED und
  *            PERCENT-COMPLETE müssen zusammen wandern - und COMPLETED beim
  *            Wiederöffnen verschwinden, sonst bleibt die Aufgabe erledigt.
- *          - Yuvomi kennt vier Prioritätsstufen und vier Status, VTODO drei
+ *          - myCrib kennt vier Prioritätsstufen und vier Status, VTODO drei
  *            Bänder und kein „in Arbeit". Der Inbound darf die feineren lokalen
  *            Angaben nicht bei jedem Lauf plattmachen.
  *          - Der Inbound darf weder eine noch nicht gepushte Bearbeitung
@@ -268,7 +268,7 @@ test('patchICSTodo tauscht nur die verwalteten Properties', () => {
   assert.ok(out.includes('PERCENT-COMPLETE:100'));
   assert.ok(/COMPLETED:\d{8}T\d{6}Z/.test(out));
 
-  // Alles, was Yuvomi nicht kennt, bleibt Zeichen für Zeichen stehen.
+  // Alles, was myCrib nicht kennt, bleibt Zeichen für Zeichen stehen.
   assert.ok(out.includes('X-APPLE-SORT-ORDER:12'), 'fremde Property bleibt');
   // Ohne geladene Tags gilt CATEGORIES als unbekannt, nicht als leer (#586) -
   // sonst löschte jeder Aufrufer mit einer rohen Zeile die Tags des Servers.
@@ -958,14 +958,14 @@ test('Der Push eines Einkaufspostens fasst CATEGORIES nicht an', () => {
   // Der Einkauf spiegelt CATEGORIES nur herein (#586): er zeigt die Etiketten
   // der Quellliste, verwaltet sie aber nicht. Nähme icsFieldsForShoppingItem
   // CATEGORIES auf, löschte jeder Haken auf einem Posten die Tags, die der
-  // Server kennt und Yuvomi nie gesehen hat - genau der Fehler, den die
+  // Server kennt und myCrib nie gesehen hat - genau der Fehler, den die
   // Aufgaben-Seite nur vermeiden darf, weil sie die Liste vollständig führt.
   const fields = icsFieldsForShoppingItem({ id: 1, name: 'Milch', is_checked: 0 });
   assert.ok(!('CATEGORIES' in fields),
     'Ein Feld, das nicht im Patch steht, lässt die Property auf dem Server unberührt');
 });
 
-// ── Anlegen: Yuvomi → Server (#695) ─────────────────────────────────────────────
+// ── Anlegen: myCrib → Server (#695) ─────────────────────────────────────────────
 
 /** Eine hier entstandene Aufgabe mit gewaehltem Ziel. */
 function insertLocalTask({ accountId, listUrl = LIST_URL, ...fields } = {}) {
@@ -1134,7 +1134,7 @@ test('Eine Liste, die auf den Einkauf zeigt, nimmt keine Aufgaben an', async () 
 // angelegter Artikel blieb aber fuer immer lokal - die Liste lief nach jedem
 // neuen Eintrag auseinander, obwohl die Oberflaeche einen Zwei-Wege-Sync
 // verspricht. Anders als eine Aufgabe traegt ein Artikel kein eigenes Ziel:
-// die Zuordnung Server-Liste <-> Yuvomi-Liste IST die Zielangabe.
+// die Zuordnung Server-Liste <-> myCrib-Liste IST die Zielangabe.
 // ════════════════════════════════════════════════════════════════════════════════
 
 function insertShoppingList(name = 'Einkauf') {

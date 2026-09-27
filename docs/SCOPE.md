@@ -1,6 +1,6 @@
-# What Yuvomi will not become
+# What myCrib will not become
 
-Yuvomi is maintained by one person, and every integration in the core is a promise without
+myCrib is maintained by one person, and every integration in the core is a promise without
 an end date. Saying no to the right things is what keeps the rest working. This page collects
 the boundaries that come up again and again, so that a request does not have to be argued
 from scratch every time - and so that a "no" arrives with a reason and with the condition
@@ -10,7 +10,7 @@ Three kinds of answer live here:
 
 - **Not this way.** The goal is right, the proposed route is not. There is usually another
   route on this page.
-- **Not here.** It belongs next to Yuvomi rather than inside it - as a third-party module
+- **Not here.** It belongs next to myCrib rather than inside it - as a third-party module
   against an unmodified image. See [MODULES.md](../MODULES.md).
 - **Not at all.** Exactly two things in the product: multi-tenancy (#611) and parcel
   tracking (#378). Section 4, about how the project is run rather than what it builds, adds one
@@ -22,7 +22,7 @@ scope is built, made once so they are not argued again, live in [DECISIONS.md](D
 
 ---
 
-## Who Yuvomi is for
+## Who myCrib is for
 
 **One household, on a server that household owns.** A family, a couple, or one person; in
 practice two to six people, and the design is shaped around that number rather than capped at
@@ -36,7 +36,7 @@ login of their own.
 What it is not designed for follows from the same shape: a club or an association, a shared flat
 whose residents change every semester, a landlord with several properties, or anyone who needs
 one instance to keep two households apart. Each of those needs the multi-tenancy that section
-"Not at all" above declines, or a membership model that expects strangers. It is not that Yuvomi
+"Not at all" above declines, or a membership model that expects strangers. It is not that myCrib
 would break at seven people; it is that every decision about what a member may see was made for
 a household, and would be the wrong decision for a group.
 
@@ -44,7 +44,7 @@ a household, and would be the wrong decision for a group.
 
 ## 1. Bank connections and other finance apps' data
 
-**Yuvomi does not connect to your bank, and does not adopt another finance app's data
+**myCrib does not connect to your bank, and does not adopt another finance app's data
 engine.** Neither is a matter of effort; both are a matter of shape.
 
 ### Live bank access is licensed, and the licence assumes a company
@@ -52,7 +52,7 @@ engine.** Neither is a matter of effort; both are a matter of shape.
 Reading account data means going through PSD2 / open banking, and that access is licensed:
 either the software provider holds an AISP licence, or it runs through an aggregator -
 GoCardless Bank Account Data, Plaid, Akahu, Enable Banking and friends. The licence does
-assume **one company running one service for many users**, and Yuvomi is the opposite
+assume **one company running one service for many users**, and myCrib is the opposite
 shape: everybody runs their own instance and there is no server of ours in the middle, so
 there is no set of credentials that could ship with the app.
 
@@ -69,9 +69,9 @@ answer is the same: this belongs in a sidecar, where #746 already does bank feed
 ### Another app's sync engine is a second data runtime
 
 Actual Budget is the recurring example, and a fair one: it answers a different question
-than Yuvomi's Budget module does, and sitting next to it is sensible. But Actual has no
+than myCrib's Budget module does, and sitting next to it is sensible. But Actual has no
 ordinary HTTP API. Integrations go through `@actual-app/api`, a Node package that opens the
-**local** budget file and runs Actual's own sync engine alongside Yuvomi. That means a
+**local** budget file and runs Actual's own sync engine alongside myCrib. That means a
 second data runtime next to a synchronous `better-sqlite3` backend, two sources of truth
 with the migration and conflict handling that implies, and a release cycle where their
 breaking change becomes a broken module here. (#834, #563)
@@ -90,11 +90,11 @@ that works for every bank rather than the subset an aggregator covers: **import 
 file your bank hands you**, with a column mapping you set once. Its shape was settled in
 #866 and is tracked as #1000:
 
-- **A mapping is saved and shareable - Yuvomi ships no bank list.** This is about
-  maintenance, not comfort. If Yuvomi ships bank profiles, every missing bank is an issue
-  against Yuvomi and that queue never ends. If a mapping is something you save after your
+- **A mapping is saved and shareable - myCrib ships no bank list.** This is about
+  maintenance, not comfort. If myCrib ships bank profiles, every missing bank is an issue
+  against myCrib and that queue never ends. If a mapping is something you save after your
   first import and can export, a community repository is people helping each other and
-  Yuvomi stays out of it. Same benefit, none of the ownership.
+  myCrib stays out of it. Same benefit, none of the ownership.
 - **A saved mapping keys on the header row**, since that is what identifies the format
   anyway.
 - **Duplicates** are caught by a fingerprint over the fields you choose, hashed when there
@@ -107,13 +107,13 @@ file your bank hands you**, with a column mapping you set once. Its shape was se
   mapping step asks which *column* means what, and JSON has no columns, it has nesting -
   that is a path expression and a different feature. OFX stays out for its own reason, that
   a half-implementation of a bank format is worse than none.
-- **The acceptance test needs no bank:** Yuvomi must read back what
+- **The acceptance test needs no bank:** myCrib must read back what
   `GET /api/v1/budget/export` writes, with no mapping and no configuration.
 
 ### If you want live bank data today
 
 That is what a sidecar is for. @JakeTheRabbit built exactly this against an unmodified
-Yuvomi image - encrypted token storage, a scheduler and a bank API, talking to Yuvomi
+myCrib image - encrypted token storage, a scheduler and a bank API, talking to myCrib
 through `/api/v1` and the `modules/` directory, without patching the core or writing to the
 database. See #746 and [MODULES.md](../MODULES.md).
 
@@ -121,7 +121,7 @@ database. See #746 and [MODULES.md](../MODULES.md).
 
 ## 2. Integrations with other people's services
 
-**Yuvomi does not take on a permanent binding to somebody else's cloud in the core.** Every
+**myCrib does not take on a permanent binding to somebody else's cloud in the core.** Every
 such integration brings a token store, a scheduler, an auth flow, rate limits and a
 breaking change somebody else decides on - and once it exists, keeping it alive is a
 commitment without an end date for a project one person maintains.
@@ -131,14 +131,14 @@ the Google and Fitbit ecosystem, the one on Apple Health and the next one on som
 each need their own integration. Two hard-coded providers serve two households; a documented
 API and a scoped token serve all of them.
 
-### The shape that works: Yuvomi stays the server, the bridge is a client
+### The shape that works: myCrib stays the server, the bridge is a client
 
 The API token system has per-area scopes, so a bridge can be granted exactly the endpoints
 it needs and nothing else. Every provider then becomes somebody's small tool rather than a
 permanent fixture in this repository.
 
 **This is a route, not a brush-off.** @JakeTheRabbit built a sidecar platform against an
-*unmodified* Yuvomi image - encrypted token storage, a scheduler and a bank API, all through
+*unmodified* myCrib image - encrypted token storage, a scheduler and a bank API, all through
 `/api/v1` and the `modules/` directory, with no core patch and no second writer on
 `yuvomi.db` (#746). Since v2.63.0 a third-party module also has the same surfaces a core
 module has - widgets, `ext:<module-id>` permissions, an API prefix, a locale chain - and
@@ -181,7 +181,7 @@ deletions cannot be learned at all. Tracked as #1002.
   correctly pointed out you can type nutrition off the packaging, no outside server
   involved. The reason is that a field only earns its place if it stays true without
   anybody tending it. A price is a fact about a purchase and stays true forever; nutrition
-  is a fact about a *product*, and manufacturers change recipes and package sizes. Yuvomi
+  is a fact about a *product*, and manufacturers change recipes and package sizes. myCrib
   would be asking a family to hand-maintain a product catalogue, and a half-filled table
   that looks like an answer is worse than no table. The price on a shopping item is the
   part that fits, and that part is wanted.
@@ -209,7 +209,7 @@ deletions cannot be learned at all. Tracked as #1002.
   copies.
 
   **The route that works today** is the usual one in CalDAV: a shared family calendar that everybody
-  subscribes to, set as the target for such events. That also matches how Yuvomi reads an event
+  subscribes to, set as the target for such events. That also matches how myCrib reads an event
   with several people on it, as a family event. Two routes stay out even if this comes back:
   matching copies by date, time and title, which stores a guessed identity (entry 7 in
   [DECISIONS.md](DECISIONS.md)), and a fingerprint in the notes field, because `description` is a
@@ -220,7 +220,7 @@ deletions cannot be learned at all. Tracked as #1002.
 
 ## 3. Dependencies
 
-The rule is often stated as "Yuvomi has no dependencies". That is not true, and stating it
+The rule is often stated as "myCrib has no dependencies". That is not true, and stating it
 that way has cost more than one request a proper answer. What is true splits in two:
 
 - **In the browser: no runtime dependencies, and this half is absolute.** Not because
@@ -234,7 +234,7 @@ that way has cost more than one request a proper answer. What is true splits in 
 
 @aizaimosaou put the better formulation in #642: not "no dependencies", but *"only small,
 well-audited dependencies with a clear purpose"*. That is accurate, and it is already what
-the backend does. Writing every specialist domain in-house would make Yuvomi the maintainer
+the backend does. Writing every specialist domain in-house would make myCrib the maintainer
 of leap-month rules, per-country phone formats and PDF rendering, which is worse than
 depending on the people who do that for a living. `libphonenumber` is exactly that trade,
 already made, and vendored on both sides.
@@ -242,7 +242,7 @@ already made, and vendored on both sides.
 So a proposal does not have to argue that a dependency is permitted. It has to answer four
 questions:
 
-1. **Would writing it ourselves make Yuvomi the maintainer of a specialist domain?** If
+1. **Would writing it ourselves make myCrib the maintainer of a specialist domain?** If
    yes, a vendored library is usually the cheaper long-term answer, not the more expensive
    one.
 2. **Does it run in the browser?** Then it is hand-copied into `public/vendor/` with its
@@ -298,7 +298,7 @@ argument.
   into a copy of the reference without anyone seeing it. Translations arrive as pull requests
   against the files. *Opens with:* a platform that runs the repository's checks before it
   writes.
-- **No hosted demo.** Yuvomi's promise is that a household's data stays on the household's
+- **No hosted demo.** myCrib's promise is that a household's data stays on the household's
   machine; a public instance filled with a fictional family's health notes and finances would
   be the opposite of that promise as a first impression, and it would be one more server to
   keep patched. What exists instead is a seed that fills a fresh installation with a realistic

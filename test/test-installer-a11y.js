@@ -634,7 +634,7 @@ test('der Inline-Fallback stimmt Wert fuer Wert mit tokens.css ueberein', () => 
  *
  * Der Erweitert-Schritt trug 18 Entscheidungspunkte auf einem Bildschirm, der
  * zweitgroesste 12 (Critique 2026-08-15). Er ist entlang einer Frage geteilt
- * worden - wo liegen Daten (Speicher) gegen womit verbindet sich Yuvomi
+ * worden - wo liegen Daten (Speicher) gegen womit verbindet sich myCrib
  * (Erweitert).
  *
  * Gezaehlt werden ENTSCHEIDUNGSPUNKTE, nicht Eingabefelder: ein Akkordeon-Kopf

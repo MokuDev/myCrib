@@ -3,7 +3,7 @@
  * Zweck: Bestimmt fuer ein Event die DTSTART/DTEND-Werte samt Parametern und
  *        sagt, welche Zone dafuer ein VTIMEZONE braucht.
  *
- * WARUM ES DAS GIBT (#938). Ein Termin geht auf drei Wegen aus Yuvomi hinaus:
+ * WARUM ES DAS GIBT (#938). Ein Termin geht auf drei Wegen aus myCrib hinaus:
  * als Neuanlage ueber caldav-sync.js, als Neuanlage ueber apple-calendar.js und
  * als Aenderung ueber caldav-outbound.js/ics-patch.js. Alle drei schrieben ihre
  * Zeiten selbst, und alle drei schrieben sie fuer lokal angelegte Termine ohne

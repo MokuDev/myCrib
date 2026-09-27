@@ -51,7 +51,7 @@ function buildCalDAVICS(event, householdZone = null) {
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//CalDAV Sync//EN',
+    'PRODID:-//myCrib//CalDAV Sync//EN',
   ];
   // RFC 5545: ein TZID-Parameter braucht sein VTIMEZONE im selben VCALENDAR,
   // und zwar bevor es benutzt wird.
@@ -85,7 +85,7 @@ function buildCalDAVICS(event, householdZone = null) {
 // --------------------------------------------------------
 
 /**
- * UID eines Termins, den Yuvomi selbst hochgeladen hat (`oikos-<id>@oikos.local`,
+ * UID eines Termins, den myCrib selbst hochgeladen hat (`oikos-<id>@oikos.local`,
  * s. den Upload im Sync; ein `::`-Suffix fuer Einzelvorkommen folgt). `_` ist in
  * LIKE ein Platzhalter, im Muster steht keiner.
  */
@@ -876,7 +876,7 @@ async function runSync({ createClient } = {}) {
   // Migration hat alle bearbeiteten Zeilen geschuetzt, weil sie eine
   // eingebrannte Farbe von einer bewusst gewaehlten nicht trennen konnte: sie
   // sah nur die Zeile. Der Sync sieht mehr. Seit #897/#899 schreibt der
-  // Ausgang eine in Yuvomi gewaehlte Farbe als COLOR-Zeile auf den Server, und
+  // Ausgang eine in myCrib gewaehlte Farbe als COLOR-Zeile auf den Server, und
   // der Inbound liest sie als Eigenfarbe - eine Farbe, die dem Termin wirklich
   // gehoert, steht also am VEVENT. Fehlt dort die COLOR-Zeile und ist der
   // gespeicherte Wert genau die Farbe eines Kalenders DIESES Kontos, bleibt als
@@ -970,7 +970,7 @@ async function runSync({ createClient } = {}) {
       const coloredUids = new Set();
       const changedIds = new Set();
 
-      // Inbound sync: CalDAV → Yuvomi
+      // Inbound sync: CalDAV → myCrib
       let accountEventCount = 0;
       let accountChangedCount = 0;
       let processedObjects = 0; // Zähler für den Event-Loop-Yield (#519)
@@ -1207,7 +1207,7 @@ async function runSync({ createClient } = {}) {
         log.error(`Outbound changes failed for account ${account.id}:`, err.message);
       }
 
-      // Outbound sync: Yuvomi → CalDAV (events with target_caldav_account_id)
+      // Outbound sync: myCrib → CalDAV (events with target_caldav_account_id)
       const localEvents = db.get().prepare(`
         SELECT * FROM calendar_events
         WHERE external_source = 'local' AND target_caldav_account_id = ?

@@ -1,7 +1,7 @@
 /**
  * Test: ausgehender CalDAV/Apple-Sync für Löschungen, Änderungen und Umzüge (#593)
  * Zweck: Wie zuvor bei Google kannte der CalDAV- und der Apple-Outbound nur das
- *        Anlegen. Ein bereits synchronisierter Termin liess sich in Yuvomi löschen
+ *        Anlegen. Ein bereits synchronisierter Termin liess sich in myCrib löschen
  *        oder bearbeiten, ohne dass davon je etwas auf dem Server ankam.
  *
  *        CalDAV unterscheidet sich dabei grundlegend von Google:
@@ -163,7 +163,7 @@ test('der Patch tauscht nur die verwalteten Properties aus', () => {
   assert.doesNotMatch(out, /SUMMARY:Alter Titel/);
 });
 
-test('alles, was Yuvomi nicht kennt, überlebt den Patch', () => {
+test('alles, was myCrib nicht kennt, überlebt den Patch', () => {
   const out = patchICSEvent(serverObject('b@t'), 'b@t', { SUMMARY: 'Neu' });
 
   assert.match(out, /ATTENDEE;CN=Maria:mailto:maria@example.com/, 'Teilnehmer');
@@ -420,7 +420,7 @@ test('kein Farbname stammt aus CSS Color Level 4 - RFC 7986 kennt nur Level 3', 
   }
 });
 
-test('jede Farbe der Yuvomi-Palette findet einen Namen, den der eigene Parser zurueckliest', () => {
+test('jede Farbe der myCrib-Palette findet einen Namen, den der eigene Parser zurueckliest', () => {
   // Die Palette aus public/pages/calendar.js. Sie steht hier als Kopie, weil der
   // Server die Frontend-Palette nicht importieren darf (Schichtgrenze). Driftet sie,
   // meldet dieser Test nur den Fall, auf den es ankommt: eine Farbe, die keinen Namen
@@ -893,7 +893,7 @@ test('eine Umfaerbung erreicht den Server, statt einen leeren PUT zu kosten', as
 test('eine Bearbeitung ohne Farbwahl laesst die des Servers stehen', async () => {
   // Der Repro aus der Review von #898: ein Termin kommt ohne COLOR herein (lokal
   // null), der Nutzer aendert nur den TITEL, und danach faerbt ein anderer
-  // Client ihn auf dem Server ein. Yuvomi erfaehrt davon zwischen Bearbeitung
+  // Client ihn auf dem Server ein. myCrib erfaehrt davon zwischen Bearbeitung
   // und Push nichts. Ginge hier ein pauschales null hinaus, raeumte die
   // Titelaenderung eine fremde Farbe ab - vor #899 sogar dauerhaft, weil das
   // Gatter des Inbound an user_modified hing und sie nie zurueckholte.

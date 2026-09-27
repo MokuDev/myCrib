@@ -1,6 +1,6 @@
 /**
  * Module: Third-party module registry
- * Purpose: Discover Yuvomi modules from /modules, validate manifests, and expose enabled client modules.
+ * Purpose: Discover myCrib modules from /modules, validate manifests, and expose enabled client modules.
  * Dependencies: node:fs/promises, server/db.js
  */
 
@@ -98,7 +98,7 @@ export function normalizeManifest(raw, folderName) {
   // kann - sie beschreiben genau dieses Format.
   //
   // EINE ZU HOHE ZAHL WIRD ABGEWIESEN, statt teilweise gelesen zu werden. Ein
-  // Manifest fuer ein Format, das diese Yuvomi-Fassung nicht kennt, halb zu
+  // Manifest fuer ein Format, das diese myCrib-Fassung nicht kennt, halb zu
   // laden hiesse, Felder stillschweigend zu ignorieren, die es fuer wesentlich
   // haelt - und der Betreiber saehe ein Modul, das laeuft und etwas anderes
   // tut als beschrieben. Die Fehlermeldung nennt beide Zahlen, damit klar ist,
@@ -112,8 +112,8 @@ export function normalizeManifest(raw, folderName) {
   }
   if (manifestVersion > SUPPORTED_MANIFEST_VERSION) {
     throw new Error(
-      `module.json declares manifestVersion ${manifestVersion}, but this Yuvomi supports up to `
-      + `${SUPPORTED_MANIFEST_VERSION}. Update Yuvomi, or use a build of the module for this version.`,
+      `module.json declares manifestVersion ${manifestVersion}, but this myCrib supports up to `
+      + `${SUPPORTED_MANIFEST_VERSION}. Update myCrib, or use a build of the module for this version.`,
     );
   }
 

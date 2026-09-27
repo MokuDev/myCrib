@@ -7813,7 +7813,7 @@ function recurringScopeChoice({ action, event }) {
  * Termin" / „dieser und folgende" / „ganze Serie"; Einzeltermine werden direkt
  * gelöscht (der Undo-Toast trägt die Rücknahme).
  *
- * Externe Serien können die Auswahl nicht anbieten: Yuvomi kann eine Serie, die
+ * Externe Serien können die Auswahl nicht anbieten: myCrib kann eine Serie, die
  * einem anderen Kalender gehört, nicht lokal aufteilen - ein ausgenommenes
  * Vorkommen käme beim nächsten Sync zurück. Gelöscht wird deshalb die ganze
  * Serie. Das ist richtig, aber es wortlos zu tun war es nicht: wer im Monat auf
@@ -7838,7 +7838,7 @@ function recurringScopeChoice({ action, event }) {
  *   durch - aber eben nur meistens: `acceptsOutbound` verlangt eine schreibende
  *   Verbindung, und ein Google-Konto im Nur-Lesen-Modus oder ein entferntes
  *   CalDAV-Konto hat keine. Der Dialog sagt deshalb NICHT mehr, dass die Serie
- *   auch im Quellkalender fällt; er sagt, was Yuvomi garantieren kann - dass
+ *   auch im Quellkalender fällt; er sagt, was myCrib garantieren kann - dass
  *   alle Vorkommen fallen, nicht nur das angetippte. Das ist die Warnung, um
  *   die es hier geht. Alles Weitere wüsste erst der Server, und dafür eine
  *   Auskunft durch die Leseroute zu ziehen, wäre für eine Textnuance ein zu

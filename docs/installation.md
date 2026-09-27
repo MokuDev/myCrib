@@ -293,13 +293,16 @@ That prints **two** values: paste one as `SESSION_SECRET` and the other as `DB_E
 docker compose up -d
 ```
 
-Docker pulls `ghcr.io/ulsklyc/yuvomi:latest` automatically. No build step, no Node.js installation needed.
+Docker pulls `ghcr.io/mokudev/mycrib:latest` automatically. No build step, no Node.js installation needed.
 
 > **Pinning a version.** Every release is also published under immutable tags:
-> `2.69.1` (exact version), `2.69` (latest patch of that minor), plus a moving `main`
+> `1.0.0` (exact version), `1.0` (latest patch of that minor), plus a moving `main`
 > tag for the current development state. To pin production to a known-good release,
-> set `image: ghcr.io/ulsklyc/yuvomi:2.69.1` in your compose file and bump it
-> deliberately; `latest` always points at the newest release.
+> set `image: ghcr.io/mokudev/mycrib:1.0.0` in your compose file and bump it
+> deliberately; `latest` always points at the newest release. Note: these version tags
+> and `latest` only exist once a `vX.Y.Z` tag has actually been pushed to this
+> repository and built - before the first one, only the `main` and per-commit `sha-`
+> tags are published.
 
 > **Verifying what you pull.** Every image the publish workflow builds is signed at build
 > time with [cosign](https://github.com/sigstore/cosign), keyless, under the identity of
@@ -307,16 +310,16 @@ Docker pulls `ghcr.io/ulsklyc/yuvomi:latest` automatically. No build step, no No
 > image you are about to run is one GitHub built from a release tag of this repository:
 >
 > ```bash
-> cosign verify ghcr.io/ulsklyc/yuvomi:2.69.1 \
+> cosign verify ghcr.io/mokudev/mycrib:1.0.0 \
 >   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
->   --certificate-identity-regexp '^https://github.com/ulsklyc/yuvomi/.github/workflows/docker-publish.yml@refs/tags/v'
+>   --certificate-identity-regexp '^https://github.com/mokudev/mycrib/.github/workflows/docker-publish.yml@refs/tags/v'
 > ```
 >
 > A passing check prints the certificate's claims, including the tag it was built from;
 > anything else means the image is not one this repository released. The `main` tag is
-> signed too, under `refs/heads/main`, which the pattern above deliberately excludes. Tags
-> published before September 2026 carry no signature. Provenance and SBOM travel inside the
-> image: `docker buildx imagetools inspect ghcr.io/ulsklyc/yuvomi:2.69.1 --format '{{ json .Provenance }}'`.
+> signed too, under `refs/heads/main`, which the pattern above deliberately excludes.
+> Provenance and SBOM travel inside the image: `docker buildx imagetools inspect
+> ghcr.io/mokudev/mycrib:1.0.0 --format '{{ json .Provenance }}'`.
 
 Continue with [Step 4 — Verify](#4-verify-the-container-is-running).
 

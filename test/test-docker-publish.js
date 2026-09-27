@@ -75,11 +75,9 @@ test('CI tests the Node major the image runs on', () => {
   assert.ok(majors.includes(imageMajor), `CI matrix [${matrix}] must include the image's Node ${imageMajor}`);
 });
 
-test('the image carries provenance and an SBOM, and is signed by digest under both names', () => {
+test('the image carries provenance and an SBOM, and is signed by digest', () => {
   // Eine Signatur per TAG waere wertlos: das Tag kann nachtraeglich verschoben
-  // werden, der Digest nennt genau den Index, der eben gepusht wurde. Beide
-  // Bildnamen (yuvomi und der oikos-Spiegel) teilen ihn, also brauchen beide
-  // die Signatur - ein Legacy-Setup prueft sonst gegen ein unsigniertes Bild.
+  // werden, der Digest nennt genau den Index, der eben gepusht wurde.
   const buildStep = namedWorkflowStep(workflow, 'Build and push');
   assert.match(buildStep, /^\s+id: build$/m, 'the build step must expose its digest under a stable id');
   assert.match(buildStep, /^\s+provenance: true$/m);
@@ -88,10 +86,8 @@ test('the image carries provenance and an SBOM, and is signed by digest under bo
   const signStep = namedWorkflowStep(workflow, 'Sign the image');
   assert.match(signStep, /DIGEST: \$\{\{ steps\.build\.outputs\.digest \}\}/);
   const signs = signStep.match(/cosign sign --yes "[^"]*@\$\{DIGEST\}"/g) || [];
-  assert.equal(signs.length, 2, 'both image names must be signed by digest');
+  assert.equal(signs.length, 1, 'the image must be signed by digest');
   assert.ok(signs.some((l) => l.includes('${REGISTRY}/${IMAGE_NAME}@')), 'primary image signed');
-  assert.ok(signs.some((l) => l.includes('${MIRROR}@')), 'oikos mirror signed');
-  assert.match(signStep, /oikos|MIRROR/);
   assert.doesNotMatch(signStep, /cosign sign --yes "[^"]*:\$\{\{/, 'never sign by tag');
 
   const permissions = workflow.slice(workflow.indexOf('\npermissions:'), workflow.indexOf('\nenv:'));
@@ -122,6 +118,6 @@ test('the installation guide verifies against this workflow identity', () => {
   const block = installation.match(/cosign verify[\s\S]*?refs\/tags\/v'/);
   assert.ok(block, 'installation.md must show a cosign verify command');
   assert.match(block[0], /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
-  assert.match(block[0], /--certificate-identity-regexp '\^https:\/\/github\.com\/ulsklyc\/yuvomi\/\.github\/workflows\/docker-publish\.yml@refs\/tags\/v'/);
+  assert.match(block[0], /--certificate-identity-regexp '\^https:\/\/github\.com\/mokudev\/mycrib\/\.github\/workflows\/docker-publish\.yml@refs\/tags\/v'/);
   assert.match(workflow, /^name: Docker Publish$/m);
 });

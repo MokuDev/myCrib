@@ -14,7 +14,7 @@
   <p>
     <a href="https://github.com/MokuDev/myCrib/releases"><img src="https://img.shields.io/github/v/release/MokuDev/myCrib?style=flat-square&color=6C3AED&label=release" alt="Latest release"></a>
     <a href="https://github.com/MokuDev/myCrib/stargazers"><img src="https://img.shields.io/github/stars/MokuDev/myCrib?style=flat-square&color=6C3AED&label=stars" alt="GitHub stars"></a>
-    <a href="https://github.com/ulsklyc/yuvomi/pkgs/container/yuvomi"><img src="https://img.shields.io/badge/ghcr.io-yuvomi-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker image"></a>
+    <a href="https://github.com/mokudev/mycrib/pkgs/container/mycrib"><img src="https://img.shields.io/badge/ghcr.io-mycrib-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker image"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT license"></a>
   </p>
 
@@ -127,7 +127,7 @@ Pick your way in: [Docker or Podman](#docker-or-podman) for full control, the
 [guided setup](#guided-setup) wizard in your browser, or your [NAS app store](#from-your-nas-app-store)
 without a terminal.
 
-- **Image** - `ghcr.io/ulsklyc/`<wbr>`yuvomi:latest`, about 500 MB. This fork does not publish its own image yet, so `docker-compose.yml` still pulls upstream's.
+- **Image** - `ghcr.io/mokudev/`<wbr>`mycrib:latest`, about 500 MB.
 - **Needs** - 256 MB RAM and one port, 3000 by default.
 - **Browsers** - everything as designed from Chrome and Edge 117, Firefox 129 and Safari 17.5. Down to Chrome 87, Firefox 79 and Safari 14.1 (iOS 14.5) it still starts and scrolls, with a plainer look and some features missing ([measured 21 September 2026](docs/installation.md#browser-support)).
 - **Writes** - four volumes you own: data, backups, modules, documents.

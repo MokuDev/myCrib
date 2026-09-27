@@ -760,7 +760,7 @@ test('Keine Gruppe mit `budget: read`: der Titel bleibt, „Erstelle eine Gruppe
 
 test('Geteilte Ausgaben: Kopfknopf und Gruppe-Anlegen haengen am Recht', () => {
   const render = fn(SPLIT_CODE, 'render');
-  // Eingebettet steht „Ausgabe hinzufuegen" im Budget-Kopf (#budget-add), den
+  // Eingebettet steht „Ausgabe hinzufuegen" im Budget-FAB (#fab-new-budget), den
   // CSS und addHandler bei `read` sperren; der Kopf fragt canAddSplitExpense().
   // Der Knopf der (heute nicht erreichten) eigenstaendigen Seite haengt weiter
   // am Recht.
@@ -1115,7 +1115,7 @@ test('Buchung: die Leseansicht zeigt jeden Wert des Bearbeiten-Dialogs', async (
     subcategory: 'power', account_id: 4, visibility: 'private', attachments: [beleg],
   });
   const werte = {
-    'budget.amountLabel': [[/id="bm-amount"[^>]*value="1014"/, /amount-type-btn--expenses amount-type-btn--active/], /^-1\.014,00\s€$/],
+    'budget.amountLabel': [[/id="bm-amount"[^>]*value="1014"/, /id="type-expense"[^>]*aria-checked="true"/], /^-1\.014,00\s€$/],
     'budget.detailDateLabel': [[/id="bm-date"\s+value="2026-06-03"/], /^2026-06-03$/],
     'budget.categoryLabel': [[/<option value="housing" selected>budget\.categoryHousing</], /^budget\.categoryHousing$/],
     'budget.subcategoryLabel': [[/<option value="power" selected>Strom</], /^Strom$/],

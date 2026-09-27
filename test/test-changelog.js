@@ -1,5 +1,5 @@
 /**
- * Tests: Live changelog parser/proxy.
+ * Tests: Changelog parser (liest CHANGELOG.md, keine externe Quelle mehr).
  * Ausführen: node --test test/test-changelog.js
  */
 
@@ -73,61 +73,6 @@ test('parseReleaseBody trennt den fettgedruckten Vorspann von der Begruendung', 
   assert.match(sections[0].items[0], /^The weather forecast was off by a day \(#851\)\./);
 });
 
-test('buildChangelogPayload marks current version when it appears in releases', () => {
-  const payload = __test.buildChangelogPayload([
-    { tag_name: 'v1.2.2', body: '- Newest release', html_url: 'https://example.test/latest' },
-    { tag_name: 'v1.2.1', body: '- Current release', html_url: 'https://example.test/current' },
-  ], '1.2.1');
-
-  assert.equal(payload.current_version, '1.2.1');
-  assert.equal(payload.latest_version, 'v1.2.2');
-  assert.equal(payload.current_in_releases, true);
-  assert.equal(payload.releases.length, 2);
-});
-
-test('buildChangelogPayload reports current version missing from releases', () => {
-  const payload = __test.buildChangelogPayload([
-    { tag_name: 'v0.88.1', body: '- Public release notes' },
-  ], '1.2.1');
-
-  assert.equal(payload.latest_version, 'v0.88.1');
-  assert.equal(payload.current_in_releases, false);
-});
-
-test('changelog router fetches and sanitizes GitHub release JSON', async () => {
-  const app = express();
-  app.use(buildRouter({
-    appVersion: '1.2.1',
-    now: () => 1000,
-    fetchFn: async (url, options) => {
-      assert.match(url, /api\.github\.com\/repos\/ulsklyc\/yuvomi\/releases/);
-      assert.equal(options.headers.Accept, 'application/vnd.github+json');
-      return {
-        ok: true,
-        json: async () => [
-          {
-            tag_name: 'v1.2.1',
-            body: '## Added\n- Live changelog\n\nFull Changelog: https://example.test',
-            html_url: 'https://github.com/ulsklyc/yuvomi/releases/tag/v1.2.1',
-          },
-        ],
-      };
-    },
-  }));
-
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
-  try {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.data.current_in_releases, true);
-    assert.equal(body.data.releases[0].sections[0].items[0], 'Live changelog');
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-});
-
 // --------------------------------------------------------
 // „Neu in deiner App" - die Auswahl der Releases (#496)
 // --------------------------------------------------------
@@ -175,7 +120,7 @@ test('default changelog router is an express router', () => {
 });
 
 // --------------------------------------------------------
-// Rueckfall auf die mitgelieferte CHANGELOG.md (#838)
+// Die mitgelieferte CHANGELOG.md ist die einzige Quelle
 // --------------------------------------------------------
 
 const SAMPLE_CHANGELOG = `# Changelog
@@ -223,32 +168,37 @@ test('die mitgelieferte CHANGELOG.md laesst sich lesen und parsen', () => {
   const releases = __test.parseChangelogFile(readFileSync(__test.CHANGELOG_PATH, 'utf8'));
 
   // Reichweiten-Nachweis: ein Parser, dessen Muster nicht mehr auf das echte
-  // Format passt, liefert sonst still eine leere Liste und der Rueckfall
-  // faellt auf nichts zurueck.
-  assert.ok(releases.length >= 10, `zu wenige Versionen geparst (${releases.length})`);
+  // Format passt, liefert sonst still eine leere Liste, und die Ansicht zeigt
+  // nichts an.
+  assert.ok(releases.length >= 1, `zu wenige Versionen geparst (${releases.length})`);
   assert.ok(releases.every((r) => /^\d+\.\d+\.\d+$/.test(r.version)),
     'ein Block traegt keine Versionsnummer');
   assert.ok(releases.every((r) => r.sections.length > 0),
     'ein Block hat keine Abschnitte');
 });
 
-test('faellt GitHub aus, kommt die mitgelieferte Datei statt 502', async () => {
+test('der Router liest die mitgelieferte Datei und cached das Ergebnis', async () => {
+  let reads = 0;
   const app = express();
   app.use(buildRouter({
     appVersion: '1.2.1',
-    now: () => 1000,
-    fetchFn: async () => { throw new Error('getaddrinfo ENOTFOUND api.github.com'); },
-    readChangelogFile: () => SAMPLE_CHANGELOG,
+    readChangelogFile: () => { reads++; return SAMPLE_CHANGELOG; },
   }));
 
   const server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   try {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
+    const first = await fetch(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(first.status, 200);
+    const body = await first.json();
     assert.equal(body.data.source, 'local');
     assert.equal(body.data.releases[0].version, '1.2.1');
+    assert.equal(reads, 1);
+
+    // Zweite Anfrage: dieselbe Datei aendert sich nicht zur Laufzeit, also
+    // kein erneutes Lesen.
+    await fetch(`http://127.0.0.1:${server.address().port}/`);
+    assert.equal(reads, 1);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -258,8 +208,6 @@ test('ohne mitgelieferte Datei bleibt es beim 502', async () => {
   const app = express();
   app.use(buildRouter({
     appVersion: '1.2.1',
-    now: () => 1000,
-    fetchFn: async () => { throw new Error('offline'); },
     readChangelogFile: () => { throw new Error('ENOENT'); },
   }));
 
@@ -268,44 +216,6 @@ test('ohne mitgelieferte Datei bleibt es beim 502', async () => {
   try {
     const res = await fetch(`http://127.0.0.1:${server.address().port}/`);
     assert.equal(res.status, 502);
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-});
-
-test('nach einem Fehlschlag wird GitHub eine Weile nicht erneut gefragt', async () => {
-  let versuche = 0;
-  let jetzt = 1000;
-  const app = express();
-  app.use(buildRouter({
-    appVersion: '1.2.1',
-    now: () => jetzt,
-    fetchFn: async () => { versuche++; throw new Error('offline'); },
-    readChangelogFile: () => SAMPLE_CHANGELOG,
-  }));
-
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise((resolve) => server.once('listening', resolve));
-  const hole = async () => {
-    const res = await fetch(`http://127.0.0.1:${server.address().port}/`);
-    return res.json();
-  };
-  try {
-    await hole();
-    assert.equal(versuche, 1);
-
-    // Ohne Sperre liefe jede weitere Anfrage wieder hinaus - bei sechzig
-    // unauthentifizierten Anfragen je Stunde und IP haelt das den Fehler
-    // aufrecht, statt ihn abzuwarten.
-    jetzt += 60 * 1000;
-    const zweite = await hole();
-    assert.equal(versuche, 1);
-    assert.equal(zweite.data.source, 'local');
-
-    // Nach Ablauf der Sperre wird es wieder versucht.
-    jetzt += 5 * 60 * 1000;
-    await hole();
-    assert.equal(versuche, 2);
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }

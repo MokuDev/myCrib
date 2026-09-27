@@ -36,6 +36,18 @@ test('GET /tokens.css liefert 200 + text/css aus public/styles', async () => {
   });
 });
 
+test('GET /icons/icon-192.png liefert 200 + image/png aus public/icons', async () => {
+  await withServer(async base => {
+    const r = await fetch(`${base}/icons/icon-192.png`);
+    assert.equal(r.status, 200);
+    assert.match(r.headers.get('content-type'), /image\/png/);
+    const body = Buffer.from(await r.arrayBuffer());
+    assert.ok(body.length > 0, 'icon-192.png kam leer zurück');
+    const onDisk = readFileSync(new URL('../public/icons/icon-192.png', import.meta.url));
+    assert.deepEqual(body, onDisk, 'ausgelieferte Datei weicht von public/icons/icon-192.png ab');
+  });
+});
+
 /**
  * HIER STANDEN ZWEI FONT-TESTS - einer sicherte der /fonts/-Route ihre 200 zu,
  * der andere haertete sie gegen Path-Traversal und Nicht-woff2.

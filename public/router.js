@@ -31,6 +31,7 @@ import { activityType } from '/utils/health-activity.js';
 import { buildHelpRows } from '/utils/help.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { triggerPageFab } from '/utils/fab.js';
+import { wireSheetDrag } from '/utils/sheet-drag.js';
 import {
   handleBackNavigation, closeAllOverlays, consumeOverlayMarker,
   pushOverlay, dropOverlay, attachOverlay,
@@ -2350,6 +2351,13 @@ function adoptPageFab() {
   // nur der Knopf um, bliebe die Mechanik im Scrollport zurück - der halbe
   // Umzug wäre schlimmer als keiner, weil er nach Erledigung aussieht.
   if (fresh) layer.replaceChildren(fresh.closest('.page-fab-group') ?? fresh);
+  // DER KOPF KANN NACH DEM FAB KOMMEN: eine Seite, die ihren Kopf erst nach
+  // ihren awaits baut, hatte beim ersten Aufruf keinen Slot - der FAB schwebt
+  // dann schon in der Ebene, und `#main-content` findet ihn nicht mehr. Die
+  // Ebene gehoert der aktuellen Seite (clearPageFab() beim Routenwechsel),
+  // also darf der schwebende Knopf hier nachdocken.
+  const floating = layer.querySelector('.page-fab');
+  if (floating && dockFabIntoToolbar(floating)) return null;
   return layer.querySelector('.page-fab');
 }
 
@@ -2378,12 +2386,10 @@ function adoptPageFab() {
  * Knopf stehen - sichtbar falsch statt unsichtbar uneinheitlich. Ein Guard in
  * test-frontend-audit hält dazu, dass jeder `.page-fab` das Attribut trägt.
  *
- * DREI SACHEN DOCKEN NICHT AN, jede aus ihrem eigenen Grund:
+ * ZWEI SACHEN DOCKEN NICHT AN, jede aus ihrem eigenen Grund:
  *   - eine .page-fab-group (das Speed-Dial der Übersicht): sie ist ein Menü,
  *     kein Knopf, und ihre Aktionsliste ist fixiert. Ein halber Umzug wäre
  *     schlimmer als keiner.
- *   - Module, die ihren eigenen .toolbar-new-btn mitbringen: sonst stünden
- *     zwei Primärknöpfe nebeneinander.
  *   - Module ohne Aktions-Slot im Kopf: dort bleibt der schwebende Knopf, bis
  *     ihr Kopf einen bekommt. Lieber ein Modul mit dem alten Weg als eines
  *     ohne Primäraktion.
@@ -2392,7 +2398,6 @@ function dockFabIntoToolbar(fab) {
   if (!isDesktopViewport()) return false;
   if (fab.closest('.page-fab-group')) return false;
   const main = document.getElementById('main-content');
-  if (main?.querySelector('.toolbar-new-btn')) return false;
   const slot = main?.querySelector('.page-toolbar__actions');
   if (!slot) return false;
   const label = fab.dataset.dockLabel;
@@ -2782,16 +2787,6 @@ function showHelpModal() {
     </div>
     <div class="modal-panel__body">
       <div class="shortcuts-list">${rows}</div>
-      <!-- Nutzerhandbuch aus der Community (#799). Es lebt in einem fremden
-           Repository und in fremder Regie - deshalb steht die Herkunft im
-           Linktext und nicht nur im Hinweis darunter: wer hier klickt,
-           verlaesst das Projekt, und das soll er vorher wissen. -->
-      <p class="help-guide">
-        <a href="https://kyrodan.github.io/yuvomi-docs/" target="_blank" rel="noopener noreferrer">
-          ${esc(t('help.guideLink'))}
-        </a>
-        <span class="help-guide__hint">${esc(t('help.guideHint'))}</span>
-      </p>
     </div>
   `);
 
@@ -3095,27 +3090,16 @@ function renderChangelog(panel, payload) {
   panel.querySelector('#changelog-current-version').textContent = versionText(currentVersion);
   panel.querySelector('#changelog-latest-version').textContent = versionText(latestVersion);
 
-  // Steht ein Update an, ist das die Nachricht - ob die laufende Version in der
-  // GitHub-Liste auftaucht, interessiert dann niemanden mehr.
-  //
-  // Der mitgelieferte Stand geht beidem vor: er kann per Konstruktion nichts
-  // ueber neuere Versionen wissen, also waere sowohl "Version X ist verfuegbar"
-  // als auch "diese Version steht in den GitHub-Releases" eine Aussage ueber
-  // etwas, das gerade niemand nachsehen konnte (#838).
-  const local = data.source === 'local';
-  const updateAvailable = !local && isNewerVersion(latestVersion, currentVersion);
+  // Der Server liest ausschliesslich die mitgelieferte CHANGELOG.md - er kann
+  // per Konstruktion nichts ueber eine neuere Version wissen, also waere
+  // "Version X ist verfuegbar" eine Aussage ueber etwas, das hier niemand
+  // nachsehen konnte. Die einzige offene Frage ist, ob der laufende Stand
+  // ueberhaupt einen eigenen Abschnitt hat.
   const note = panel.querySelector('#changelog-version-note');
-  if (local) {
-    note.textContent = t('changelog.offlineNotice');
-  } else if (updateAvailable) {
-    note.textContent = t('changelog.updateAvailable', { version: displayVersion(latestVersion) });
-  } else {
-    note.textContent = data.current_in_releases
-      ? t('changelog.currentFound')
-      : t('changelog.currentMissing');
-  }
-  note.classList.toggle('changelog-version-note--warning', local || (!updateAvailable && !data.current_in_releases));
-  note.classList.toggle('changelog-version-note--update', updateAvailable);
+  note.textContent = data.current_in_releases
+    ? t('changelog.ownChangelogNotice')
+    : t('changelog.currentMissing');
+  note.classList.toggle('changelog-version-note--warning', !data.current_in_releases);
 
   // Der Nutzer sieht die Liste gerade - der Punkt an der Navigation hat seinen
   // Zweck erfüllt und verschwindet, bis eine noch neuere Version erscheint.
@@ -3299,28 +3283,24 @@ function initMoreSheet(container, openSearch) {
     }
   });
 
-  /* WISCHEN SCHLIESST NUR VOM ANFANG DER LISTE AUS.
+  /* WISCHEN SCHLIESST NUR VOM ANFANG DER LISTE AUS - ODER VOM GRIFF.
    *
    * Vorher schloss jede Abwaertsbewegung ueber 60px das Blatt, egal wo sie
    * begann. Seit `.more-sheet__body` scrollt (die Obergrenze gegen den
    * Blattueberstand bei 320px), IST diese Geste auch das Zurueckscrollen in den
    * Gruppen: wer unten steht und nach oben zurueckwischt, bewegt den Finger
-   * abwaerts und schloss damit das Blatt (PR-Review #754).
+   * abwaerts und schloss damit das Blatt (PR-Review #754). Der Stand wird beim
+   * BEGINN der Geste gemerkt, nicht am Ende.
    *
-   * Der Stand wird beim BEGINN der Geste gemerkt, nicht am Ende: bis dahin hat
-   * der Scroller laengst reagiert und stuende auch nach einem echten
-   * Zieh-zum-Schliessen auf 0. */
-  let _touchStartY = 0;
-  let _touchStartAtTop = true;
-  sheet.addEventListener('touchstart', (e) => {
-    _touchStartY = e.touches[0].clientY;
-    const body = sheet.querySelector('.more-sheet__body');
-    _touchStartAtTop = !body || body.scrollTop <= 0;
-  }, { passive: true });
-  sheet.addEventListener('touchend', (e) => {
-    if (!_touchStartAtTop) return;
-    if (e.changedTouches[0].clientY - _touchStartY > 60) closeSheet();
-  }, { passive: true });
+   * Die Geste selbst ist seit der Re-Critique 2026-09-27 dieselbe wie am
+   * Dialog-Sheet (utils/sheet-drag.js): das Blatt geht 1:1 mit, schliesst ab
+   * 80px ODER bei einem Flick, federt sonst zurueck. Vorher entschied erst
+   * `touchend` ab 60px, und das Blatt stand waehrenddessen still. */
+  wireSheetDrag(sheet, {
+    scroller: () => sheet.querySelector('.more-sheet__body'),
+    onDismiss: () => closeSheet(),
+    resetAfterDismiss: true,
+  });
 
   sheet.addEventListener('click', (e) => {
     if (e.target.closest('[data-route]')) closeSheet({ restoreFocus: false });
@@ -4859,7 +4839,7 @@ observeNavCapsule();
 // hing an einem einzelnen `resize`, und blieb ein zweites aus, war die
 // Primäraktion des Moduls dauerhaft weg - dieselbe Falle wie beim
 // Scroll-Retract, den #634 entfernt hat. Der FAB ist der einzige Weg zum
-// Anlegen (`.toolbar-new-btn` ist überall ausgeblendet), also kostet ein
+// Anlegen (angedockt wird erst ab 1024px), also kostet ein
 // Falsch-Positiv hier das ganze Modul.
 //
 // Eine Tastatur ist offen, wenn ein Texteingabefeld den Fokus hat. Das ist

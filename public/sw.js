@@ -17,7 +17,7 @@
  *   → bypassCacheUntil (in-memory + Cache API für SW-Restart-Robustheit)
  */
 
-const APP_RELEASE        = '2.69.1';
+const APP_RELEASE        = '1.0.0';
 const APP_BUILD_REVISION = '__YUVOMI_BUILD_REVISION__';
 const CACHE_RELEASE      = `${APP_RELEASE}-${APP_BUILD_REVISION}`;
 const SHELL_CACHE        = `yuvomi-shell-${CACHE_RELEASE}`;
@@ -151,6 +151,7 @@ const APP_SHELL = [
   '/utils/health-meds.js',
   '/utils/health-nutrition.js',
   '/utils/health-overview.js',
+  '/utils/health-person-switcher.js',
   '/utils/health-prevention.js',
   '/utils/health-tabs.js',
   '/utils/health-vitals.js',
@@ -202,6 +203,8 @@ const APP_SHELL = [
   '/utils/schedule-tabs.js',
   '/utils/scroll-restore.js',
   '/utils/seal-pair.js',
+  '/utils/segment-indicator.js',
+  '/utils/sheet-drag.js',
   '/utils/shopping-categories.js',
   '/utils/skeleton.js',
   '/utils/sub-tabs.js',

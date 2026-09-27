@@ -3928,12 +3928,15 @@ describe('Sonde 18 - am Scroll-Ende liegt nichts Bedienbares unter dem FAB', () 
          * der Zahl der Einstellungsseiten, nicht am FAB. Ein Modul, das seinen
          * FAB verliert, faellt trotzdem auf: es fehlt dann in einem der beiden
          * Toepfe hier. */
-        /* Einkauf dockt seit der Kopfregel mobil (2026-09-26) an: vorher hatte er am
-         * Desktop gar keine Kopfaktion und zaehlte als eingeklappt. */
-        assert.deepEqual({ angedockt, eingeklappt }, { angedockt: 6, eingeklappt: 5 },
-          'Erwartet auf dem Zeiger: 6 FABs in der Kopfleiste (Vorrat, Mahlzeiten, Rezepte, Einkauf, '
-          + 'Geburtstage, Dokumente) und 5 eingeklappte (dort traegt der Modulkopf seinen eigenen '
-          + `Knopf). Gezaehlt wurden ${angedockt} und ${eingeklappt}, dazu ${ohneFab} Seiten ohne FAB. `
+        /* Seit dem Component-Canon-Durchgang (2026-09-27, #1483) dockt der Add-Button
+         * ueberall an: "der Add-Button ist derselbe ueberall und sagt, was er
+         * hinzufuegt" ersetzt den handgebauten Kopf-Knopf, den einzelne Module vorher
+         * fuehrten. Die fruehere Zweiteilung angedockt/eingeklappt gibt es damit nicht
+         * mehr - eingeklappt war der Zustand jener handgebauten Knoepfe. */
+        assert.deepEqual({ angedockt, eingeklappt }, { angedockt: 11, eingeklappt: 0 },
+          'Erwartet auf dem Zeiger: alle 11 Module mit eigener Neu-Aktion docken sie im Kopf an, '
+          + `keines klappt mehr ein. Gezaehlt wurden ${angedockt} angedockt und ${eingeklappt} `
+          + `eingeklappt, dazu ${ohneFab} Seiten ohne FAB. `
           + 'Aendert sich das, aendert sich die Reichweite dieser Sonde.');
       } else {
         // 15 Routen minus die drei ohne FAB.

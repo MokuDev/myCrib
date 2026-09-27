@@ -753,9 +753,16 @@ function renderTabs(container) {
     // Der Zähler ist aria-hidden, sonst klebt er am Buttonnamen („Einkauf23");
     // die Ansage steht als aria-label auf dem Tab selbst - dasselbe Muster wie
     // setSubTabBadge. „0 offene Artikel" deckt auch den ✓-Zustand ehrlich ab.
+    //
+    // DIE WAHL WIRD ANGESAGT, NICHT NUR GEFAERBT (R8 H11): bis dahin trug nur
+    // `list-tab--active` den Zustand, und ein Screenreader las fuenf gleiche
+    // Knoepfe. Die Leiste ist `role="group"` (sie haelt auch „Neue Liste"),
+    // kein Tablist - `aria-selected` waere dort ungueltig, `aria-current`
+    // sagt genau „das ist die gezeigte Liste".
+    const active = list.id === state.activeListId;
     return `
-      <button class="list-tab ${list.id === state.activeListId ? 'list-tab--active' : ''}"
-              data-action="switch-list" data-id="${list.id}"
+      <button type="button" class="list-tab ${active ? 'list-tab--active' : ''}"
+              data-action="switch-list" data-id="${list.id}"${active ? ' aria-current="true"' : ''}
               ${list.item_total > 0 ? `aria-label="${esc(list.name)}, ${esc(t('nav.shoppingOpen', { count: unchecked }))}"` : ''}>
         ${esc(list.name)}
         ${list.item_total > 0 ? `<span class="list-tab__count" aria-hidden="true">${unchecked > 0 ? unchecked : '✓'}</span>` : ''}
@@ -3595,8 +3602,10 @@ export async function render(container, { user, signal: routeSignal = null } = {
            aber OHNE Titel: Zeile 2 des Kuechenkopfs. Kontext sind die
            Listen-Kapseln (sie nennen die Liste), am Ende das Werkzeugmenue
            der Liste; am Desktop dockt der Router davor den Primaerknopf an,
-           wie in den drei Geschwister-Tabs. -->
-      <div class="page-toolbar page-toolbar--in-group page-toolbar--narrow shopping-toolbar">
+           wie in den drei Geschwister-Tabs. Kein --narrow (Re-Critique
+           2026-09-27, D3): der Kopf endet an der Kuechen-Leiste, damit die
+           Primaeraktion in allen vier Tabs an derselben Stelle steht. -->
+      <div class="page-toolbar page-toolbar--in-group shopping-toolbar">
         <div class="page-toolbar__center">
           <div class="list-tabs-bar" id="list-tabs-bar" role="group" aria-label="${t('shopping.listsLabel')}"></div>
         </div>

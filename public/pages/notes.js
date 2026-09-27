@@ -17,6 +17,7 @@ import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
 import { findPageFab } from '/utils/fab.js';
+import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { emptyStateHTML } from '/utils/empty-state.js';
 import { AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import {
@@ -238,7 +239,7 @@ export async function render(container, { user, signal }) {
     <div class="notes-page app-page app-page--full" data-composition="full">
       <div class="page-toolbar notes-toolbar">
         <h1 class="page-toolbar__title">${t('notes.title')}</h1>
-        ${renderPageSearch({ id: 'notes-search', label: t('notes.searchPlaceholder'), placeholder: t('notes.searchPlaceholder'), value: state.filterQuery, clearLabel: t('common.searchClear'), className: 'notes-toolbar__search' })}
+        ${renderPageSearch({ id: 'notes-search', label: t('notes.searchPlaceholder'), placeholder: t('notes.searchPlaceholder'), value: state.filterQuery, clearLabel: t('common.searchClear'), className: 'notes-toolbar__search page-toolbar__center' })}
         ${/* KATEGORIEN VERWALTEN STEHT IM WERKZEUGMENUE (Kopfregel mobil,
               2026-09-26): am Desktop war es ein 131px-Textknopf neben der
               Suche, mobil ein loses Icon - Verwaltung, die im Kopf so laut
@@ -246,16 +247,19 @@ export async function render(container, { user, signal }) {
               `notes-manage-categories`: an ihr blendet die Shell den
               Verwaltungsweg bei Nur-lesen aus (layout.css), auch wenn sich das
               Recht ohne Neuladen aendert. */ ''}
-        ${readOnly() ? '' : `
-        <div class="notes-manage-categories notes-toolbar__tools">
-          ${pageToolsMenuHtml({ id: 'notes-tools-menu', label: t('common.moreActions'), items: [
-            { action: 'manage-categories', label: t('category.manageTitle'), icon: 'tags' },
-          ] })}
-        </div>`}
-        <button class="btn btn--primary toolbar-new-btn" id="notes-add-btn" aria-label="${t('notes.addNoteLabel')}">
-          <i data-lucide="plus" class="icon-md" aria-hidden="true"></i>
-          <span class="toolbar-new-btn__label">${t('newLabel.notes')}</span>
-        </button>
+        ${/* DER AKTIONS-SLOT DES KANONKOPFS (Re-Critique 2026-09-27, D3): in
+              ihn dockt die Shell am Zeigergeraet den FAB mit seinem Nomen an
+              (dockFabIntoToolbar) - ohne Slot schwebte er weiter. Er steht
+              auch bei Nur-lesen, dann leer; unter 1024px blendet die Shell
+              einen leeren Slot aus. */ ''}
+        <div class="page-toolbar__actions">
+          ${readOnly() ? '' : `
+          <div class="notes-manage-categories notes-toolbar__tools">
+            ${pageToolsMenuHtml({ id: 'notes-tools-menu', label: t('common.moreActions'), items: [
+              { action: 'manage-categories', label: t('category.manageTitle'), icon: 'tags' },
+            ] })}
+          </div>`}
+        </div>
       </div>
       <div class="notes-scroll page-scrollport">
         <!-- DIE CHIPREIHE IST DAS ERSTE KIND DES PORTS (Kopfregel mobil,
@@ -325,13 +329,10 @@ export async function render(container, { user, signal }) {
   const filterFade = wireScrollFade(container.querySelector('#notes-filters'));
   signal?.addEventListener('abort', () => filterFade.destroy(), { once: true });
 
-  // Beide Anlegewege sind per CSS ausgeblendet (html[data-module-readonly]),
+  // Der Anlegeweg ist per CSS ausgeblendet (html[data-module-readonly]),
   // der Handler bleibt trotzdem gesperrt: ausgeblendet ist nicht dasselbe wie
   // unerreichbar (derselbe Satz wie am FAB in waste.js).
   const addHandler = () => { if (!readOnly()) openNoteModal({ mode: 'create' }); };
-  // #notes-add-btn ist per .toolbar-new-btn global ausgeblendet (FAB übernimmt),
-  // bleibt aber als einheitliches Modul-Muster erhalten (frontend-audit 1.9).
-  _container.querySelector('#notes-add-btn').addEventListener('click', addHandler);
   // Das Werkzeugmenue: Positionierung, Light-Dismiss und Pfeiltasten aus der
   // geteilten Popover-Mechanik, der Klick ueber `data-action` am Kopf.
   installPopoverMenus(_container);
@@ -506,10 +507,15 @@ function renderGrid() {
   const rest   = visible.filter((n) => !n.pinned);
   const heading = (label) => `<h2 class="notes-group__title u-section-title">${label}</h2>`;
 
-  const html = (pinned.length && rest.length)
-    ? heading(t('notes.groupPinned')) + pinned.map(renderNoteCard).join('')
-      + heading(t('notes.groupOthers')) + rest.map(renderNoteCard).join('')
-    : visible.map(renderNoteCard).join('');
+  // Der Notiztitel ist eine echte Ueberschrift (R8 H15), eine Ebene unter
+  // dem, was darueber steht: unter den Gruppenkoepfen (h2) ein h3, sonst
+  // direkt unter dem Seitentitel (h1) ein h2 - keine uebersprungene Ebene.
+  const grouped = Boolean(pinned.length && rest.length);
+  const card = (n) => renderNoteCard(n, { headingLevel: grouped ? 3 : 2 });
+  const html = grouped
+    ? heading(t('notes.groupPinned')) + pinned.map(card).join('')
+      + heading(t('notes.groupOthers')) + rest.map(card).join('')
+    : visible.map(card).join('');
 
   grid.replaceChildren();
   grid.insertAdjacentHTML('beforeend', html);
@@ -573,7 +579,7 @@ export function noteName(note) {
   return line.length > 40 ? `${line.slice(0, 40).trimEnd()}…` : line;
 }
 
-function renderNoteCard(note) {
+function renderNoteCard(note, { headingLevel = 2 } = {}) {
   // KEINE INITIALEN AUF EINER 16px-SCHEIBE (Initialen-Schwelle-Regel).
   //
   // Hier standen bis zuletzt zwei Buchstaben auf einer 16-%-Waschung - unter der
@@ -591,7 +597,11 @@ function renderNoteCard(note) {
          data-id="${note.id}"
          style="--note-color:${esc(note.color)};">
       ${pinMarkup(note)}
-      ${note.title ? `<div class="note-card__title">${esc(note.title)}</div>` : ''}
+      ${/* ECHTE UEBERSCHRIFT STATT `div` (R8 H15): die Ueberschriften-
+          * Navigation eines Screenreaders fand bis dahin keine einzige Notiz.
+          * Die Optik traegt allein die Klasse (typography.css, notes.css);
+          * `reset.css` nimmt den UA-Rand, die Groesse setzt die Rolle. */ ''}
+      ${note.title ? `<h${headingLevel === 3 ? 3 : 2} class="note-card__title">${esc(note.title)}</h${headingLevel === 3 ? 3 : 2}>` : ''}
       <div class="note-card__content">${renderMarkdownLight(note.content, CHECKLIST_OPTS())}</div>
       ${(note.categories || []).length ? `<div class="note-card__categories" role="group" aria-label="${t('noteCategories.categories')}">
         ${note.categories.map(renderCategoryBadge).join('')}
@@ -870,6 +880,10 @@ function openNoteModal({ mode, note = null }) {
       const readerOnly  = [...panel.querySelectorAll('[data-reader-only]')];
       const titleEl     = document.getElementById('shared-modal-title');
       const modeTabs    = [...panel.querySelectorAll('.note-mode-switch .sub-tab')];
+      // Lesen/Bearbeiten gleitet wie jede Segment-Leiste (D8); die Kapsel
+      // folgt `sub-tab--active` aus setView() von selbst.
+      const modeSwitch = panel.querySelector('.note-mode-switch');
+      if (modeSwitch) attachSegmentIndicator(modeSwitch);
       const viewTitle   = panel.querySelector('#note-title');
       const viewContent = panel.querySelector('#note-content');
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;

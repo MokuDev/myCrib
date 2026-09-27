@@ -53,13 +53,7 @@ export async function render(container) {
     <main class="auth-page" id="main-content">
       <div class="auth-hero">
         <span class="auth-hero__mark" aria-hidden="true">
-          <svg viewBox="0 0 160 160" fill="currentColor">
-            <g fill-opacity="0.82">
-              <circle cx="64" cy="72" r="27" />
-              <circle cx="100" cy="78" r="25" />
-              <circle cx="80" cy="106" r="24" />
-            </g>
-          </svg>
+          <img src="/icons/icon-192.png" alt="" />
         </span>
         <h1 class="auth-hero__title">${esc(storedAppName)}</h1>
         <p class="auth-hero__tagline">${esc(t('login.tagline'))}</p>

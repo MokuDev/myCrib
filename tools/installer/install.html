@@ -116,19 +116,16 @@
     }
 
     /* Marken-Anker über der Karte: Zeichen plus Wortmarke, dasselbe Motiv wie
-       .login-hero__mark in der App. Der Wizard trug bisher kein myCrib-Zeichen. */
+       .auth-hero__mark in der App. Der Wizard trug bisher kein myCrib-Zeichen. */
     .brand { text-align: center; margin-bottom: 22px; }
     .brand__mark {
       display: inline-flex; align-items: center; justify-content: center;
       width: 64px; height: 64px; margin-bottom: 12px;
       border-radius: var(--radius-lg);
-      background-color: var(--color-accent);
-      /* Folgt dem Theme. --color-text-on-accent wäre hier statisches Weiss und
-         im Dark-Mode derselbe Kontrastfehler wie bei den Primäraktionen. */
-      color: var(--color-ink-on-vivid);
+      overflow: hidden;
       box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, var(--color-ink-on-vivid) 22%, transparent);
     }
-    .brand__mark svg { width: 55%; height: 55%; }
+    .brand__mark img { width: 100%; height: 100%; display: block; object-fit: cover; }
     .brand__word {
       font-size: var(--text-xl); font-weight: 700;
       /* Label-Farbe, nicht Akzent. auth.css:77-81 haelt fest, dass DESIGN.md
@@ -413,15 +410,20 @@
     .done-wrap   { text-align: center; padding: 20px 0 8px; }
     /* Der Abschluss trug ein 🎉-Systemsemoji: der einzige Bildinhalt der ganzen
        Reise, auf jedem Betriebssystem anders gerendert und gegen PRODUCT.md:22
-       („kein Konfetti"). Jetzt trägt ihn das myCrib-Zeichen in einem Erfolgsring. */
+       („kein Konfetti"). Jetzt traegt ihn ein Haeckchen in einem Erfolgsring -
+       nicht mehr das myCrib-Zeichen selbst (das seit dem Artwork-Wechsel ein
+       Foto ist und sich nicht auf --color-success einfaerben laesst). */
     .done-mark {
       display: inline-grid; place-items: center; width: 72px; height: 72px;
       margin-bottom: 16px; border-radius: var(--radius-full);
-      color: var(--color-success);
       background: color-mix(in srgb, var(--color-success) 12%, transparent);
       box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--color-success) 34%, transparent);
     }
-    .done-mark svg { width: 40px; height: 40px; }
+    .done-mark svg {
+      width: 36px; height: 36px;
+      stroke: var(--color-success); fill: none;
+      stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+    }
     .done-wrap h2 { font-size: var(--text-2xl); font-weight: 700; letter-spacing: -.02em; }
     .done-wrap p  { color: var(--color-text-secondary); margin: 8px 0 28px; font-size: var(--text-base); }
     .open-link {
@@ -566,13 +568,7 @@
        Sprache gleich, braucht also keinen Locale-Key. -->
   <div class="brand">
     <span class="brand__mark" aria-hidden="true">
-      <svg viewBox="0 0 160 160" fill="currentColor">
-        <g fill-opacity="0.82">
-          <circle cx="64" cy="72" r="27"/>
-          <circle cx="100" cy="78" r="25"/>
-          <circle cx="80" cy="106" r="24"/>
-        </g>
-      </svg>
+      <img src="/icons/icon-192.png" alt="" />
     </span>
     <div class="brand__word">myCrib</div>
   </div>
@@ -1470,13 +1466,7 @@
       <div class="card-body">
         <div class="done-wrap">
           <div class="done-mark" aria-hidden="true">
-            <svg viewBox="0 0 160 160" fill="currentColor">
-              <g fill-opacity="0.82">
-                <circle cx="64" cy="72" r="27"/>
-                <circle cx="100" cy="78" r="25"/>
-                <circle cx="80" cy="106" r="24"/>
-              </g>
-            </svg>
+            <svg viewBox="0 0 24 24"><path d="m5 12 5 5L20 7"/></svg>
           </div>
           <h2 tabindex="-1" data-i18n="done.title">myCrib is ready!</h2>
           <!-- Kein data-i18n: der Text haengt seit dem 404-Zweig vom Zustand ab

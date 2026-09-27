@@ -35,6 +35,9 @@ export async function render(container) {
   container.insertAdjacentHTML('beforeend', `
     <main class="auth-page" id="main-content">
       <div class="auth-hero">
+        <span class="auth-hero__mark" aria-hidden="true">
+          <img src="/icons/icon-192.png" alt="" />
+        </span>
         <h1 class="auth-hero__title">${esc(storedAppName)}</h1>
         <p class="auth-hero__tagline">${esc(t('setup.tagline'))}</p>
       </div>

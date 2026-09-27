@@ -563,6 +563,12 @@ async function route(req, res, server) {
     return serveStatic(res, resolve(projectRoot(), 'public', 'styles', 'tokens.css'), 'text/css; charset=utf-8');
   }
 
+  // Markenzeichen fuer .brand__mark: dieselbe PNG-Datei, die die App als
+  // PWA-Icon einsetzt, statt einer zweiten Kopie im Installer-Verzeichnis.
+  if (req.method === 'GET' && url.pathname === '/icons/icon-192.png') {
+    return serveStatic(res, resolve(projectRoot(), 'public', 'icons', 'icon-192.png'), 'image/png');
+  }
+
   // HIER STAND EINE /fonts/-ROUTE. Sie lieferte Plus Jakarta Sans aus
   // public/fonts, damit der Installer dieselbe Schrift trug wie die App. Mit dem
   // HIG-Redesign ist die Schrift aus der App gefallen: public/ enthaelt kein

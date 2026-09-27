@@ -152,7 +152,7 @@ function eventHasEnded(event, nowStamp) {
 }
 
 function getAppName() {
-  return localStorage.getItem(APP_NAME_STORAGE_KEY) || 'Yuvomi';
+  return localStorage.getItem(APP_NAME_STORAGE_KEY) || 'myCrib';
 }
 
 function getOnboardingSteps() {
@@ -1398,7 +1398,7 @@ export function renderUpcomingBirthdays(allBirthdays, size, total = null) {
  *
  * ZWEI QUELLEN, EINE LISTE, UND MAN SIEHT WELCHE. Ein Termin und eine Aufgabe
  * zählen gleich herunter, führen aber woanders hin: das Icon der Zeile ist das
- * des Termins (Yuvomi-eigenes Feld) bzw. das Aufgabenzeichen, und der Klick
+ * des Termins (myCrib-eigenes Feld) bzw. das Aufgabenzeichen, und der Klick
  * öffnet das jeweilige Modul. Ohne diesen Unterschied wäre die Liste eine
  * dritte Sorte Eintrag, und genau die sollte es nicht geben.
  *
@@ -1640,7 +1640,7 @@ function renderQuickLinkTile(s) {
   const tint = s.color ? ` style="--quick-link-color:${esc(s.color)};"` : '';
   // `rel` und `referrerpolicy` sind hier keine Formalie: ein Ziel im Heimnetz
   // hat nichts davon zu erfahren, von welcher Adresse aus dieser Haushalt
-  // seine Yuvomi-Instanz betreibt, und `noopener` nimmt der geöffneten Seite
+  // seine myCrib-Instanz betreibt, und `noopener` nimmt der geöffneten Seite
   // den Griff auf das Fenster, aus dem sie kam.
   // Name und volle Adresse stehen im `title`: die Host-Zeile darunter ist
   // einzeilig und kuerzt, und eine gekuerzte Adresse darf nicht die einzige

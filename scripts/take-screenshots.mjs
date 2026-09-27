@@ -1,5 +1,5 @@
 /**
- * Screenshot Script - Yuvomi
+ * Screenshot Script - myCrib
  * Fully automated: seeds demo data (in the target locale), starts a server and
  * captures every module and sub-tab in light + dark mode for two device profiles:
  *   - web:    iPad Pro 13"         → 2752 × 2064 px  (viewport 1376×1032, DSF 2.0)

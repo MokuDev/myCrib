@@ -2,7 +2,7 @@
  * Test: Wiederholungsfelder der Oberfläche (public/rrule-ui.js, #756)
  *
  * Der Anlassfall: Ein per CalDAV eingelesener Serientermin verlor seine
- * Wiederholung, sobald man in Yuvomi irgendein anderes Feld änderte - und der
+ * Wiederholung, sobald man in myCrib irgendein anderes Feld änderte - und der
  * Verlust wanderte über den Sync zurück in den Fremdkalender. Zwei Ursachen,
  * beide hier abgedeckt:
  *

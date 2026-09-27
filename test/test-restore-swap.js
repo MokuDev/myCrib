@@ -1297,7 +1297,7 @@ test(
     try {
       await assert.rejects(
         () => target.mod.restoreFromFile(backupPath),
-        /Run the restore as the user Yuvomi runs as, or as root/
+        /Run the restore as the user myCrib runs as, or as root/
       );
     } finally {
       fsp.stat = realStat;
@@ -1616,7 +1616,7 @@ test(
     try {
       await assert.rejects(
         () => target.mod.restoreFromFile(backupPath),
-        /Run the restore as the user Yuvomi runs as, or as root/
+        /Run the restore as the user myCrib runs as, or as root/
       );
     } finally {
       delete globalThis[handshake];

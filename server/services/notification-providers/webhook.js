@@ -1,7 +1,7 @@
 /**
  * Generic JSON webhook notification provider.
  *
- * Ohne Vorlage sendet der Kanal einen Yuvomi-geformten Body. Der passt fuer
+ * Ohne Vorlage sendet der Kanal einen myCrib-geformten Body. Der passt fuer
  * Empfaenger, die beliebiges JSON annehmen (Home Assistant, n8n), aber nicht
  * fuer Dienste mit eigenem Pflichtschema: ein Discord-Webhook verlangt `content`
  * oder `embeds` und antwortet auf alles andere mit 400. Statt pro Dienst einen

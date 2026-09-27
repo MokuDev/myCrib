@@ -1,6 +1,6 @@
 ---
-name: Yuvomi
-description: Familienplaner in Apples Handwerk und Yuvomis Handschrift - warme Buehne, eine violette Stimme, WCAG AA als Invariante
+name: myCrib
+description: Familienplaner in Apples Handwerk und myCribs Handschrift - warme Buehne, eine violette Stimme, WCAG AA als Invariante
 colors:
   accent-violet: "#6C3AED"
   accent-violet-hover: "#5B2FD4"
@@ -236,7 +236,7 @@ components:
     size: "64px"
 ---
 
-# Design System: Yuvomi
+# Design System: myCrib
 
 <!-- Neu aufgezeichnet 2026-08-06 aus dem GEBAUTEN Stand des HIG-Redesigns nach
      Fundament + Rest-Rollout Runde 1-3 und zwei Finish-Review-Durchlaeufen
@@ -354,21 +354,21 @@ Stand bis 2026-08-08 als HTML-Kommentar am Body-Anfang von `public/index.html`
 und wurde damit an jeden Browser ausgeliefert. Er gehoert hierher, wo die
 uebrigen Designentscheidungen stehen.
 
-**THESIS:** Apples HANDWERK, Yuvomis HANDSCHRIFT. Die Struktur ist
+**THESIS:** Apples HANDWERK, myCribs HANDSCHRIFT. Die Struktur ist
 Plattform-Kanon (Gruppenlisten, Kapsel-Controls, Typo-Skala, Motion,
-AA-Disziplin); die Haut gehoert Yuvomi. Verweigert wird der Kategorie-Standard
+AA-Disziplin); die Haut gehoert myCrib. Verweigert wird der Kategorie-Standard
 (freundlicher Pastell-Organizer) - und seit 2026-08-10 ausdruecklich auch die
 woertliche Uebernahme von Apples PALETTE und seinem Pro-App-Tint-Modell.
 
 **KORREKTUR VOM 2026-08-10, und der Anlass steht in einem Satz des Betreibers:**
-"Im Vergleich zum alten Yuvomi fuehlt sich die App nicht mehr wie aus einem Guss
+"Im Vergleich zum alten myCrib fuehlt sich die App nicht mehr wie aus einem Guss
 an." Hier stand vorher "Plattform-Kanon in voller Treue" mit kuehlen
 System-Neutralen (#F2F2F7 / Near-Black #0A0A0C) und Apple Indigo als globalem
 Tint. Drei Uebernahmen waren zu woertlich, und alle drei sind zurueckgenommen:
-die KUEHLE BUEHNE (Apples Grau war Apples Buehne, nicht Yuvomis - jetzt warmes
+die KUEHLE BUEHNE (Apples Grau war Apples Buehne, nicht myCribs - jetzt warmes
 Papier #F5F3ED / warme Kohle #191816), der INDIGO-TINT (die Bildmarke ist
 violett und gesetzt; Logo und App sprachen zwei Farben - jetzt #6C3AED) und das
-PRO-APP-TINT-MODELL (Apple faerbt pro App, Yuvomi hat siebzehn Zimmer in EINEM
+PRO-APP-TINT-MODELL (Apple faerbt pro App, myCrib hat siebzehn Zimmer in EINEM
 Haus - siehe die Eine-Stimme-Regel). Was BLEIBT, ist alles, was die Runden 1-9
 an Struktur und Messbarkeit gebaut haben. Der Kanon war nicht der Fehler, seine
 woertliche Anwendung auf die Haut war es.
@@ -395,9 +395,9 @@ Messlatte Apple-Systemapps + Fantastical) als STRUKTUR, nicht als Palette.
 
 ## Overview
 
-**Creative North Star: "Apples Handwerk, Yuvomis Handschrift"**
+**Creative North Star: "Apples Handwerk, myCribs Handschrift"**
 
-Yuvomi ist so gebaut, wie eine mitgelieferte App gebaut waere - und sieht aus wie Yuvomi.
+myCrib ist so gebaut, wie eine mitgelieferte App gebaut waere - und sieht aus wie myCrib.
 Der Kanon ist die Apple Human Interface Guidelines in der Liquid-Glass-Designphilosophie;
 die Messlatte sind Apple-Systemapps und Fantastical. Er gilt fuer die STRUKTUR: Gruppen-
 listen, Kapsel-Controls, Typo-Skala, Feder-Motion, die Messdisziplin. Er gilt NICHT fuer
@@ -505,7 +505,7 @@ Inhalt, kein Verlauf ueber eine Karte, kein Text auf einer Flaeche, die nicht ge
   und laut PRODUCT.md als Marke gesetzt, die App war es nicht mehr - Logo und Oberflaeche
   sprachen zwei Farben. Und weil zusaetzlich jedes Modul das Chrome umfaerbte (siehe die
   Eine-Stimme-Regel), kam das Indigo ohnehin nur auf dem Dashboard vor: es gab keine Farbe,
-  die app-weit "Yuvomi" hiess.
+  die app-weit "myCrib" hiess.
 
 ### Secondary
 - **Neun Familientoene, aus denen die Modul-Tints beziehen** (Frontmatter `family-*`,
@@ -1057,7 +1057,7 @@ das Verhaeltnis haelt.
   keine Glyphen-Fonts.
 - **Ein Modul fuehrt EIN Zeichen, in EINER Hand** (2026-08-17). Wo ein Modul sich zu erkennen
   gibt - Leiste, Sidebar, „Mehr"-Blatt, Widget-Kopf, Kennzahl-Kachel, „Heute wichtig", Suche,
-  Wand -, zeichnet Yuvomis eigener monoliniger Satz (`public/nav-icons.js`); was er nicht
+  Wand -, zeichnet myCribs eigener monoliniger Satz (`public/nav-icons.js`); was er nicht
   kennt, faellt auf Lucide zurueck. Aktions- und Zustandszeichen (Chevron, Plus, Uhrzeit-Slot
   einer Mahlzeit) bleiben Lucide - sie beantworten nicht „welches Modul".
   **Der Fehler war nicht ein falscher Glyph, sondern die dritte Tabelle:** die Zuordnung
@@ -1207,7 +1207,7 @@ Backdrop und seinen Aktionen. Inhalte - Karten, Listen, Widgets, Text - sind opa
 Blur-Stufen kanonisch 2/6/10/20/32px (`--blur-2xs..lg`).
 
 **Der Modulkopf traegt KEIN Glas, und das ist eine begruendete Abweichung vom Kanon, keine
-Auslassung.** Die belegte Liquid-Glass-Linie fuehrt Navigationsleisten transparent; Yuvomi
+Auslassung.** Die belegte Liquid-Glass-Linie fuehrt Navigationsleisten transparent; myCrib
 stellt den Kopf nahtlos und opak auf den Seitengrund (`--color-bg`). Zwei Gruende, beide
 gemessen: die kollabierende Large-Title-Leiste lebt davon - Glas zeigte am Scroll-Anfang
 eine Flaeche, wo gerade keine sein soll, und haette die gewonnene Ruhe wieder aufgehoben -
@@ -2460,8 +2460,8 @@ Der Einkauf verdrahtete seine Gesten nur im Nachlade-Pfad und antwortete beim er
 Oeffnen der Seite auf gar nichts; im Quelltext stand alles richtig da.
 
 ### Das Markensiegel (Signature Component)
-Yuvomis eigene Ausweisform und die Antwort auf "Health hat die Ringe, was hat Yuvomi?" - die
-eine Stelle, an der die Marke etwas kann, was keine Systemapp braucht: **Yuvomi ist der
+myCribs eigene Ausweisform und die Antwort auf "Health hat die Ringe, was hat myCrib?" - die
+eine Stelle, an der die Marke etwas kann, was keine Systemapp braucht: **myCrib ist der
 einzige Ort, an dem siebzehn Apps in einem Raum leben, und das Siegel weist jedes Ding als
 "aus Raum X" aus.**
 
@@ -2534,7 +2534,7 @@ Solo-Nutzer ist ein Anti-Ziel des Briefs.
 **Eine Systembenachrichtigung kann kein Siegel tragen**, und der Titel uebernimmt seine
 Aufgabe: sie hat kein DOM, ihr `icon` erreicht nur einen Teil der Plattformen, und Android
 maskiert ihr `badge` monochrom, womit der Familienton ohnehin verloren ginge. Der Titel
-erreicht jede Plattform und stand app-weit auf "Yuvomi" - auf dem, was das System darueber
+erreicht jede Plattform und stand app-weit auf "myCrib" - auf dem, was das System darueber
 ohnehin anzeigt. Er nennt jetzt das Herkunftsmodul (Kalender, Aufgaben, Abonnements,
 Medikamente), serverseitig uebersetzt ueber die Datensprache des Haushalts, clientseitig ueber
 die Sprache des Nutzers. Die beiden Karten liegen beidseits der Schichtgrenze und sind an die

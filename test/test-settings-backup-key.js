@@ -273,18 +273,18 @@ test('Fehlertext: own_key_missing und backup_key_wrong nennen auch „keine Yuvo
   for (const file of files) {
     const s = JSON.parse(readFileSync(new URL(file, locales), 'utf8')).settings;
     for (const key of ['backupRestoreErrorNeverEncrypted', 'backupRestoreErrorKeyRightButNotDb', 'backupRestoreErrorNothingChanged']) {
-      assert.ok(typeof s[key] === 'string' && s[key].includes('Yuvomi') !== (key === 'backupRestoreErrorNothingChanged'), `${file}: ${key}`);
+      assert.ok(typeof s[key] === 'string' && s[key].includes('myCrib') !== (key === 'backupRestoreErrorNothingChanged'), `${file}: ${key}`);
     }
     for (const key of ['backupRestoreErrorOwnKeyMissing', 'backupRestoreErrorKeyWrong']) {
       assert.ok(!s[key].includes(s.backupRestoreErrorNothingChanged), `${file}: ${key} traegt den Schlusssatz selbst`);
     }
   }
   const de = JSON.parse(readFileSync(new URL('de.json', locales), 'utf8')).settings;
-  assert.match(de.backupRestoreErrorNeverEncrypted, /nie verschlüsselt.*keine gültige Yuvomi-Datenbank/);
-  assert.match(de.backupRestoreErrorKeyRightButNotDb, /Schlüssel richtig.*keine Yuvomi-Datenbank.*abgeschnitten/);
+  assert.match(de.backupRestoreErrorNeverEncrypted, /nie verschlüsselt.*keine gültige myCrib-Datenbank/);
+  assert.match(de.backupRestoreErrorKeyRightButNotDb, /Schlüssel richtig.*keine myCrib-Datenbank.*abgeschnitten/);
   const en = JSON.parse(readFileSync(new URL('en.json', locales), 'utf8')).settings;
-  assert.match(en.backupRestoreErrorNeverEncrypted, /never encrypted.*not a valid Yuvomi database/);
-  assert.match(en.backupRestoreErrorKeyRightButNotDb, /key is right.*not a Yuvomi database.*cut short/);
+  assert.match(en.backupRestoreErrorNeverEncrypted, /never encrypted.*not a valid myCrib database/);
+  assert.match(en.backupRestoreErrorKeyRightButNotDb, /key is right.*not a myCrib database.*cut short/);
 });
 
 test('describedby: die Fehlerbox kommt dazu, Hinweis und HTTP-Warnung bleiben, und sie geht wieder', async () => {

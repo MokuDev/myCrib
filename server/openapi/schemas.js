@@ -600,7 +600,7 @@ export const schemas = {
             {
               type: 'string',
               pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?$',
-              description: 'Yuvomi local wall-clock value in the household time zone, without offset.',
+              description: 'myCrib local wall-clock value in the household time zone, without offset.',
             },
             {
               type: 'string',
@@ -621,7 +621,7 @@ export const schemas = {
             {
               type: 'string',
               pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}(?::\\d{2}(?:\\.\\d+)?)?$',
-              description: 'Yuvomi local wall-clock value in the household time zone. Seconds and fractional seconds are optional and are dropped; stored as YYYY-MM-DDTHH:MM.',
+              description: 'myCrib local wall-clock value in the household time zone. Seconds and fractional seconds are optional and are dropped; stored as YYYY-MM-DDTHH:MM.',
             },
             {
               type: 'string',
@@ -1248,7 +1248,7 @@ export const schemas = {
               properties: {
                 defaultLocale: { type: 'string', description: 'Fallback locale when the UI language is not shipped (default en).' },
                 availableLocales: { type: 'array', items: { type: 'string' }, description: 'Locale files present in the module.' },
-                coreLocales: { type: 'array', items: { type: 'string' }, description: 'All locales supported by Yuvomi core.' },
+                coreLocales: { type: 'array', items: { type: 'string' }, description: 'All locales supported by myCrib core.' },
               },
             },
             capabilities: { $ref: '#/components/schemas/ExtensionModuleCapabilities' },

@@ -1,6 +1,6 @@
 # Notification webhooks
 
-Yuvomi can deliver every due reminder to a generic HTTP webhook in addition to
+myCrib can deliver every due reminder to a generic HTTP webhook in addition to
 Web Push, Gotify, ntfy, and email. Webhook channels use the same per-channel delivery
 tracking, retry, and deduplication flow as the other notification providers.
 
@@ -12,7 +12,7 @@ Only administrators can manage household notification channels.
 2. Under **Household channels**, select **Add channel**.
 3. Choose **Webhook** as the provider and enter a name.
 4. Enter the complete HTTP or HTTPS endpoint URL.
-5. Optionally enter a Bearer token. Yuvomi stores it as a write-only secret and
+5. Optionally enter a Bearer token. myCrib stores it as a write-only secret and
    sends it as `Authorization: Bearer <token>`.
 6. Optionally enter a **payload template** if the receiver expects a body of its
    own shape. Leaving it empty sends the default body described below.
@@ -36,13 +36,13 @@ well.
 
 ## Request format
 
-Yuvomi sends an HTTP `POST` with `Content-Type: application/json`:
+myCrib sends an HTTP `POST` with `Content-Type: application/json`:
 
 ```json
 {
   "event": "notification",
   "notification": {
-    "title": "Yuvomi",
+    "title": "myCrib",
     "body": "Take out the bins",
     "url": "/reminders",
     "tag": "reminder-42",
@@ -54,7 +54,7 @@ Yuvomi sends an HTTP `POST` with `Content-Type: application/json`:
 
 `sentAt` is generated for each delivery attempt. The notification `tag`
 identifies the reminder and can be used by receivers for their own
-deduplication. The `url` is relative to the Yuvomi application.
+deduplication. The `url` is relative to the myCrib application.
 
 ## Payload template
 

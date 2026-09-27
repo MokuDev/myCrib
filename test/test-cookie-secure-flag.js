@@ -1,7 +1,7 @@
 /**
  * Test: Das `Secure`-Attribut des CSRF-Cookies folgt EINER Einstellung
  *
- * Zweck: `SESSION_SECURE` entscheidet, ob Yuvomi seine Cookies als `Secure`
+ * Zweck: `SESSION_SECURE` entscheidet, ob myCrib seine Cookies als `Secure`
  *        ausstellt. Der Standard ist AUS - in `.env.example` ist die Variable
  *        auskommentiert, und eine Installation auf reinem HTTP ist bei einem
  *        selbst gehosteten Dienst der Normalfall. Ein `Secure`-Cookie wird dort

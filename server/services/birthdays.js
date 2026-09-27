@@ -214,7 +214,7 @@ function syncBirthdayCalendarEvent(database, birthday, kind = 'birthday') {
       //
       // Folge, die dazugehört: die Zeile bleibt damit auch im Blick von
       // pruneDeletedEvents (calendar-prune.js). Wer den Termin beim Provider
-      // löscht, den Geburtstag in Yuvomi aber behält, bekommt ihn beim nächsten
+      // löscht, den Geburtstag in myCrib aber behält, bekommt ihn beim nächsten
       // Sync neu angelegt und hochgeladen. Das ist die konsequente Fortsetzung
       // davon, dass der Geburtstag die Quelle ist und der Kalendereintrag sein
       // Abbild - wer ihn loswerden will, stellt die Erinnerung auf "keine" oder

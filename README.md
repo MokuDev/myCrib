@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="docs/logo.svg" alt="" width="92" />
+  <img src="docs/logo.png" alt="" width="92" />
 
-  <h1>Yuvomi</h1>
+  <h1>myCrib</h1>
 
   <p><strong>One private home for everything that keeps a household running.</strong></p>
 
@@ -33,14 +33,14 @@
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-dark-web.webp">
-    <img src="docs/screenshots/dashboard-light-web.webp" alt="The Yuvomi dashboard: today's tasks, calendar events, meals and the shopping list on one screen" width="820">
+    <img src="docs/screenshots/dashboard-light-web.webp" alt="The myCrib dashboard: today's tasks, calendar events, meals and the shopping list on one screen" width="820">
   </picture>
 
   <sub><b>20</b> modules&nbsp;&nbsp;·&nbsp; <b>24</b> languages&nbsp;&nbsp;·&nbsp; <b>0</b> trackers&nbsp;&nbsp;·&nbsp; optional&nbsp;<b>AES&#8209;256</b>&nbsp;database&nbsp;encryption&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
 </div>
 
 Most households glue their life together from a dozen paid apps, each with its own account, its
-own subscription and its own copy of your data on someone else's server. Yuvomi puts all of it in
+own subscription and its own copy of your data on someone else's server. myCrib puts all of it in
 one place that belongs to you, running as a container on any home server or NAS. Every module is
 independent, so you use what fits and switch off what doesn't.
 
@@ -48,7 +48,7 @@ independent, so you use what fits and switch off what doesn't.
 
 ## One app instead of a dozen subscriptions
 
-| Instead of juggling… | Yuvomi gives you |
+| Instead of juggling… | myCrib gives you |
 |---|---|
 | a to-do &amp; task app | **Tasks** - Kanban, deadlines, recurring, multi-assignment |
 | a shared calendar subscription | **Calendar** - sync, subscriptions, per-event visibility |
@@ -116,7 +116,7 @@ disk, and copying it is the whole export, as long as documents are stored in the
 Scheduled backups write a restorable archive on top of that, and the documented API pulls anything
 out in whatever shape you need.
 
-**What does it cost?** Nothing. Yuvomi is free and MIT-licensed. You provide the server; there is
+**What does it cost?** Nothing. myCrib is free and MIT-licensed. You provide the server; there is
 no subscription, no upsell and no paid tier.
 
 ---
@@ -188,9 +188,9 @@ covers engine setup, HTTPS, backups and troubleshooting step by step.
 
 > **Health is not a medical device.** No diagnostic claims are made. Health data is sensitive, so enable database encryption (`DB_ENCRYPTION_KEY`, SQLCipher).
 
-> **External document storage needs its own backup.** Database backups hold document metadata and links, not binaries stored in a local folder, on WebDAV, or in Google Drive; back up the selected target separately. Yuvomi visibility settings only control access through Yuvomi. Anyone with access to the connected `Yuvomi/Documents` Google Drive folder can view all files stored there.
+> **External document storage needs its own backup.** Database backups hold document metadata and links, not binaries stored in a local folder, on WebDAV, or in Google Drive; back up the selected target separately. myCrib visibility settings only control access through myCrib. Anyone with access to the connected `Yuvomi/Documents` Google Drive folder can view all files stored there.
 
-> **Self-hosting in a GDPR context?** If you run Yuvomi in the EU/EEA and process other people's data, read [privacy for self-hosters](docs/PRIVACY-FOR-SELFHOSTERS.md) before going live. It covers third-country assessments for every external service, data-processing-agreement notes, log-retention guidance and a records-of-processing template.
+> **Self-hosting in a GDPR context?** If you run myCrib in the EU/EEA and process other people's data, read [privacy for self-hosters](docs/PRIVACY-FOR-SELFHOSTERS.md) before going live. It covers third-country assessments for every external service, data-processing-agreement notes, log-retention guidance and a records-of-processing template.
 
 </details>
 
@@ -216,7 +216,7 @@ Yuvomi was renamed from **Oikos** to avoid a trademark conflict with an unrelate
 - **Apple HIG in the Liquid Glass language** - the system font stack and Apple's type scale, capsule controls, inset-grouped lists and spring motion, verified for WCAG AA in light and dark.
 - **Privacy first** - fully self-hosted, optional SQLCipher AES-256 database encryption, zero telemetry.
 - **Sign-in that scales to a household** - optional two-factor authentication (TOTP with recovery codes, enforceable household-wide), invite links instead of handed-over passwords, and optional self-service password reset by email. Optional single sign-on works with any OIDC provider. One switch decides whether an unknown identity gets an account, so a provider shared beyond your household opens no door, and another makes SSO the only way in.
-- **24 languages** with automatic detection. A separate household setting decides the language of entries Yuvomi creates itself, so an exported calendar speaks your household's language instead of English.
+- **24 languages** with automatic detection. A separate household setting decides the language of entries myCrib creates itself, so an exported calendar speaks your household's language instead of English.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Express-000000?style=flat-square&logo=express&logoColor=white" alt="Express">
@@ -245,7 +245,7 @@ the sources above disagree, the ones above are right.
 
 <div align="center">
   <br>
-  <img src="docs/logo.svg" alt="" width="48" />
+  <img src="docs/logo.png" alt="" width="48" />
   <p><strong>One home for your household. Yours to keep.</strong></p>
   <p>
     Install it once. No account with us, no subscription,<br>

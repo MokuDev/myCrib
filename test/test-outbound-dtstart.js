@@ -4,7 +4,7 @@
  *        Monatsmitte angelegt wurde, darf nach draussen kein unsynchronisiertes
  *        DTSTART tragen - RFC 5545 3.8.5.3 nennt die Wiederholungsmenge dann
  *        ausdruecklich "undefined", und ein fremder Client darf daraus ein
- *        Vorkommen MEHR machen, als Yuvomi zeigt.
+ *        Vorkommen MEHR machen, als myCrib zeigt.
  * Ausfuehren: node --experimental-sqlite --test test/test-outbound-dtstart.js
  *
  * Geprueft werden die reine Umformung UND der Feed, weil beides schiefgehen
@@ -39,7 +39,7 @@ test('eine eigene Monatsletzten-Serie startet nach draussen am Monatsletzten', (
 
 test('eine importierte Serie geht Wort fuer Wort zurueck (#756)', () => {
   // Fremde Kalender duerfen ein unsynchronisiertes DTSTART absichtlich fuehren;
-  // beim Round-Trip ist Yuvomi darueber nicht der Schiedsrichter.
+  // beim Round-Trip ist myCrib darueber nicht der Schiedsrichter.
   for (const quelle of ['ics', 'caldav', 'google', 'apple']) {
     const ev = { start_datetime: '2026-01-15T09:00', recurrence_rule: MONATSLETZTER, external_source: quelle };
     assert.equal(outboundStartDatetime(ev), '2026-01-15T09:00', `Quelle ${quelle}`);

@@ -80,7 +80,7 @@ export function assignDefaultToEvent(d, eventId, userId) {
 // im Kalender liegt. Er hinterlässt aber eine Spur, die kein Import trägt -
 // Google und CalDAV behalten ihr gewähltes Ziel (target_*), Apple und CalDAV
 // laden unter der UID 'oikos-<id>@oikos.local' hoch. Ein importierter Termin,
-// den jemand in Yuvomi in einen anderen Kalender verschoben hat, trägt ebenfalls
+// den jemand in myCrib in einen anderen Kalender verschoben hat, trägt ebenfalls
 // ein Ziel und bleibt damit aussen vor: an ihm hat schon eine Hand gearbeitet.
 //
 // Die eine Luecke dieser Spur: vor Migration 47 lud der Google-Outbound JEDEN
@@ -169,7 +169,7 @@ const UNASSIGNED_MAPPED_EVENTS = `
 //   - ZUSAETZLICH `user_modified = 0`. Der Umzug zur Laufzeit hat den Wechsel
 //     gesehen; hier fehlt dieser Beleg, und "genau die Person von A" kann auch
 //     eine Hand sein, die einen Termin in B bewusst dieser Person gegeben hat.
-//     Jede Bearbeitung in Yuvomi - auch die Zuweisung - setzt `user_modified`
+//     Jede Bearbeitung in myCrib - auch die Zuweisung - setzt `user_modified`
 //     an einem externen Termin (routes/calendar/crud.js, PUT), und der Inbound
 //     setzt es nie zurueck. Ein so bearbeiteter Termin bleibt stehen; die
 //     sichere Richtung.

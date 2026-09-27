@@ -24,10 +24,10 @@ import { runSerialized } from '../utils/sync-lock.js';
 // --------------------------------------------------------
 
 /**
- * Map an RFC-5545 VTODO PRIORITY (1–9, 0/undefined) to an Yuvomi task priority.
+ * Map an RFC-5545 VTODO PRIORITY (1–9, 0/undefined) to an myCrib task priority.
  * 1–4 → high, 5 → medium, 6–9 → low, else none.
  *
- * `current` ist die lokale Priorität, falls es die Aufgabe schon gibt. Yuvomi
+ * `current` ist die lokale Priorität, falls es die Aufgabe schon gibt. myCrib
  * kennt vier Stufen, RFC 5545 drei Bänder - `urgent` und `high` teilen sich das
  * obere. Meldet der Server dasselbe Band, in dem die Aufgabe lokal schon liegt,
  * bleibt die feinere lokale Angabe stehen; sonst käme jede hochgeschobene
@@ -52,7 +52,7 @@ function mapVtodoPriority(p, current = null) {
 const LOCAL_OPEN_STATES = new Set(['in_progress']);
 
 /**
- * VTODO-Status → Yuvomi-Aufgabenstatus, unter Rücksicht auf den lokalen Stand:
+ * VTODO-Status → myCrib-Aufgabenstatus, unter Rücksicht auf den lokalen Stand:
  * ohne ihn käme eine begonnene oder abgelegte Aufgabe bei jedem Lauf als
  * „offen" zurück (#617).
  */
@@ -70,7 +70,7 @@ function mapVtodoStatus(todo, current = null) {
  * UTC, `DUE;TZID=…` wird dorthin umgerechnet. `due_date`/`due_time` einer Aufgabe
  * sind dagegen reine Wanduhr-Werte, die die Oberfläche unverändert anzeigt - der
  * Instant muss deshalb erst in die Zone des Haushalts (#617). Ohne diesen Schritt
- * stand eine um 14:30 fällige Aufgabe in Yuvomi um 12:30, verschoben um genau den
+ * stand eine um 14:30 fällige Aufgabe in myCrib um 12:30, verschoben um genau den
  * Zonenoffset. Eine Fälligkeit ohne Zonenangabe (floating) ist bereits Wanduhr
  * und bleibt unangetastet.
  */
@@ -233,7 +233,7 @@ function updateReminderSelection(accountId, listUrl, { enabled, targetModule } =
 }
 
 // --------------------------------------------------------
-// Upsert Helpers (Inbound: Server → Yuvomi)
+// Upsert Helpers (Inbound: Server → myCrib)
 // --------------------------------------------------------
 
 // Die Objekt-URL (obj.url des Abrufs) wandert bei jedem Upsert mit: ohne sie ist
@@ -285,7 +285,7 @@ function upsertTask(todo, accountId, createdBy, objectUrl = null) {
  * danach, und über Listengrenzen hinweg ohnehin. Erst wenn alle UIDs eine
  * lokale ID haben, ist die Zuordnung entscheidbar.
  *
- * Yuvomi kennt genau eine Ebene (die POST-Route weist ein Enkelkind ab), CalDAV
+ * myCrib kennt genau eine Ebene (die POST-Route weist ein Enkelkind ab), CalDAV
  * kennt beliebig tiefe Ketten. Ein Enkel wird deshalb an den obersten Vorfahren
  * gehängt statt fallen gelassen - flach unter dem falschen Kopf ist immer noch
  * eine Hierarchie, gar keine wäre der gemeldete Zustand.
@@ -324,7 +324,7 @@ function applyTaskRelations(seen) {
     const rootUid = parentUidOf.has(uid) ? rootOf(uid) : null;
     const parentId = rootUid ? idByUid.get(rootUid) ?? null : null;
     // Auch der NULL-Fall muss geschrieben werden: wer auf dem Server aus der
-    // Unterliste gezogen wurde, ist sonst in Yuvomi für immer ein Kind.
+    // Unterliste gezogen wurde, ist sonst in myCrib für immer ein Kind.
     update.run(parentId, entry.taskId, parentId);
   }
 }
@@ -617,7 +617,7 @@ async function runSync({ createClient: makeClient } = {}) {
       }
 
       // Dasselbe für den Einkauf (#831). Ein Artikel trägt kein eigenes Ziel -
-      // die Zuordnung Server-Liste ↔ Yuvomi-Liste ist die Zielangabe, also
+      // die Zuordnung Server-Liste ↔ myCrib-Liste ist die Zielangabe, also
       // reicht sie hier hinein.
       try {
         const shoppingSelections = enabledLists.filter((s) => s.target_module === 'shopping');

@@ -63,7 +63,7 @@ const router = express.Router();
 // External storage deletion yields back to Express between documents. Keep the
 // exact previewed identities stable during that window so a later request
 // cannot move a confirmed document or child folder out from under the batch.
-// Yuvomi runs one Node process per instance; the database remains the durable
+// myCrib runs one Node process per instance; the database remains the durable
 // source of truth, while these sets serialize in-flight route mutations.
 const activeFolderTreeDeletes = new Set();
 const folderDeleteSnapshotKey = process.env.SESSION_SECRET || randomBytes(32);

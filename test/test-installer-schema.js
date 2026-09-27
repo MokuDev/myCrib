@@ -148,7 +148,7 @@ const INTENTIONALLY_NOT_IN_INSTALLER = {
   // (#693) wird unter Einstellungen → Verwaltung → Immich verbunden, samt
   // Verbindungstest und Vorschau. Ein API-Schlüssel im Wizard hieße, ihn vor
   // der ersten Anmeldung zu erfragen - und Immich läuft bei den meisten noch
-  // gar nicht, wenn Yuvomi installiert wird. Die Env-Variablen bleiben als
+  // gar nicht, wenn myCrib installiert wird. Die Env-Variablen bleiben als
   // zweiter Weg für Setups, die alles deklarativ halten.
   IMMICH_URL: 'In der App unter Verwaltung → Immich einzurichten; Env ist der deklarative Zweitweg.',
   // Benachrichtigungskanaele entstehen in der App, lange nach der Installation.

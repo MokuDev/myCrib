@@ -2,7 +2,7 @@
 
 _Abgeleitet aus einer Wissensgraph-Analyse der Codebase (2026-07-08); die Import-/Aufruf-Zahlen sind per grep-Gegencheck ermittelt und zuletzt am 2026-09-14 aufgefrischt (dieselbe Zählweise wie am 2026-08-05, gegen den damaligen Stand nachgerechnet: `import { … }` je Datei, Aufrufe ohne die Definition, `public/vendor/` ausgenommen). Die Betweenness-Werte stammen aus der Analyse vom Juli und sind als Größenordnung zu lesen; für `toLocalDateKey()` beschreiben sie den Stand vor #829._
 
-Die zentralsten Frontend-/Server-Utilities von Yuvomi ("God-Nodes" im Wissensgraph)
+Die zentralsten Frontend-/Server-Utilities von myCrib ("God-Nodes" im Wissensgraph)
 zerfallen in **zwei Klassen**, die der Graph an der Provenienz ihrer Kanten trennt
 (`INFERRED calls` vs. `EXTRACTED imports`):
 

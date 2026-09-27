@@ -1054,7 +1054,7 @@ describe('CalDAV: eine Bearbeitung friert die Farbe nicht mehr ein (#899)', () =
   }
 
   // Derselbe Termin, wahlweise mit COLOR-Zeile - so faerbt ihn ein anderer
-  // Client auf dem Server ein, ohne dass in Yuvomi jemand etwas tut.
+  // Client auf dem Server ein, ohne dass in myCrib jemand etwas tut.
   function clientWith({ color = null } = {}) {
     return async () => ({
       fetchCalendars:       async () => [{ url: CALENDAR_URL, displayName: 'Cal 1' }],
@@ -1078,7 +1078,7 @@ describe('CalDAV: eine Bearbeitung friert die Farbe nicht mehr ein (#899)', () =
 
   it('lernt die Farbe des Servers auch nach einer Titelaenderung', async () => {
     // Der Repro aus #899, Schritt fuer Schritt: Termin kommt ohne COLOR herein,
-    // der Nutzer aendert in Yuvomi nur den TITEL (das setzt user_modified = 1),
+    // der Nutzer aendert in myCrib nur den TITEL (das setzt user_modified = 1),
     // danach faerbt ihn jemand in Nextcloud ein. Solange das Farb-Gatter an
     // user_modified hing, kam diese Farbe nie an - dauerhaft.
     const d = buildDb();
@@ -1598,7 +1598,7 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
   }));
 
   it('ein vor v2.49 hochgeladener Termin mit der Farbe seines Zielkalenders heilt', () => withDb(async (d) => {
-    // Die haeufigste Gruppe aus #1270: in Yuvomi mit CalDAV-Ziel angelegt,
+    // Die haeufigste Gruppe aus #1270: in myCrib mit CalDAV-Ziel angelegt,
     // ohne COLOR hochgeladen (vor #897), der naechste Inbound brannte die
     // Farbe des Zielkalenders ein, eine spaetere Bearbeitung fror sie ein.
     const OWN_UID = 'oikos-7@oikos.local';
@@ -1839,7 +1839,7 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
     assert.strictEqual(row(d).color, COLOR_A, 'die Frist ist abgelaufen');
   }));
 
-  // Waehrend Kalender B abgerufen wird, aendert jemand den Termin in Yuvomi.
+  // Waehrend Kalender B abgerufen wird, aendert jemand den Termin in myCrib.
   // `change` schreibt, was die Route schreiben wuerde.
   function clientChangingDuringB(d, change) {
     return async () => ({
@@ -1994,7 +1994,7 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
   }));
 
   it('eine nach der Heilung neu gewaehlte Kalenderfarbe bleibt, auch wenn der Server COLOR verwirft', () => withDb(async (d) => {
-    // Codex 4079517707: geheilt, dann in Yuvomi auf eine Kalenderfarbe des
+    // Codex 4079517707: geheilt, dann in myCrib auf eine Kalenderfarbe des
     // Kontos umgefaerbt; der Server nimmt den Push an und verwirft COLOR.
     await sync({ createClient: clientWith({ inCal: CAL_A }) });
     legacyState(d, COLOR_A);
@@ -2197,7 +2197,7 @@ describe('CalDAV: eine Aufgabenliste bleibt kein Terminziel (#617)', () => {
   });
 
   it('laesst die dort bereits gespiegelten Termine liegen', async () => {
-    // Abschalten heisst nicht wegwerfen: was Yuvomi frueher in die Aufgabenliste
+    // Abschalten heisst nicht wegwerfen: was myCrib frueher in die Aufgabenliste
     // geschrieben hat, liegt weiter im Kalender des Nutzers.
     const d = buildDb();
     _setTestDatabase(d);

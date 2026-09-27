@@ -24,7 +24,7 @@ export function isOidcEnabled() {
 /**
  * Darf eine SSO-Anmeldung ein noch unbekanntes Konto ANLEGEN? (#654)
  *
- * Wer Yuvomi an einen IdP haengt, den er nicht nur fuer diesen Haushalt
+ * Wer myCrib an einen IdP haengt, den er nicht nur fuer diesen Haushalt
  * betreibt, teilt damit sein ganzes Verzeichnis: bisher bekam jeder, der sich
  * dort anmelden konnte, beim ersten Klick auf „Mit SSO anmelden" ungefragt ein
  * Konto im Familienplaner. Ein Verzeichnis ist aber eine Liste von Menschen,

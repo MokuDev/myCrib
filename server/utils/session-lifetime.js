@@ -11,7 +11,7 @@
  * benutzt wurde, lief also nie ab, waehrend der rechtmaessige Browser am
  * siebten Tag abgemeldet wurde.
  *
- * WARUM 90 TAGE. Yuvomi ist fuer den ganzen Haushalt, auch fuer die, die es
+ * WARUM 90 TAGE. myCrib ist fuer den ganzen Haushalt, auch fuer die, die es
  * einmal im Monat oeffnen; die sollen sich nicht bei jedem Besuch anmelden. Der
  * Preis: ein gestohlenes, unbenutztes Cookie gilt laenger. Das Gegenstueck, das
  * ihn bezahlt, ist "auf anderen Geraeten abmelden" (#1354).

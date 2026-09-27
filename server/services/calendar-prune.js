@@ -74,7 +74,7 @@ export function pruneDeletedEvents(database, {
 //
 // Etwas anderes als der Prune darüber, obwohl beide Termine löschen: dort
 // entscheidet der Server ("der Kalender liefert diesen Termin nicht mehr"), hier
-// der Mensch ("ich will diesen Kalender in Yuvomi nicht mehr sehen"). Deshalb
+// der Mensch ("ich will diesen Kalender in myCrib nicht mehr sehen"). Deshalb
 // kein Leer-Guard und kein UID-Abgleich - die Auswahl ist die Ansage.
 //
 // LOKAL, NICHT NACH AUSSEN: Gelöscht wird mit einem direkten DELETE, ohne

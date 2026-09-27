@@ -118,10 +118,10 @@ function buildScheduleFeed(conn, userId, now = new Date()) {
   const out = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//Schedule Feed//DE',
+    'PRODID:-//myCrib//Schedule Feed//DE',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
-    'X-WR-CALNAME:Yuvomi Schedule',
+    'X-WR-CALNAME:myCrib Schedule',
   ];
   if (feedZone) out.push(`X-WR-TIMEZONE:${feedZone}`);
   // Genau ein VTIMEZONE fuer die Feed-Zone (RFC 5545: vor den VEVENTs), nur

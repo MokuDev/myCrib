@@ -110,7 +110,7 @@ router.get('/export/fasting', (req, res) => {
   try {
     const rows = getAllFastingHistory(db.get(), { id: viewerId(req) }, subject(req), { from: req.query.from, to: req.query.to });
     res.set('Content-Type', 'text/csv; charset=utf-8');
-    res.set('Content-Disposition', 'attachment; filename="yuvomi-fasting.csv"');
+    res.set('Content-Disposition', 'attachment; filename="mycrib-fasting.csv"');
     return res.send(`\ufeff${fastingToCsv(rows)}\n`);
   } catch (error) { return sendError(res, error); }
 });

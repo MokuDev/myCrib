@@ -1,6 +1,6 @@
-# Yuvomi Modules
+# myCrib Modules
 
-Yuvomi loads third-party modules from the repository-level `modules/` directory. Each module lives in its own folder and must include a `module.json` manifest. Modules are separate code: do not edit Yuvomi core files to install one.
+myCrib loads third-party modules from the repository-level `modules/` directory. Each module lives in its own folder and must include a `module.json` manifest. Modules are separate code: do not edit myCrib core files to install one.
 
 ## Folder Layout
 
@@ -22,7 +22,7 @@ The folder name must match the manifest `id`.
   "id": "example-module",
   "name": "Example Module",
   "version": "1.0.0",
-  "description": "Adds a small page to Yuvomi.",
+  "description": "Adds a small page to myCrib.",
   "entry": "index.js",
   "style": "style.css",
   "icon": "box",
@@ -102,11 +102,11 @@ export async function render(container, context) {
 
 `context` carries `user`, `page` and `signal`. `page` is the normalized declaration from your manifest (`composition`, `width`, `navigation`, `responsive`), so a module can branch on it without reading `module.json` a second time. `signal` is an `AbortSignal` the router aborts as soon as the user leaves your page: pass it to every `addEventListener` (`{ signal }`) and clear timers on its `abort` event, and check `signal.aborted` after each `await` before touching the DOM. Without that, a page keeps polling and re-rendering into a container that is no longer on screen.
 
-Modules may import public Yuvomi browser libraries such as `/api.js`, `/i18n.js`, and utilities under `/utils/`. For calls to Yuvomi's built-in REST API, prefer `import { api } from '/api.js'`: it prefixes requests with `/api/v1`, sends the current session credentials, handles CSRF tokens, and uses non-cached fetches for user data.
+Modules may import public myCrib browser libraries such as `/api.js`, `/i18n.js`, and utilities under `/utils/`. For calls to myCrib's built-in REST API, prefer `import { api } from '/api.js'`: it prefixes requests with `/api/v1`, sends the current session credentials, handles CSRF tokens, and uses non-cached fetches for user data.
 
-If a module calls a separate backend service through a reverse proxy, expose that service on a same-origin `/api/...` path whenever the response is dynamic. Yuvomi's service worker deliberately bypasses `/api/` requests, while other same-origin GET requests may be handled by the app-shell caching strategy. A dynamic proxy path such as `/ext/myservice/...` can therefore return stale cached responses unless you also change the service-worker strategy.
+If a module calls a separate backend service through a reverse proxy, expose that service on a same-origin `/api/...` path whenever the response is dynamic. myCrib's service worker deliberately bypasses `/api/` requests, while other same-origin GET requests may be handled by the app-shell caching strategy. A dynamic proxy path such as `/ext/myservice/...` can therefore return stale cached responses unless you also change the service-worker strategy.
 
-Modules must follow the same frontend security rules as core Yuvomi:
+Modules must follow the same frontend security rules as core myCrib:
 
 - Use `replaceChildren()` and `insertAdjacentHTML()`.
 - Escape untrusted values before inserting HTML.
@@ -116,19 +116,19 @@ Modules must follow the same frontend security rules as core Yuvomi:
 
 ## Modules With A Backend Service
 
-A module page is browser code with no server of its own. When a module needs stored state, scheduled work, or a third-party credential, run that as a separate service beside Yuvomi rather than as a patch to core, and leave Yuvomi on its official image. What follows is what such a module needs in order to survive a Yuvomi upgrade.
+A module page is browser code with no server of its own. When a module needs stored state, scheduled work, or a third-party credential, run that as a separate service beside myCrib rather than as a patch to core, and leave myCrib on its official image. What follows is what such a module needs in order to survive a myCrib upgrade.
 
-Serve the service from the same origin under `/api/extensions/<module-id>/`. That path is required, not a convention: `capabilities.api.prefix` is rejected unless it is exactly `/api/extensions/<module-id>`, so an extension cannot take over a core API prefix. Browser requests then carry the Yuvomi session cookie, and the service worker leaves them alone. The stale-cache trap described above applies to any dynamic path outside `/api/`.
+Serve the service from the same origin under `/api/extensions/<module-id>/`. That path is required, not a convention: `capabilities.api.prefix` is rejected unless it is exactly `/api/extensions/<module-id>`, so an extension cannot take over a core API prefix. Browser requests then carry the myCrib session cookie, and the service worker leaves them alone. The stale-cache trap described above applies to any dynamic path outside `/api/`.
 
-Do not open `yuvomi.db`. It is core's private storage: the schema changes between releases without notice, and a second writer breaks Yuvomi's own migrations. Read and write through `/api/v1` instead. If the data a module needs is not reachable through the API, that is a missing endpoint worth an issue, not a reason to reach for the file.
+Do not open `yuvomi.db`. It is core's private storage: the schema changes between releases without notice, and a second writer breaks myCrib's own migrations. Read and write through `/api/v1` instead. If the data a module needs is not reachable through the API, that is a missing endpoint worth an issue, not a reason to reach for the file.
 
-Re-check identity on the server for every request. Forward the incoming Yuvomi session cookie to `GET /api/v1/auth/me` over the internal Yuvomi URL, and trust only that response for the user id, role, and permissions. The browser half of a module is not a trusted caller: never accept a user id or role from a request body.
+Re-check identity on the server for every request. Forward the incoming myCrib session cookie to `GET /api/v1/auth/me` over the internal myCrib URL, and trust only that response for the user id, role, and permissions. The browser half of a module is not a trusted caller: never accept a user id or role from a request body.
 
-Cache that answer briefly rather than resolving it on every call. Yuvomi rate-limits `/api/` to 300 requests per minute per IP, and a service that does not forward the caller's address spends that budget from its own container IP for all of its users at once - the first symptom is a `429` for everyone. A few seconds of cache keyed on the session cookie is enough, and short enough that a logout still takes effect.
+Cache that answer briefly rather than resolving it on every call. myCrib rate-limits `/api/` to 300 requests per minute per IP, and a service that does not forward the caller's address spends that budget from its own container IP for all of its users at once - the first symptom is a `429` for everyone. A few seconds of cache keyed on the session cookie is enough, and short enough that a logout still takes effect.
 
-Yuvomi's CSRF token protects Yuvomi's endpoints, not a module's. State-changing routes on the service should independently require:
+myCrib's CSRF token protects myCrib's endpoints, not a module's. State-changing routes on the service should independently require:
 
-- a valid Yuvomi session, verified as above;
+- a valid myCrib session, verified as above;
 - an `Origin` matching the public host;
 - the service's own double-submit CSRF cookie and header pair;
 - an endpoint-specific role or ownership check.
@@ -173,9 +173,9 @@ Optional `capabilities` block in `module.json` registers your module with the sa
 
 Third-party modules integrate with the same `t('key')` helper as core UI (`import { t } from '/i18n.js'`).
 
-**Supported languages:** the same 24 locales as Yuvomi core (`getSupportedLocales()` / files under `public/locales/`). You may ship all of them, a subset, or only your default - the runtime never shows raw i18n keys in shell UI.
+**Supported languages:** the same 24 locales as myCrib core (`getSupportedLocales()` / files under `public/locales/`). You may ship all of them, a subset, or only your default - the runtime never shows raw i18n keys in shell UI.
 
-**Ship translation files** under `locales/{locale}.json` in your module folder (for example `locales/de.json`, `locales/en.json`, `locales/ru.json`). Yuvomi scans that folder at module load and exposes metadata on `GET /api/v1/modules`:
+**Ship translation files** under `locales/{locale}.json` in your module folder (for example `locales/de.json`, `locales/en.json`, `locales/ru.json`). myCrib scans that folder at module load and exposes metadata on `GET /api/v1/modules`:
 
 ```json
 "i18n": {
@@ -214,12 +214,12 @@ Use flat keys in locale files:
 
 In `module.json`, reference them with short `labelKey` / `titleKey` values (`"menu"`, `"widgets.summary"`) or full paths (`extensions.my-module.menu`). Inside your module JavaScript, call `t('extensions.my-module.your.key')` for any other strings.
 
-Core shell surfaces (navigation, dashboard widget chrome, permissions admin, API token scopes) resolve extension labels automatically. Core UI chrome (`common.save`, `nav.settings`, …) still comes from Yuvomi's own locale files.
+Core shell surfaces (navigation, dashboard widget chrome, permissions admin, API token scopes) resolve extension labels automatically. Core UI chrome (`common.save`, `nav.settings`, …) still comes from myCrib's own locale files.
 
 Rules:
 
-- `manifestVersion` declares the **format** your manifest is written in, not the version of your module (that is `version`). It is an integer; this Yuvomi reads up to **1**. Omit it and 1 is assumed, so manifests written before this field keep working. A manifest declaring a *higher* version is rejected outright rather than read in part: loading it halfway would mean silently ignoring fields it considers essential, and the operator would see a module that runs and does something other than what it says. The error names both numbers.
-- **What a version bump means for you:** new optional fields never require one - an older manifest simply omits them and behaves as before. The number only moves when a field is removed or renamed, and when it does, this Yuvomi keeps reading the older format as well. A guard in `test/test-modules.js` enforces that: it drives a manifest carrying every promised field through the real normaliser, so dropping one turns the suite red rather than turning somebody's widget blank.
+- `manifestVersion` declares the **format** your manifest is written in, not the version of your module (that is `version`). It is an integer; this myCrib reads up to **1**. Omit it and 1 is assumed, so manifests written before this field keep working. A manifest declaring a *higher* version is rejected outright rather than read in part: loading it halfway would mean silently ignoring fields it considers essential, and the operator would see a module that runs and does something other than what it says. The error names both numbers.
+- **What a version bump means for you:** new optional fields never require one - an older manifest simply omits them and behaves as before. The number only moves when a field is removed or renamed, and when it does, this myCrib keeps reading the older format as well. A guard in `test/test-modules.js` enforces that: it drives a manifest carrying every promised field through the real normaliser, so dropping one turns the suite red rather than turning somebody's widget blank.
 - Permission module key: `ext:<module-id>` (appears in Settings -> Administration -> Roles & permissions).
 - Widget id in the dashboard: `<module-id>:<widget-id>` (namespace avoids collisions with core widgets).
 - `capabilities.permissions.module` is required when you declare widgets and/or `api.prefix`.
@@ -234,20 +234,20 @@ Serve a sidecar from the same origin under `/api/extensions/<module-id>/` (Traef
 
 ## Loading And Failure Behavior
 
-Yuvomi scans `modules/` and validates each `module.json`. Invalid modules are shown as errored in Settings and are not loaded. Disabled modules are not served to the browser and do not appear in navigation. If a module page fails while rendering, Yuvomi shows an error for that page without changing core application code.
+myCrib scans `modules/` and validates each `module.json`. Invalid modules are shown as errored in Settings and are not loaded. Disabled modules are not served to the browser and do not appear in navigation. If a module page fails while rendering, myCrib shows an error for that page without changing core application code.
 
 Admins enable and disable modules in Settings -> Modules -> Active modules. Ordering is a separate, personal matter and lives in Settings -> Personal -> Navigation, where every member also decides which modules they want in their own navigation - hiding one there removes it from that member's sidebar and mobile favourites without taking it from the household. Copying a new folder into `modules/` makes it appear in both places automatically.
 
-## Compatibility Across Yuvomi Releases
+## Compatibility Across myCrib Releases
 
-`module.json` records the module's own version, not the Yuvomi version it was written against, and Yuvomi does not gate loading on a compatibility range. A module that calls an endpoint a later release renamed or moved therefore keeps loading and fails at the point of use, in front of the user.
+`module.json` records the module's own version, not the myCrib version it was written against, and myCrib does not gate loading on a compatibility range. A module that calls an endpoint a later release renamed or moved therefore keeps loading and fails at the point of use, in front of the user.
 
 Two endpoints help, though they answer at different times:
 
-- `GET /api/v1/version` returns the running Yuvomi version to any caller holding a session or an API token. Without a credential the response still describes the instance, but omits the version.
+- `GET /api/v1/version` returns the running myCrib version to any caller holding a session or an API token. Without a credential the response still describes the instance, but omits the version.
 - `GET /api/v1/openapi.json` describes the operations that version actually serves. It is admin-only, so treat it as a check you run while developing and against a new release before shipping, not as something every module instance can call at startup.
 
-Compare the operations the module requires - method, path, and the response fields it reads - against that document while building, and again when a Yuvomi release moves. At runtime, where the document is usually out of reach, watch the version instead and read the failure: a `404` or `405` on an endpoint that worked before means the operation moved, and that is the point to degrade rather than retry. Three outcomes cover the realistic cases: run normally; keep stored data, review and export readable while blocking writes; or show a dependency error with a retry control. Refusing a write is better than issuing it against an endpoint whose meaning has changed.
+Compare the operations the module requires - method, path, and the response fields it reads - against that document while building, and again when a myCrib release moves. At runtime, where the document is usually out of reach, watch the version instead and read the failure: a `404` or `405` on an endpoint that worked before means the operation moved, and that is the point to degrade rather than retry. Three outcomes cover the realistic cases: run normally; keep stored data, review and export readable while blocking writes; or show a dependency error with a retry control. Refusing a write is better than issuing it against an endpoint whose meaning has changed.
 
 Third-party modules should build on `/api/v1` and the public browser libraries described above; breaking changes to those are called out in the CHANGELOG. Direct database access, private helpers under `server/`, and undocumented response fields sit outside that line and may change in any release without notice.
 
@@ -255,7 +255,7 @@ How long that line holds: before an operation under `/api/v1` changes or goes aw
 
 ## Docker / Podman
 
-The default `docker-compose.yml` mounts `${MODULES_DIR:-./modules}` to `/app/modules`. To keep modules outside the Yuvomi checkout, set `MODULES_DIR=/absolute/path/to/yuvomi-modules` in `.env` and restart the compose service. The compose file pins `MODULES_DIR` to `/app/modules` inside the container, so the value in `.env` only moves the host folder. New or changed module folders are scanned at runtime; rebuilding the image is not required.
+The default `docker-compose.yml` mounts `${MODULES_DIR:-./modules}` to `/app/modules`. To keep modules outside the myCrib checkout, set `MODULES_DIR=/absolute/path/to/yuvomi-modules` in `.env` and restart the compose service. The compose file pins `MODULES_DIR` to `/app/modules` inside the container, so the value in `.env` only moves the host folder. New or changed module folders are scanned at runtime; rebuilding the image is not required.
 
 On Podman (RHEL/Fedora/CentOS Stream) use `podman-compose.yml` instead — it mounts the same `/app/modules` path with the SELinux `:Z` relabel so the rootless container can read your modules.
 

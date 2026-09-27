@@ -121,7 +121,7 @@ export const REASON_TEXT = Object.freeze({
  *
  * Ohne `reason` bleibt es bei der Servermeldung, wie in `twoFactorErrorText()`
  * (personal-account.js): diese Fehler tragen ihren Inhalt nur im Text, etwa
- * „Backup aus einer neueren Yuvomi-Version, erst aktualisieren". Ein
+ * „Backup aus einer neueren myCrib-Version, erst aktualisieren". Ein
  * allgemeiner Text verloere genau den naechsten Schritt.
  * @param {{ message?: string, data?: { reason?: string } } | undefined} err
  * @returns {string}

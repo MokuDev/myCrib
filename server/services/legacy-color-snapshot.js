@@ -4,7 +4,7 @@
 //
 // Die Heilung nimmt eine eingebrannte Kalenderfarbe nur, solange ein Termin
 // genau die Farbe traegt, die er bei Fristbeginn trug (Schnappschuss je Konto
-// in sync_config). Waehlt jemand in Yuvomi eine Farbe, ist der Termin von da
+// in sync_config). Waehlt jemand in myCrib eine Farbe, ist der Termin von da
 // an keine Altlast mehr - auch wenn er spaeter wieder die alte Farbe bekommt.
 // Deshalb faellt er bei jeder lokalen Umfaerbung aus dem Schnappschuss, und
 // zwar an der Route selbst: dort kommt jede lokale Farbwahl an, auch eine,

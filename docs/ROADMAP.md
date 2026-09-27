@@ -1,4 +1,4 @@
-# Where Yuvomi is going
+# Where myCrib is going
 
 This page is direction, not a queue. It names the few themes that keep coming back across the
 open discussions, says for each what has been decided and what is still open, and lists the
@@ -9,7 +9,7 @@ the interface release goes out, and it is edited rather than appended to, so tha
 disappears from it.
 
 What it is not: a promise that any of this ships, or a place to ask for something. An idea is a
-[discussion](https://github.com/ulsklyc/yuvomi/discussions/new?category=ideas); what Yuvomi will
+[discussion](https://github.com/ulsklyc/yuvomi/discussions/new?category=ideas); what myCrib will
 not become is in [SCOPE.md](SCOPE.md); a decision made once is in [DECISIONS.md](DECISIONS.md).
 The [backlog](../BACKLOG.md) stays empty on purpose - the thread is the place for the single
 wish, and this page is the view from above.
@@ -66,7 +66,7 @@ contacts back to CardDAV (#702) and Google contacts (#843), meal plans into the 
 and into Tandoor (#747), reminders into CalDAV (#705), events created by a member back into
 their Google calendar (#573).
 
-- **Decided.** Yuvomi stays the server and a bridge is a client ([SCOPE.md section
+- **Decided.** myCrib stays the server and a bridge is a client ([SCOPE.md section
   2](SCOPE.md#2-integrations-with-other-peoples-services)); what the API cannot do yet is
   answer "what changed", which every two-way sync needs - tracked as #1002.
 - **Open.** The change feed itself; then each write-back on its own merits. Two calendars

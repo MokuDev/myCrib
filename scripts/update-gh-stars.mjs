@@ -55,7 +55,7 @@ const patterns = (stars) => [
 
 async function main() {
   const res = await fetch(`https://api.github.com/repos/${REPO}`, {
-    headers: { 'User-Agent': 'yuvomi-build-script' },
+    headers: { 'User-Agent': 'mycrib-build-script' },
   });
   if (!res.ok) {
     throw new Error(`GitHub API ${res.status}: ${await res.text()}`);

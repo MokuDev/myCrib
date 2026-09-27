@@ -9,7 +9,7 @@
   <meta name="referrer" content="strict-origin-when-cross-origin">
   <meta name="robots" content="index, follow">
   <meta name="color-scheme" content="light dark">
-  <title>Yuvomi - The Self-Hosted Family Planner</title>
+  <title>myCrib - The Self-Hosted Family Planner</title>
   <!-- Der <title> behaelt "Family Planner": das ist die Kategorie, unter der
        gesucht wird, und die Positionierung aus PRODUCT.md. Die Reichweite
        gehoert in die Beschreibung, die dafuer Platz hat - der bestaetigte
@@ -19,20 +19,20 @@
   <meta name="theme-color" content="#FBFAF7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#191816" media="(prefers-color-scheme: dark)">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Yuvomi - The Self-Hosted Family Planner">
+  <meta property="og:title" content="myCrib - The Self-Hosted Family Planner">
   <meta property="og:description" content="Tasks, shopping, meals, calendar, budget - for families, couples and one-person households. All self-hosted, no cloud dependency.">
   <meta property="og:image" content="https://yuvomi.cloud/og-image.png">
   <meta property="og:url" content="https://yuvomi.cloud/">
-  <meta property="og:site_name" content="Yuvomi">
+  <meta property="og:site_name" content="myCrib">
   <meta property="og:locale" content="en_US">
   <meta property="og:locale:alternate" content="de_DE">
-  <meta property="og:image:alt" content="Yuvomi - the self-hosted family planner, shown on desktop and mobile">
+  <meta property="og:image:alt" content="myCrib - the self-hosted family planner, shown on desktop and mobile">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="Yuvomi - The Self-Hosted Family Planner">
+  <meta name="twitter:title" content="myCrib - The Self-Hosted Family Planner">
   <meta name="twitter:description" content="Tasks, shopping, meals, calendar, budget - for families, couples and one-person households. All self-hosted, no cloud dependency.">
   <meta name="twitter:image" content="https://yuvomi.cloud/twitter-image.png">
   <link rel="canonical" href="https://yuvomi.cloud/">
-  <link rel="icon" type="image/svg+xml" href="logo.svg">
+  <link rel="icon" type="image/png" href="logo.png">
 
   <!-- Geteiltes Token-System der vier Seiten. Frueher stand es hier viermal.
        Der Rest dieses <style> ist seitenspezifisch und bleibt lokal. -->
@@ -118,7 +118,7 @@
     .topbar .wrap { display: flex; align-items: center; justify-content: space-between; height: 100%; }
     .nav-logo { display: flex; align-items: center; gap: 11px; font-weight: 700; font-size: 1.2rem; letter-spacing: -0.02em; color: var(--text-1);
       flex-shrink: 0; min-height: 44px; margin-right: 12px; }
-    .nav-logo svg { width: 34px; height: 34px; filter: drop-shadow(0 3px 8px var(--accent-glow)); }
+    .nav-logo img { width: 34px; height: 34px; border-radius: 7px; filter: drop-shadow(0 3px 8px var(--accent-glow)); }
     /* Fortschrittslinie unter der Topbar: der billigste ehrliche Weg, "wo bin
        ich" auf einer Seite von 15 Bildschirmen zu beantworten. Sie sitzt IN der
        Leiste, verbraucht also keine eigene Hoehe. */
@@ -766,7 +766,7 @@
        duplicate the in-hero Install button above the fold. No-JS keeps it visible. */
     /* visibility, not just opacity: pointer-events keeps the mouse out but an
        opacity-0 link is still in the tab order, so keyboard users hit an
-       invisible "Install Yuvomi" while the hero was still on screen. .to-top on
+       invisible "Install myCrib" while the hero was still on screen. .to-top on
        the legal pages already does it this way. */
     html.js .mobile-cta { opacity: 0; visibility: hidden; pointer-events: none;
       transition: opacity .3s var(--ease-out), visibility .3s var(--ease-out); }
@@ -911,9 +911,9 @@
 <nav class="topbar" data-t-aria="nav_main" aria-label="Main">
   <div class="nav-progress" aria-hidden="true"><span id="navBar"></span></div>
   <div class="wrap">
-    <a href="#top" class="nav-logo" aria-label="Yuvomi">
-      <svg viewBox="0 0 160 160" fill="none" aria-hidden="true"><defs><linearGradient id="g" x1="0" y1="0" x2="160" y2="160" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#6c3aed"/></linearGradient></defs><rect width="160" height="160" rx="36" fill="url(#g)"/><g fill="white" fill-opacity="0.82"><circle cx="64" cy="72" r="27"/><circle cx="100" cy="78" r="25"/><circle cx="80" cy="106" r="24"/></g></svg>
-      Yuvomi
+    <a href="#top" class="nav-logo" aria-label="myCrib">
+      <img src="logo.png" alt="" width="34" height="34">
+      myCrib
     </a>
     <!-- Vier Laeufe lang gemeldet: 15,2 Bildschirme Desktop und 25,2 mobil ohne
          jede Positionsanzeige und ohne Weg, das Dokument zu ueberfliegen. Die
@@ -942,11 +942,11 @@
 
 <!-- Sticky thumb-zone Install CTA (phones only). No aria-label: it carried a
      hardcoded English one that overrode the translated visible text, so a
-     German reader's screen reader announced "Install Yuvomi" over "Yuvomi
+     German reader's screen reader announced "Install myCrib" over "myCrib
      installieren". The span is the accessible name. -->
 <a href="install.html" class="mobile-cta">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-  <span data-t="hero_install">Install Yuvomi</span>
+  <span data-t="hero_install">Install myCrib</span>
 </a>
 </header>
 
@@ -967,7 +967,7 @@
            the homelab criteria are one scroll away, in the grid that owns them. -->
       <p class="hero-sub" data-t="hero_sub">The self-hosted family planner: tasks, calendar, budget and shopping on a server you own. For a family, a couple, or just you.</p>
       <div class="hero-actions">
-        <a href="install.html" class="btn btn-primary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-t="hero_install">Install Yuvomi</span></a>
+        <a href="install.html" class="btn btn-primary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-t="hero_install">Install myCrib</span></a>
         <a href="#screens" class="btn btn-secondary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg><span data-t="hero_demo">See it in action</span></a>
       </div>
       <!-- Drei Chips, nicht fuenf. "MIT-Lizenz" und "24 Sprachen" standen hier
@@ -994,12 +994,12 @@
              ohne sie hier haette das Skript erst die 2752px-Desktopaufnahme
              geholt und applyShots sie danach ersetzt - also genau der doppelte
              Download, den dieser Kommentar zu verhindern verspricht. -->
-        <img class="sc" data-shot-profile="lead" data-light="screenshots/dashboard-light-web.png" data-dark="screenshots/dashboard-dark-web.png" data-light-m="screenshots/dashboard-light-mobile.png" data-dark-m="screenshots/dashboard-dark-mobile.png" alt="Yuvomi dashboard showing today's tasks, calendar, meals and shopping at a glance" data-alt-t="alt_hero" width="900" height="675" loading="eager" decoding="async" id="heroShot">
+        <img class="sc" data-shot-profile="lead" data-light="screenshots/dashboard-light-web.png" data-dark="screenshots/dashboard-dark-web.png" data-light-m="screenshots/dashboard-light-mobile.png" data-dark-m="screenshots/dashboard-dark-mobile.png" alt="myCrib dashboard showing today's tasks, calendar, meals and shopping at a glance" data-alt-t="alt_hero" width="900" height="675" loading="eager" decoding="async" id="heroShot">
         <script>document.getElementById('heroShot')&&(function(i){try{var t=localStorage.getItem('yuvomi-theme')||localStorage.getItem('oikos-theme'),d=t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches),l=localStorage.getItem('yuvomi-lang')||localStorage.getItem('oikos-lang')||((navigator.language||'en').toLowerCase().indexOf('de')===0?'de':'en'),m=matchMedia('(max-width:860px)').matches,k=d?'dark':'light',b=i.dataset[m&&i.dataset[k+'M']?k+'M':k],p=l!=='en'?b.replace('screenshots/','screenshots/'+l+'/'):b;i.onerror=function(){i.onerror=null;i.srcset='';i.src=b;};i.srcset=p.replace(/\.png$/,'@1x.webp')+' 1x, '+p.replace(/\.png$/,'.webp')+' 2x';i.src=p.replace(/\.png$/,'.webp');}catch(e){i.src=i.dataset.light;}})(document.getElementById('heroShot'));</script>
-        <noscript><img class="sc" src="screenshots/dashboard-light-web.png" alt="Yuvomi dashboard showing today's tasks, calendar, meals and shopping at a glance" width="900" height="675"></noscript>
+        <noscript><img class="sc" src="screenshots/dashboard-light-web.png" alt="myCrib dashboard showing today's tasks, calendar, meals and shopping at a glance" width="900" height="675"></noscript>
       </div>
       <div class="hero-float">
-        <img class="sc" data-light="screenshots/tasks-light-mobile.png" data-dark="screenshots/tasks-dark-mobile.png" src="screenshots/tasks-light-mobile.png" alt="Yuvomi tasks on mobile" data-alt-t="alt_hero_m" loading="lazy" width="440" height="956">
+        <img class="sc" data-light="screenshots/tasks-light-mobile.png" data-dark="screenshots/tasks-dark-mobile.png" src="screenshots/tasks-light-mobile.png" alt="myCrib tasks on mobile" data-alt-t="alt_hero_m" loading="lazy" width="440" height="956">
       </div>
     </div>
   </div>
@@ -1047,7 +1047,7 @@
           <p data-t="gal_dash_c"><b>Everything due today, in one place.</b> Tasks, the calendar, tonight’s dinner and the shopping list, without opening a single other app.</p>
         </figcaption>
         <div class="gal-frame">
-          <img class="sc" data-shot-profile="lead" data-light="screenshots/dashboard-light-web.png" data-light-m="screenshots/dashboard-light-mobile.png" data-dark-m="screenshots/dashboard-dark-mobile.png" data-sizes="(max-width: 860px) 300px, (min-width: 1248px) 1152px, 92vw" data-dark="screenshots/dashboard-dark-web.png" src="screenshots/dashboard-light-web.png" alt="Yuvomi dashboard showing today's tasks, calendar, meals and shopping at a glance" data-alt-t="alt_hero" loading="lazy" decoding="async" width="900" height="675">
+          <img class="sc" data-shot-profile="lead" data-light="screenshots/dashboard-light-web.png" data-light-m="screenshots/dashboard-light-mobile.png" data-dark-m="screenshots/dashboard-dark-mobile.png" data-sizes="(max-width: 860px) 300px, (min-width: 1248px) 1152px, 92vw" data-dark="screenshots/dashboard-dark-web.png" src="screenshots/dashboard-light-web.png" alt="myCrib dashboard showing today's tasks, calendar, meals and shopping at a glance" data-alt-t="alt_hero" loading="lazy" decoding="async" width="900" height="675">
         </div>
       </figure>
       <figure class="gal-item reveal" style="--m: var(--m-calendar)">
@@ -1056,7 +1056,7 @@
           <p data-t="gal_cal_c"><b>Google, iCloud and Nextcloud, finally in one calendar.</b> Two-way sync, so an appointment added here lands on every phone in the house.</p>
         </figcaption>
         <div class="gal-frame">
-          <img class="sc" data-light="screenshots/calendar-light-web.png" data-light-m="screenshots/calendar-light-mobile.png" data-dark-m="screenshots/calendar-dark-mobile.png" data-sizes="(max-width: 860px) 300px, (min-width: 1248px) 1152px, 92vw" data-dark="screenshots/calendar-dark-web.png" src="screenshots/calendar-light-web.png" alt="Yuvomi calendar showing appointments, tasks and birthdays for the whole household" data-alt-t="alt_c_cal" loading="lazy" decoding="async" width="900" height="675">
+          <img class="sc" data-light="screenshots/calendar-light-web.png" data-light-m="screenshots/calendar-light-mobile.png" data-dark-m="screenshots/calendar-dark-mobile.png" data-sizes="(max-width: 860px) 300px, (min-width: 1248px) 1152px, 92vw" data-dark="screenshots/calendar-dark-web.png" src="screenshots/calendar-light-web.png" alt="myCrib calendar showing appointments, tasks and birthdays for the whole household" data-alt-t="alt_c_cal" loading="lazy" decoding="async" width="900" height="675">
         </div>
       </figure>
       <!-- Tasks and Budget used to sit here too, with the same two images the
@@ -1377,7 +1377,7 @@
       <figure class="mod-shot reveal"><img class="sc" data-light="screenshots/documents-light-mobile.png" data-dark="screenshots/documents-dark-mobile.png" src="screenshots/documents-light-mobile.png" alt="Family documents on a phone" data-alt-t="alt_m_documents" loading="lazy" decoding="async" width="440" height="956"><figcaption data-t="m_docs_t">Documents</figcaption></figure>
       <figure class="mod-shot reveal"><img class="sc" data-light="screenshots/recipes-light-mobile.png" data-dark="screenshots/recipes-dark-mobile.png" src="screenshots/recipes-light-mobile.png" alt="The recipe list on a phone" data-alt-t="alt_m_recipes" loading="lazy" decoding="async" width="440" height="956"><figcaption data-t="m_recipes_t">Recipes</figcaption></figure>
     </div>
-    <p class="mod-scope reveal" data-t="more_scope">Not a photo library, a password manager or a media server: Yuvomi replaces the apps a household runs on, not your whole server. What you already run can stay. Calendars and contacts sync both ways over CalDAV and CardDAV, documents can live on WebDAV or Google Drive, an idle wall tablet can show photos from your own Immich, and API tokens plus the MCP endpoint let the rest of your setup talk to it.</p>
+    <p class="mod-scope reveal" data-t="more_scope">Not a photo library, a password manager or a media server: myCrib replaces the apps a household runs on, not your whole server. What you already run can stay. Calendars and contacts sync both ways over CalDAV and CardDAV, documents can live on WebDAV or Google Drive, an idle wall tablet can show photos from your own Immich, and API tokens plus the MCP endpoint let the rest of your setup talk to it.</p>
   </div>
 </section>
 
@@ -1509,7 +1509,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       <h2 data-t="cta_title">Take back control of <em>your own data.</em></h2>
       <p data-t="cta_desc">You install it once and it is yours after that. No account with us, no subscription, and nothing of ours between your household and its data.</p>
       <div class="cta-actions">
-        <a href="install.html" class="btn btn-primary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-t="cta_install">Install Yuvomi</span></a>
+        <a href="install.html" class="btn btn-primary"><svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg><span data-t="cta_install">Install myCrib</span></a>
         <a href="https://github.com/ulsklyc/yuvomi" class="btn btn-secondary" target="_blank" rel="noopener"><svg aria-hidden="true" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z"/></svg><span data-t="cta_gh">View on GitHub</span></a>
       </div>
     </div>
@@ -1530,7 +1530,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
   <div class="wrap">
     <div class="foot-grid">
       <div class="foot-brand">
-        <a href="#top" class="nav-logo"><svg viewBox="0 0 160 160" fill="none" aria-hidden="true"><defs><linearGradient id="gf" x1="0" y1="0" x2="160" y2="160" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#6c3aed"/></linearGradient></defs><rect width="160" height="160" rx="36" fill="url(#gf)"/><g fill="white" fill-opacity="0.82"><circle cx="64" cy="72" r="27"/><circle cx="100" cy="78" r="25"/><circle cx="80" cy="106" r="24"/></g></svg>Yuvomi</a>
+        <a href="#top" class="nav-logo"><img src="logo.png" alt="" width="34" height="34">myCrib</a>
         <p data-t="footer_heart">Built with care for households who value privacy and simplicity.</p>
       </div>
       <nav class="foot-cols" data-t-aria="foot_nav" aria-label="Footer">
@@ -1580,7 +1580,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       long_q2:'What if I want my data somewhere else?', long_a2:'<b>Copying one file is the whole export.</b> Everything lives in a single SQLite file on your own disk, unless you moved documents to a folder, WebDAV or Google Drive; those files need their own backup. Scheduled backups write a restorable archive on top of that, and the documented API plus the MCP endpoint pull anything out in whatever shape you need.',
       long_q3:'What if I lose the encryption key?', long_a3:'<b>Then the database is gone, and we cannot help you.</b> That is the honest answer: SQLCipher has no recovery path and no back door, which is the entire point of it. Store the key the way you store the ones that matter. Encryption is optional; if you would rather not carry that risk, leave it off and the file stays readable.',
       long_title:'The three questions worth asking first',
-      alt_c_cal:'Yuvomi calendar showing appointments, tasks and birthdays for the whole household',
+      alt_c_cal:'myCrib calendar showing appointments, tasks and birthdays for the whole household',
       alt_m_inventory:'The inventory module on a phone',
       alt_m_shopping:'A shared shopping list on a phone',
       alt_m_rewards:'The rewards ledger on a phone',
@@ -1604,7 +1604,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       swap_10_a:'a notes app & contacts sync',  swap_10_b:'<b>Notes & Contacts</b> - Markdown notes, CardDAV sync',
       swap_close:'There\'s a calmer way. <span>Self-hosted, and yours.</span>',
       skip_link:'Skip to content',
-      more_scope:'Not a photo library, a password manager or a media server: Yuvomi replaces the apps a household runs on, not your whole server. What you already run can stay. Calendars and contacts sync both ways over CalDAV and CardDAV, documents can live on WebDAV or Google Drive, an idle wall tablet can show photos from your own Immich, and API tokens plus the MCP endpoint let the rest of your setup talk to it.',
+      more_scope:'Not a photo library, a password manager or a media server: myCrib replaces the apps a household runs on, not your whole server. What you already run can stay. Calendars and contacts sync both ways over CalDAV and CardDAV, documents can live on WebDAV or Google Drive, an idle wall tablet can show photos from your own Immich, and API tokens plus the MCP endpoint let the rest of your setup talk to it.',
       m_pantry_t:'Pantry', m_pantry_d:'What is actually in the house: amount, storage location and best-before date, with expiry and low-stock filters, and a two-way handover with the shopping list.',
       m_family_t:'Family', m_family_d:'Member profiles with roles, photos and contact details, kept in sync with Contacts and Birthdays.',
       m_api_t:'API tokens', m_api_d:'Bearer and X-API-Key tokens against a documented OpenAPI 3.0 spec, plus an MCP endpoint at <code>/mcp</code> that lets a client like Claude Desktop drive the API in plain language.',
@@ -1617,8 +1617,8 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       ho_2_d:'Any task can carry a point value. Finishing it credits whoever it was assigned to, and those points buy real rewards from a catalog you control.',
       ho_3_a:'A receipt gets filed', ho_3_b:'It hangs on the transaction',
       ho_3_d:'Attach it to the budget entry from the documents you already keep, or upload it on the spot. Filed once, findable from both sides.',
-      alt_hero:"Yuvomi dashboard showing today's tasks, calendar, meals and shopping at a glance",
-      alt_hero_m:"Yuvomi tasks on mobile",
+      alt_hero:"myCrib dashboard showing today's tasks, calendar, meals and shopping at a glance",
+      alt_hero_m:"myCrib tasks on mobile",
       alt_f_health_m:"Health vitals on mobile",
       alt_f_tasks_m:"Tasks on mobile",
       alt_f_meals_m:"Meals on mobile",
@@ -1635,7 +1635,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       tb_writes_k:'Writes', tb_writes_v:'Four volumes you own: data, backups, modules, documents.',
       tb_out_k:'Outbound', tb_out_v:'Out of the box, one update check against the GitHub releases API. Anything else reaches out only when you use a feature that needs it: the calendar settings load the holiday country list from openholidaysapi.org, the subscription logo search looks up the website of the service, and weather, holidays, calendar sync, push and cloud backup connect once you switch them on.',
       tb_data_k:'Your data', tb_data_v:'One SQLite file at', tb_data_v2:'Copying it is the whole export, unless documents live outside the database.',
-      hero_install:'Install Yuvomi', hero_demo:'See it in action', tag_nocloud:'No cloud required',
+      hero_install:'Install myCrib', hero_demo:'See it in action', tag_nocloud:'No cloud required',
       gal_eyebrow:'See it first', gal_title:'This is the whole thing, <em>on one screen.</em>',
       gal_desc:'No demo account, no sales call. The screens your family opens every day, at the size you will actually use them. The rest are further down.',
       gal_dash_k:'Dashboard', gal_dash_c:'<b>Everything due today, in one place.</b> Tasks, the calendar, tonight’s dinner and the shopping list, without opening a single other app.',
@@ -1682,7 +1682,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       /* "Get started" brach als einziger CTA die Installieren-Verbfamilie
          (nav, hero, Sprungmenue sagen alle "Install") - gleiches Ziel, gleiches
          Icon, also auch dasselbe Verb. */
-      cta_install:'Install Yuvomi', cta_gh:'View on GitHub',
+      cta_install:'Install myCrib', cta_gh:'View on GitHub',
       footer_heart:'Built with care for households who value privacy and simplicity.',
       foot_product:'Product', foot_screens:'Screenshots', foot_install:'Install', foot_docs:'Docs & spec',
       foot_guide:'User guide (community)',
@@ -1697,7 +1697,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       long_q2:'Was, wenn ich meine Daten woanders hin will?', long_a2:'<b>Eine Datei kopieren ist der ganze Export.</b> Alles liegt in einer einzigen SQLite-Datei auf eurer eigenen Platte, außer ihr habt die Dokumente in einen Ordner, auf WebDAV oder in Google Drive ausgelagert; diese Dateien brauchen eine eigene Sicherung. Geplante Backups schreiben darüber hinaus ein wiederherstellbares Archiv, und die dokumentierte API samt MCP-Endpunkt holt alles in der Form heraus, die ihr braucht.',
       long_q3:'Was, wenn ich den Verschlüsselungsschlüssel verliere?', long_a3:'<b>Dann ist die Datenbank weg, und wir können euch nicht helfen.</b> Das ist die ehrliche Antwort: SQLCipher hat keinen Wiederherstellungsweg und keine Hintertür, und genau das ist der Sinn der Sache. Verwahrt den Schlüssel wie die, auf die es ankommt. Die Verschlüsselung ist optional; wer dieses Risiko nicht tragen will, lässt sie aus, dann bleibt die Datei lesbar.',
       long_title:'Die drei Fragen, die man vorher stellen sollte',
-      alt_c_cal:'Yuvomi-Kalender mit Terminen, Aufgaben und Geburtstagen des ganzen Haushalts',
+      alt_c_cal:'myCrib-Kalender mit Terminen, Aufgaben und Geburtstagen des ganzen Haushalts',
       alt_m_inventory:'Das Inventar-Modul auf dem Handy',
       alt_m_shopping:'Eine geteilte Einkaufsliste auf dem Handy',
       alt_m_rewards:'Das Belohnungs-Konto auf dem Handy',
@@ -1721,7 +1721,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       swap_10_a:'eine Notiz-App plus Kontakte-Sync',swap_10_b:'<b>Notizen & Kontakte</b> - Markdown-Notizen, CardDAV-Sync',
       swap_close:'Es geht auch ruhiger. <span>Selbstgehostet, und es gehört euch.</span>',
       skip_link:'Zum Inhalt springen',
-      more_scope:'Keine Fotobibliothek, kein Passwort-Manager, kein Media-Server: Yuvomi ersetzt die Apps, mit denen ein Haushalt läuft, nicht euren ganzen Server. Was ihr schon betreibt, darf bleiben. Kalender und Kontakte synchronisieren in beide Richtungen über CalDAV und CardDAV, Dokumente können auf WebDAV oder Google Drive liegen, ein untätiges Wandtablet zeigt Fotos aus eurem eigenen Immich, und über API-Tokens samt MCP-Endpunkt spricht der Rest eurer Einrichtung mit Yuvomi.',
+      more_scope:'Keine Fotobibliothek, kein Passwort-Manager, kein Media-Server: myCrib ersetzt die Apps, mit denen ein Haushalt läuft, nicht euren ganzen Server. Was ihr schon betreibt, darf bleiben. Kalender und Kontakte synchronisieren in beide Richtungen über CalDAV und CardDAV, Dokumente können auf WebDAV oder Google Drive liegen, ein untätiges Wandtablet zeigt Fotos aus eurem eigenen Immich, und über API-Tokens samt MCP-Endpunkt spricht der Rest eurer Einrichtung mit myCrib.',
       m_pantry_t:'Vorrat', m_pantry_d:'Was tatsächlich im Haus ist: Menge, Lagerort und Mindesthaltbarkeit, mit Filtern für Ablauf und knappe Bestände, und einer Übergabe in beide Richtungen mit der Einkaufsliste.',
       m_family_t:'Familie', m_family_d:'Mitgliederprofile mit Rollen, Fotos und Kontaktdaten, synchron mit Kontakten und Geburtstagen.',
       m_api_t:'API-Tokens', m_api_d:'Bearer- und X-API-Key-Tokens gegen eine dokumentierte OpenAPI-3.0-Spezifikation, dazu ein MCP-Endpunkt unter <code>/mcp</code>, über den ein Client wie Claude Desktop die API in natürlicher Sprache bedient.',
@@ -1734,8 +1734,8 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       ho_2_d:'Jede Aufgabe kann Punkte tragen. Wer sie erledigt, bekommt sie gutgeschrieben, und die Punkte lassen sich gegen echte Belohnungen aus einem Katalog eintauschen, den ihr bestimmt.',
       ho_3_a:'Ein Beleg wird abgelegt', ho_3_b:'Er hängt an der Buchung',
       ho_3_d:'Hängt ihn aus euren vorhandenen Dokumenten an den Budget-Eintrag oder ladet ihn direkt hoch. Einmal ablegen, von beiden Seiten auffindbar.',
-      alt_hero:"Yuvomi-Übersicht: Aufgaben, Kalender, Mahlzeiten und Einkauf des Tages auf einen Blick",
-      alt_hero_m:"Yuvomi-Aufgaben auf dem Handy",
+      alt_hero:"myCrib-Übersicht: Aufgaben, Kalender, Mahlzeiten und Einkauf des Tages auf einen Blick",
+      alt_hero_m:"myCrib-Aufgaben auf dem Handy",
       alt_f_health_m:"Gesundheitswerte auf dem Handy",
       alt_f_tasks_m:"Aufgaben auf dem Handy",
       alt_f_meals_m:"Mahlzeiten auf dem Handy",
@@ -1752,7 +1752,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       tb_writes_k:'Legt an', tb_writes_v:'Vier Volumes, die euch gehören: Daten, Backups, Module, Dokumente.',
       tb_out_k:'Nach außen', tb_out_v:'Ab Werk eine Update-Abfrage an die GitHub-Releases-API. Alles andere geht erst nach außen, wenn ihr eine Funktion nutzt, die es braucht: die Kalender-Einstellungen laden die Liste der Feiertagsländer von openholidaysapi.org, die Logo-Suche für Abos ruft die Website des Dienstes auf, und Wetter, Feiertage, Kalender-Sync, Push und Cloud-Backup verbinden sich erst, wenn ihr sie einschaltet.',
       tb_data_k:'Eure Daten', tb_data_v:'Eine einzige SQLite-Datei unter', tb_data_v2:'Kopieren ist der ganze Export, solange die Dokumente in der Datenbank liegen.',
-      hero_install:'Yuvomi installieren', hero_demo:'App ansehen', tag_nocloud:'Keine Cloud nötig',
+      hero_install:'myCrib installieren', hero_demo:'App ansehen', tag_nocloud:'Keine Cloud nötig',
       gal_eyebrow:'Erst sehen', gal_title:'Das ist alles, <em>auf einem Bildschirm.</em>',
       gal_desc:'Kein Demo-Konto, kein Verkaufsgespräch. Die Bildschirme, die eure Familie täglich öffnet, in der Größe, in der ihr sie wirklich nutzt. Der Rest kommt weiter unten.',
       gal_dash_k:'Dashboard', gal_dash_c:'<b>Alles, was heute ansteht, an einem Ort.</b> Aufgaben, der Kalender, das Abendessen und die Einkaufsliste, ohne eine einzige weitere App zu öffnen.',
@@ -1793,7 +1793,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
       plat_oneclick:'1 Klick', plat_start:'Fangt hier an', plat_guide:'Anleitung', to_top:'Nach oben',
       quick_warn:'<b>Öffnet jetzt <code>.env</code> und ersetzt beide <code>REPLACE_WITH_…</code>-Platzhalter</b> durch die zwei eben erzeugten Werte. Bleibt <code>DB_ENCRYPTION_KEY</code> auf seinem Platzhalter, wird eure Datenbank mit einem Schlüssel verschlüsselt, der auf dieser Seite abgedruckt ist. Sobald eine Datenbank verschlüsselt ist, öffnet ein verlorener oder geänderter Schlüssel sie nie wieder, weder für euch noch für uns - schreibt den Wert also auf. Wer ohne Verschlüsselung fahren will, leert die Zeile, statt sie zu füllen.',
       quick_note:'Dann <code>http://localhost:3000</code> öffnen. Beim ersten Aufruf legt ihr euer Admin-Konto an. Lieber geführt? Der <a href="install.html">schrittweise Installer</a> kümmert sich um HTTPS, SSO und Backups.', cta_title:'Holt euch die Kontrolle über <em>eure Daten</em> zurück.', cta_desc:'Ihr installiert es einmal, danach gehört es euch. Kein Konto bei uns, kein Abo, und nichts von uns zwischen eurem Haushalt und seinen Daten.',
-      cta_install:'Yuvomi installieren', cta_gh:'Auf GitHub ansehen',
+      cta_install:'myCrib installieren', cta_gh:'Auf GitHub ansehen',
       footer_heart:'Mit Sorgfalt gebaut für Haushalte, die Privatsphäre und Einfachheit schätzen.',
       foot_product:'Produkt', foot_screens:'Screenshots', foot_install:'Installieren', foot_docs:'Doku & Spec',
       foot_guide:'Nutzerhandbuch (Community)',
@@ -1950,7 +1950,7 @@ openssl rand -hex 32</div><button class="copy-btn" type="button" data-copy="curl
     var lb = document.getElementById('langBtn');
     lb.setAttribute('aria-label', lang === 'en' ? 'Auf Deutsch umschalten' : 'Switch to English');
     lb.setAttribute('title', lang === 'en' ? 'Auf Deutsch umschalten' : 'Switch to English');
-    document.title = lang === 'en' ? 'Yuvomi - The Self-Hosted Family Planner' : 'Yuvomi - Der selbstgehostete Familienplaner';
+    document.title = lang === 'en' ? 'myCrib - The Self-Hosted Family Planner' : 'myCrib - Der selbstgehostete Familienplaner';
     var rel = document.getElementById('foot-released');
     if (rel) { var rp = (rel.getAttribute('data-released') || '').split('-'); if (rp[0]) { rel.textContent = new Date(+rp[0], (+rp[1] || 1) - 1, +rp[2] || 1).toLocaleDateString(lang === 'de' ? 'de-DE' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' }); } }
     /* Alt text is content, not chrome: it stayed English on a de-labelled page,

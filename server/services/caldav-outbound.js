@@ -129,7 +129,7 @@ export function icsFieldsForEvent(event, householdZone = null) {
   //      → das Feld bleibt weg, "nicht anfassen".
   //
   // Fall 3 ist keine Vorsicht ohne Anlass. Ein Termin kommt ohne COLOR herein,
-  // jemand faerbt ihn spaeter auf dem SERVER, und Yuvomi erfaehrt davon erst
+  // jemand faerbt ihn spaeter auf dem SERVER, und myCrib erfaehrt davon erst
   // beim naechsten Inbound-Lauf - der aber laeuft nicht zwischen der Bearbeitung
   // und ihrem Push. Ein pauschales null haette dessen Farbe abgeraeumt, und vor
   // #899 dauerhaft: das Gatter hing an `user_modified`, das jede Bearbeitung
@@ -306,7 +306,7 @@ export async function processPendingUpdates(client, source, objectIndex, calenda
 
     if (!known?.data) {
       // Ohne das Originalobjekt bliebe nur, es neu zu bauen - und das verlöre
-      // alles, was Yuvomi nicht kennt (Teilnehmer, Alarme, Kategorien).
+      // alles, was myCrib nicht kennt (Teilnehmer, Alarme, Kategorien).
       log.warn(`[${label(source)}] No source object for event ${event.id} in this run, deferring its update.`);
       continue;
     }

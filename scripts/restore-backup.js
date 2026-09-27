@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Restore an Yuvomi database backup from the CLI.
+ * Restore a myCrib database backup from the CLI.
  *
  * Usage:
  *   node --import dotenv/config scripts/restore-backup.js /path/to/yuvomi-backup.db

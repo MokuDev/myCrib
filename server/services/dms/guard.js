@@ -11,7 +11,7 @@
  *          blocked" because their typical target is on the public internet.
  *          A DMS is the opposite case: Paperless-ngx and Papra are self-hosted
  *          by definition, and in practice they sit on the same LAN or the same
- *          Docker network as Yuvomi. Shipping this as an opt-in would have
+ *          Docker network as myCrib. Shipping this as an opt-in would have
  *          broken essentially every existing installation on update, so the
  *          flag defaults to ALLOWED and an operator who wants the guard sets
  *          it to `false`.

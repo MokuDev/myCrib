@@ -177,12 +177,12 @@ test('buildCycleFeed: Text folgt der Haushaltssprache statt fest deutsch zu sein
 
   setHouseholdLanguage('de');
   const de = cycleIcs.buildCycleFeed(db, alice, new Date('2026-05-10T00:00:00Z'));
-  assert.match(de, /X-WR-CALNAME:Yuvomi Zyklus/);
+  assert.match(de, /X-WR-CALNAME:myCrib Zyklus/);
   assert.match(de, /SUMMARY:Periode/);
 
   setHouseholdLanguage('en');
   const en = cycleIcs.buildCycleFeed(db, alice, new Date('2026-05-10T00:00:00Z'));
-  assert.match(en, /X-WR-CALNAME:Yuvomi Cycle/);
+  assert.match(en, /X-WR-CALNAME:myCrib Cycle/);
   assert.match(en, /SUMMARY:Period/);
 });
 

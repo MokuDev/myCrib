@@ -2,8 +2,8 @@
 // Gezieltes Ändern einzelner Properties in einem bestehenden iCalendar-Objekt (#593).
 //
 // CalDAV kennt kein PATCH: eine Änderung ist immer ein PUT des kompletten
-// Kalenderobjekts. Würde Yuvomi das Objekt aus seinen eigenen Feldern neu bauen,
-// verlöre ein importierter Termin auf dem Server alles, was Yuvomi nicht kennt -
+// Kalenderobjekts. Würde myCrib das Objekt aus seinen eigenen Feldern neu bauen,
+// verlöre ein importierter Termin auf dem Server alles, was myCrib nicht kennt -
 // Teilnehmer, Erinnerungen, Kategorien, Organisator, Anhänge. Deshalb wird das
 // Original bearbeitet statt ersetzt: nur die gespiegelten Properties werden
 // getauscht, jede andere Zeile bleibt Zeichen für Zeichen stehen.
@@ -12,7 +12,7 @@
 import { rruleLine } from '../services/recurrence.js';
 import { vtimezoneFor } from './vtimezone.js';
 
-// Properties, die Yuvomi verwaltet und daher ersetzen darf - je Komponente.
+// Properties, die myCrib verwaltet und daher ersetzen darf - je Komponente.
 //
 // COLOR (RFC 7986) kam mit #897 dazu. Es reicht nicht, den Wert auszugeben:
 // solange die Property hier fehlt, verwirft der Patcher sie wieder, und ein
@@ -25,7 +25,7 @@ const MANAGED_VEVENT = new Set([
 // lesen den Erledigt-Zustand mal am einen, mal am anderen ab.
 //
 // CATEGORIES kam mit den Tags dazu (#586). Verwaltet werden darf es erst,
-// seit Yuvomi die vollständige Liste hält: solange nur ein einzelner Wert
+// seit myCrib die vollständige Liste hält: solange nur ein einzelner Wert
 // gespiegelt worden wäre, hätte jeder Push die übrigen Tags des Servers
 // gelöscht.
 const MANAGED_VTODO = new Set([
@@ -273,7 +273,7 @@ function anchorFloatingOccurrenceIds(lines, uid, tzid) {
  * Sorgt dafuer, dass das VCALENDAR ein VTIMEZONE fuer `tzid` enthaelt.
  *
  * RFC 5545 §3.2.19 laesst einen TZID-Parameter nur zu, wenn im selben VCALENDAR
- * ein VTIMEZONE mit dieser Kennung steht. Yuvomi schrieb sein `;TZID=` fuer
+ * ein VTIMEZONE mit dieser Kennung steht. myCrib schrieb sein `;TZID=` fuer
  * wiederkehrende Serien bereits vorher, den Block aber nie (#938) - iOS und eM
  * Client verzeihen das, ein strenger Server darf das Objekt zurueckweisen.
  *

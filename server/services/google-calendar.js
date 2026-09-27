@@ -696,7 +696,7 @@ async function runSync(createCalendar) {
     do {
       // singleEvents:false liefert eine Serie als EINEN Master mit ihrer RRULE
       // statt als hunderte Einzelvorkommen - so, wie CalDAV und ICS sie schon
-      // immer liefern, und wie Yuvomi Serien lokal führt und expandiert (#593).
+      // immer liefern, und wie myCrib Serien lokal führt und expandiert (#593).
       // showDeleted:true ist dabei Pflicht: ein einzeln abgesagtes Vorkommen ist
       // nur als cancelled-Instanz erkennbar, aus der das EXDATE entsteht.
       const listParams = { calendarId, singleEvents: false, showDeleted: true, pageToken };
@@ -789,7 +789,7 @@ async function runSync(createCalendar) {
 
 // Google Calendar uses exclusive end dates for all-day events (RFC 5545).
 // A 2-day event Jan 1–2 is stored as end.date = "2026-01-03" (exclusive).
-// Subtract 1 day to convert to Yuvomi-style inclusive end date.
+// Subtract 1 day to convert to myCrib-style inclusive end date.
 function googleAllDayEndToInclusive(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00Z');
@@ -797,7 +797,7 @@ function googleAllDayEndToInclusive(dateStr) {
   return d.toISOString().slice(0, 10);
 }
 
-// Yuvomi stores inclusive end dates. Add 1 day when sending to Google (exclusive).
+// myCrib stores inclusive end dates. Add 1 day when sending to Google (exclusive).
 function localAllDayEndToExclusive(dateStr) {
   if (!dateStr) return null;
   const d = new Date(dateStr + 'T00:00:00Z');
@@ -1158,7 +1158,7 @@ function retireLegacyInstances(masterExternalId, seen) {
   }
 }
 
-// Yuvomi speichert getimte Events als "YYYY-MM-DDTHH:MM" (ohne Sekunden,
+// myCrib speichert getimte Events als "YYYY-MM-DDTHH:MM" (ohne Sekunden,
 // siehe validate.js). Die Google Calendar API verlangt RFC 3339 mit
 // Sekunden, sonst "Bad Request" bzw. bei Wiederholungen "Invalid
 // recurrence rule" (Issue #217). Sekunden ergänzen, falls sie fehlen.
@@ -1212,13 +1212,13 @@ function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZon
   // Der Unterschied zählt nur beim Update, und dort entscheidet er alles: der
   // Push ist ein `events.patch`, und ein PATCH fasst genau die Felder an, die im
   // Body STEHEN. Ein fehlendes `colorId` heißt also "nicht anfassen", nicht
-  // "löschen" - Google behielte seine alte Farbe, während Yuvomi die der
+  // "löschen" - Google behielte seine alte Farbe, während myCrib die der
   // zugewiesenen Person zeigt, und die beiden blieben dauerhaft verschieden.
   //
   // ABER NUR BEI EINEM ECHTEN LEEREN, und das ist der Unterschied zu #891: dort
   // ging das null bei jedem Termin ohne Farbe hinaus, auch bei einem, der nie
   // eine hatte. Ein Termin kommt ohne `colorId` herein (lokal NULL), jemand
-  // färbt ihn später in Google, und die nächste beliebige Bearbeitung in Yuvomi
+  // färbt ihn später in Google, und die nächste beliebige Bearbeitung in myCrib
   // hätte dessen Farbe abgeräumt, ohne dass sie hier je jemand angefasst hätte.
   // `color_modified` trennt die beiden Zustände: nur wer die Farbe wirklich
   // geleert hat, leert sie auch drüben.
@@ -1240,12 +1240,12 @@ function localEventToGoogle(rawEvent, colorMap = {}, timeZone = householdTimeZon
     gEvent.start = { date: startDate };
     gEvent.end   = { date: localAllDayEndToExclusive(endDate) };
   } else {
-    // Yuvomi speichert getimte Events als naive Wanduhrzeit ohne Zone. Ohne
+    // myCrib speichert getimte Events als naive Wanduhrzeit ohne Zone. Ohne
     // timeZone lehnt Google Serien ab ("recurring events: field is required"),
     // mit einer festen Zone landet das Event bei allen Nutzern außerhalb dieser
     // Zone verschoben (Issue #572: Australien = +7,5 h gegenüber Europe/Berlin).
     // Die Zone des Zielkalenders ist die, in der Google die Zeit anzeigt - damit
-    // steht in Google dieselbe Uhrzeit wie in Yuvomi.
+    // steht in Google dieselbe Uhrzeit wie in myCrib.
     const startDt = toRfc3339(event.start_datetime);
     const endDt   = toRfc3339(event.end_datetime) || startDt;
     gEvent.start = { dateTime: startDt, timeZone };

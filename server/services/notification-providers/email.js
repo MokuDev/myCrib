@@ -1,6 +1,6 @@
 /**
  * Modul: Email Notification Provider
- * Zweck: Yuvomi Reminder-Payloads als Mail zustellen (#944).
+ * Zweck: myCrib Reminder-Payloads als Mail zustellen (#944).
  * Abhaengigkeiten: server/services/email.js, public/utils/html.js
  */
 import { emailService as defaultEmailService } from '../email.js';
@@ -35,7 +35,7 @@ function subjectFor(payload) {
   const title = headerSafe(payload?.title);
   const body = headerSafe(payload?.body);
   if (title && body && title !== body) return `${title}: ${body}`;
-  return title || body || 'Yuvomi';
+  return title || body || 'myCrib';
 }
 
 /**

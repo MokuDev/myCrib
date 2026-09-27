@@ -1,7 +1,7 @@
 <div align="center">
-  <img src="docs/logo.svg" alt="" width="92" />
+  <img src="docs/logo.png" alt="" width="92" />
 
-  <h1>Yuvomi</h1>
+  <h1>myCrib</h1>
 
   <p><strong>Ein privates Zuhause für alles, was einen Haushalt am Laufen hält.</strong></p>
 
@@ -33,14 +33,14 @@
 
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/de/dashboard-dark-web.webp">
-    <img src="docs/screenshots/de/dashboard-light-web.webp" alt="Das Yuvomi-Dashboard: Aufgaben, Termine, Mahlzeiten und Einkaufsliste des Tages auf einem Bildschirm" width="820">
+    <img src="docs/screenshots/de/dashboard-light-web.webp" alt="Das myCrib-Dashboard: Aufgaben, Termine, Mahlzeiten und Einkaufsliste des Tages auf einem Bildschirm" width="820">
   </picture>
 
   <sub><b>20</b> Module&nbsp;&nbsp;·&nbsp; <b>24</b> Sprachen&nbsp;&nbsp;·&nbsp; <b>0</b> Tracker&nbsp;&nbsp;·&nbsp; optionale&nbsp;<b>AES&#8209;256</b>&#8209;Datenbankverschlüsselung&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
 </div>
 
 Die meisten Haushalte kleben ihren Alltag aus einem Dutzend Bezahl-Apps zusammen, jede mit eigenem
-Konto, eigenem Abo und einer eigenen Kopie deiner Daten auf fremden Servern. Yuvomi bringt das alles
+Konto, eigenem Abo und einer eigenen Kopie deiner Daten auf fremden Servern. myCrib bringt das alles
 an einen Ort, der dir gehört, als Container auf jedem Home-Server oder NAS. Jedes Modul ist
 eigenständig - nutze, was passt, und schalte ab, was nicht passt.
 
@@ -48,7 +48,7 @@ eigenständig - nutze, was passt, und schalte ab, was nicht passt.
 
 ## Eine App statt einem Dutzend Abos
 
-| Statt zu jonglieren mit… | gibt dir Yuvomi |
+| Statt zu jonglieren mit… | gibt dir myCrib |
 |---|---|
 | einer To-do- &amp; Aufgaben-App | **Aufgaben** - Kanban, Fristen, Wiederholungen, Mehrfachzuweisung |
 | einem Abo für den geteilten Kalender | **Kalender** - Sync, Abos, Sichtbarkeit je Termin |
@@ -107,7 +107,7 @@ Dashboard-Widgets, Rechten und Übersetzungen -, steht im [Modulhandbuch](MODULE
 
 ## Bevor du dich festlegst
 
-**Was, wenn dieses Projekt aufhört?** Auf deiner Maschine ändert sich nichts. Yuvomi ist
+**Was, wenn dieses Projekt aufhört?** Auf deiner Maschine ändert sich nichts. myCrib ist
 MIT-lizenziert und selbstgehostet, und auf dem Weg steht kein Server von uns. Der Container, den du
 schon geholt hast, läuft weiter wie heute, mit uns oder ohne uns.
 
@@ -116,7 +116,7 @@ eigenen Platte, und sie zu kopieren ist der ganze Export, solange die Dokumente 
 liegen. Geplante Backups schreiben zusätzlich ein wiederherstellbares Archiv, und die dokumentierte
 API holt alles in der Form heraus, die du brauchst.
 
-**Was kostet es?** Nichts. Yuvomi ist kostenlos und MIT-lizenziert. Du stellst den Server; es gibt
+**Was kostet es?** Nichts. myCrib ist kostenlos und MIT-lizenziert. Du stellst den Server; es gibt
 kein Abo, keinen Upsell und keine Bezahlstufe.
 
 ---
@@ -190,9 +190,9 @@ Backups und Fehlersuche.
 
 > **Gesundheit ist kein Medizinprodukt.** Es werden keine diagnostischen Aussagen getroffen. Gesundheitsdaten sind sensibel - aktiviere die Datenbankverschlüsselung (`DB_ENCRYPTION_KEY`, SQLCipher).
 
-> **Externer Dokumentenspeicher braucht eine eigene Sicherung.** Datenbank-Backups enthalten Metadaten und Verknüpfungen, nicht die Dateien selbst, wenn sie in einem lokalen Ordner, auf WebDAV oder in Google Drive liegen; sichere das gewählte Ziel separat. Yuvomis Sichtbarkeitseinstellungen regeln nur den Zugriff über Yuvomi. Wer Zugriff auf den verbundenen Google-Drive-Ordner `Yuvomi/Documents` hat, sieht alle dort abgelegten Dateien.
+> **Externer Dokumentenspeicher braucht eine eigene Sicherung.** Datenbank-Backups enthalten Metadaten und Verknüpfungen, nicht die Dateien selbst, wenn sie in einem lokalen Ordner, auf WebDAV oder in Google Drive liegen; sichere das gewählte Ziel separat. myCribs Sichtbarkeitseinstellungen regeln nur den Zugriff über myCrib. Wer Zugriff auf den verbundenen Google-Drive-Ordner `Yuvomi/Documents` hat, sieht alle dort abgelegten Dateien.
 
-> **Selbst hosten im DSGVO-Kontext?** Wenn du Yuvomi in der EU oder im EWR betreibst und fremde Daten verarbeitest, lies vorher [Datenschutz für Selfhoster](docs/PRIVACY-FOR-SELFHOSTERS.md). Dort stehen Drittlandsbewertungen für jeden externen Dienst, Hinweise zur Auftragsverarbeitung, Empfehlungen zur Log-Aufbewahrung und eine Vorlage für das Verarbeitungsverzeichnis.
+> **Selbst hosten im DSGVO-Kontext?** Wenn du myCrib in der EU oder im EWR betreibst und fremde Daten verarbeitest, lies vorher [Datenschutz für Selfhoster](docs/PRIVACY-FOR-SELFHOSTERS.md). Dort stehen Drittlandsbewertungen für jeden externen Dienst, Hinweise zur Auftragsverarbeitung, Empfehlungen zur Log-Aufbewahrung und eine Vorlage für das Verarbeitungsverzeichnis.
 
 </details>
 
@@ -218,7 +218,7 @@ Yuvomi wurde von **Oikos** umbenannt, um einen Markenkonflikt mit einem unabhän
 - **Apple HIG in der Liquid-Glass-Sprache** - Systemschrift und Apples Typoskala, Kapsel-Bedienelemente, eingerückte Listengruppen und federnde Bewegung, in Hell und Dunkel gegen WCAG AA geprüft.
 - **Privatsphäre zuerst** - vollständig selbstgehostet, optionale SQLCipher-AES-256-Datenbankverschlüsselung, keine Telemetrie.
 - **Anmeldung für einen ganzen Haushalt** - optionale Zwei-Faktor-Anmeldung (TOTP mit Wiederherstellungscodes, auf Wunsch für alle verpflichtend), Einladungslinks statt weitergereichter Passwörter und optionaler Self-Service-Passwort-Reset per E-Mail. Optionales Single Sign-on klappt mit jedem OIDC-Anbieter. Ein Schalter entscheidet, ob eine unbekannte Identität ein Konto bekommt, damit ein über deinen Haushalt hinaus geteilter Anbieter keine Tür öffnet, und ein zweiter macht SSO zum einzigen Weg hinein.
-- **24 Sprachen** mit automatischer Erkennung. Eine eigene Haushaltseinstellung bestimmt die Sprache der Einträge, die Yuvomi selbst anlegt - so spricht ein exportierter Kalender die Sprache deines Haushalts statt Englisch.
+- **24 Sprachen** mit automatischer Erkennung. Eine eigene Haushaltseinstellung bestimmt die Sprache der Einträge, die myCrib selbst anlegt - so spricht ein exportierter Kalender die Sprache deines Haushalts statt Englisch.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Express-000000?style=flat-square&logo=express&logoColor=white" alt="Express">
@@ -247,7 +247,7 @@ zurückliegen; wo sie und die Quellen oben sich widersprechen, gelten die oben.
 
 <div align="center">
   <br>
-  <img src="docs/logo.svg" alt="" width="48" />
+  <img src="docs/logo.png" alt="" width="48" />
   <p><strong>Ein Zuhause für deinen Haushalt. Und es bleibt deins.</strong></p>
   <p>
     Einmal installiert. Kein Konto bei uns, kein Abo,<br>

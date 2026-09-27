@@ -325,11 +325,11 @@ test('Feed-Texte folgen der Haushaltssprache statt fest deutsch zu sein', () => 
 
   setHouseholdLanguage('de');
   const de = deadlinesIcs.buildInventoryDeadlinesFeed(db);
-  assert.match(de, /X-WR-CALNAME:Yuvomi Inventar/);
+  assert.match(de, /X-WR-CALNAME:myCrib Inventar/);
   assert.match(de, /SUMMARY:Garantie endet: Espressomaschine/);
 
   setHouseholdLanguage('en');
   const en = deadlinesIcs.buildInventoryDeadlinesFeed(db);
-  assert.match(en, /X-WR-CALNAME:Yuvomi Inventory/);
+  assert.match(en, /X-WR-CALNAME:myCrib Inventory/);
   assert.match(en, /SUMMARY:Warranty ends: Espressomaschine/);
 });

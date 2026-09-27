@@ -84,7 +84,7 @@ function buildWasteFeed(conn, userId, now = new Date()) {
   const out = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
-    'PRODID:-//Yuvomi//Waste Collection Feed//DE',
+    'PRODID:-//myCrib//Waste Collection Feed//DE',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     `X-WR-CALNAME:${escapeICSText(translate(locale, 'waste.icsCalendarName'))}`,

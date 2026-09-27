@@ -169,7 +169,7 @@ export function verifyCode(secret, token, { nowMs = Date.now(), window = TOTP_WI
  * @param {{ secret: string, account: string, issuer?: string }} params
  * @returns {string}
  */
-export function otpauthUri({ secret, account, issuer = 'Yuvomi' }) {
+export function otpauthUri({ secret, account, issuer = 'myCrib' }) {
   const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(account)}`;
   const query = new URLSearchParams({
     secret,

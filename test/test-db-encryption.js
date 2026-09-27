@@ -454,7 +454,7 @@ function nenntSchluesselUndAlternative(err, fall) {
   assert.match(err.message, /DB_ENCRYPTION_KEY/, `${fall}: die Meldung muss den Schluessel nennen`);
   assert.match(
     err.message,
-    /is not a (valid )?Yuvomi database/,
+    /is not a (valid )?myCrib database/,
     `${fall}: die Meldung darf die zweite Moeglichkeit nicht verschweigen`
   );
   return true;
@@ -519,7 +519,7 @@ test('eine Datei, die wirklich keine Datenbank ist, bekommt weiter die alte Ausk
 
   await assert.rejects(
     () => ziel.restoreFromFile(fremd),
-    (err) => /not a valid Yuvomi database|file is not a database/.test(err.message)
+    (err) => /not a valid myCrib database|file is not a database/.test(err.message)
       && !/DB_ENCRYPTION_KEY/.test(err.message),
     'eine unverschluesselte Datei darf den Schluessel nicht beschuldigen'
   );
@@ -592,7 +592,7 @@ test('ohne eigenen Schluessel bleibt der Rat zum Setzen des Schluessels stehen',
     (err) => {
       assert.match(
         err.message,
-        /restart Yuvomi, then restore again/,
+        /restart myCrib, then restore again/,
         'ohne eigenen Schluessel muss der Weg ueber .env erhalten bleiben'
       );
       assert.ok(
@@ -667,7 +667,7 @@ test('das eigene Journal nach einem unsauberen Stopp wird NICHT zum Loeschen emp
         'und sagen, was dabei verlorenginge'
       );
       assert.ok(
-        !/stop Yuvomi, delete/i.test(err.message),
+        !/stop myCrib, delete/i.test(err.message),
         'kein unbedingter Loeschbefehl - die Bedingung kennt nur der Admin'
       );
       assert.match(
@@ -875,7 +875,7 @@ test('Datei und Schluessel zusammen ersetzt: der Rat schickt nicht zurueck, sond
       );
       assert.match(
         err.message,
-        /If they match, the key Yuvomi was started with is not, byte for byte, the one the file was written with/,
+        /If they match, the key myCrib was started with is not, byte for byte, the one the file was written with/,
         'zweite Probe: stimmt die Datei, ist es der Key - nicht „der richtige Key", sondern seine Bytes'
       );
       assert.match(
@@ -1140,7 +1140,7 @@ function sqliteCodeBeimPruefen(filePath, key) {
 }
 
 /** Was nur die Schluessel-Meldung sagt - nichts davon passt, wenn der Key stimmt. */
-const SCHLUESSEL_SAETZE = /another installation|could not be decrypted|Do NOT just set|CLI \/ Docker Compose restore|restart Yuvomi/;
+const SCHLUESSEL_SAETZE = /another installation|could not be decrypted|Do NOT just set|CLI \/ Docker Compose restore|restart myCrib/;
 
 test('Restore-Dialog: ein Backup mit fremdem Schluessel behaelt die Schluessel-Meldung', async () => {
   const backupPath = await backupFromInstance('schluessel-der-alten-instanz-0123');

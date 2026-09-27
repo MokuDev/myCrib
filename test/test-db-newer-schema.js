@@ -1,7 +1,7 @@
 /**
  * Modul: Downgrade-Schutz - aeltere App auf neuerer Datenbank
  * Zweck: Migrationen laufen nur vorwaerts. Traegt eine Datenbank Migrationsnummern,
- *        die dieser Build nicht kennt, hat eine NEUERE Yuvomi-Version sie
+ *        die dieser Build nicht kennt, hat eine NEUERE myCrib-Version sie
  *        geschrieben (Image-Rollback, fremdes Backup). Bis zum Leitlinien-Audit
  *        vom 03.09.2026 (Nebenbefund N1) startete die aeltere App darauf stumm;
  *        was sie schrieb, war nach dem naechsten Update verloren, weil die
@@ -47,7 +47,7 @@ test('eine Datenbank dieses Builds startet ohne Befund', async () => {
 
 test('eine aeltere App verweigert den Start auf der neueren Datenbank und sagt warum', async () => {
   await assert.rejects(boot(), (err) => {
-    assert.match(err.message, /newer Yuvomi/, 'die Ursache steht in der Meldung');
+    assert.match(err.message, /newer myCrib/, 'die Ursache steht in der Meldung');
     assert.match(err.message, /999999/, 'die unbekannte Nummer steht in der Meldung');
     assert.match(err.message, /DB_ALLOW_NEWER_SCHEMA/, 'der Notfallschalter steht in der Meldung');
     return true;
@@ -70,7 +70,7 @@ test('DB_ALLOW_NEWER_SCHEMA=1 startet trotzdem, die Datenbank bleibt nutzbar', a
 test('ein leerer Wert des Schalters zaehlt nicht als gesetzt', async () => {
   process.env.DB_ALLOW_NEWER_SCHEMA = '';
   try {
-    await assert.rejects(boot(), /newer Yuvomi/);
+    await assert.rejects(boot(), /newer myCrib/);
   } finally {
     delete process.env.DB_ALLOW_NEWER_SCHEMA;
   }

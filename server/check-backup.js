@@ -4,7 +4,7 @@
  *        „Restore"). Der Befehl ersetzt die Datenbankdatei von Hand; vorher
  *        laeuft hier dieselbe Validierung wie vor jedem Restore aus der App:
  *        mit DB_ENCRYPTION_KEY dieser Instanz lesbar, jede Seite heil,
- *        Yuvomi-Schema, keine neuere Version.
+ *        myCrib-Schema, keine neuere Version.
  *
  * Liegt unter server/ und nicht unter scripts/, weil scripts/ nicht im Image
  * ist (.dockerignore). Oeffnet die laufende Datenbank nicht (Handschlag vor dem

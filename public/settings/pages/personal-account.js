@@ -92,7 +92,7 @@ function consumeAccessNotice() {
  * Karte für die Verknüpfung mit dem Single-Sign-on-Konto (#832).
  *
  * Ohne sie bekam ein Nutzer, dessen IdP-Kontoname zufällig einem bestehenden
- * Yuvomi-Konto entspricht, bei der ersten SSO-Anmeldung ein zweites Konto -
+ * myCrib-Konto entspricht, bei der ersten SSO-Anmeldung ein zweites Konto -
  * gleicher Name, angehängte Ziffer, leere Daten. Zusammengeführt wird hier,
  * angemeldet: erst die Sitzung und dann der Provider belegen, dass beide Konten
  * derselben Person gehören.

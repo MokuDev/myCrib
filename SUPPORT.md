@@ -1,6 +1,6 @@
 # Support
 
-Yuvomi is a solo-maintained open-source project. Pick the channel that fits:
+myCrib is a solo-maintained open-source project. Pick the channel that fits:
 
 - **Questions & ideas** - [GitHub Discussions](https://github.com/ulsklyc/yuvomi/discussions).
   Feature ideas go to the [Ideas category](https://github.com/ulsklyc/yuvomi/discussions/new?category=ideas);

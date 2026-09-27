@@ -100,7 +100,7 @@ function overrideChoice(overrides, key, fallback) {
  * Build the first, conflict-free shape of a directory upload.
  *
  * The first path component is the local directory the user selected. It is
- * preserved as the first Yuvomi folder so the uploaded tree matches the tree
+ * preserved as the first myCrib folder so the uploaded tree matches the tree
  * the user picked.
  *
  * @param {ArrayLike<File>} inputFiles

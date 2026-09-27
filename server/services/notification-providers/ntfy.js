@@ -1,6 +1,6 @@
 /**
  * Modul: ntfy Notification Provider
- * Zweck: Yuvomi Reminder-Payloads an ntfy Topics senden.
+ * Zweck: myCrib Reminder-Payloads an ntfy Topics senden.
  */
 
 import { guardedFetch } from './guarded-fetch.js';

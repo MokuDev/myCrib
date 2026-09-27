@@ -73,7 +73,7 @@ export function toggleRowHtml({
   disabled = false,
   className = '',
   // Icon vor dem Text. Der Name geht durch `moduleIconHTML`: ist es ein
-  // Modulzeichen, kommt es aus Yuvomis Satz, sonst als Lucide-Platzhalter
+  // Modulzeichen, kommt es aus myCribs Satz, sonst als Lucide-Platzhalter
   // (der wie überall ein `lucide.createIcons()` nach dem Einfügen braucht).
   icon = null,
   // Zeilen, deren Kontext den Schalter schon benennt (Modul-Listen), tragen ihr

@@ -984,7 +984,7 @@ html:has(.list-bulkbar) yuvomi-install-prompt {
 }
 
 /* ── Das Markensiegel (Block 2, 2026-08-10; ein Gesicht seit 2026-08-17) ──
- * Yuvomis Ausweisform, abgeleitet aus der Bildmarke (drei transluzente
+ * myCribs Ausweisform, abgeleitet aus der Bildmarke (drei transluzente
  * Kreise mit Sheen): eine kreisrunde Vollton-Scheibe, die die Herkunft eines
  * Objekts benennt - Flaeche im Familienton, Tinte --color-ink-on-vivid,
  * Sheen-Lichtkante als Gradient aus --glass-sheen.
@@ -1067,7 +1067,7 @@ html:has(.list-bulkbar) yuvomi-install-prompt {
 /* ── EINE HAND FÜR ALLE MODULZEICHEN ──
  * Wo ein Modul sich zu erkennen gibt - Siegel, Leiste, Sidebar, Mehr-Blatt,
  * Modul-Liste in den Einstellungen -, zeichnet dieselbe Strichstärke,
- * unabhängig davon, ob das Zeichen aus Yuvomis eigenem Satz (nav-icons.js, 1.6
+ * unabhängig davon, ob das Zeichen aus myCribs eigenem Satz (nav-icons.js, 1.6
  * auf viewBox 24) oder aus Lucide (2 auf viewBox 24) kommt. Ohne
  * `non-scaling-stroke` skaliert der Strich mit der Zeichengröße, und dieselbe
  * Zahl bedeutete dann in jeder Größe etwas anderes: genau daran hing die
@@ -4248,10 +4248,12 @@ p.field-hint--warn[hidden] {
     flex-shrink: 0;
   }
 
-  .nav-sidebar__logomark svg {
+  .nav-sidebar__logomark img {
     width: 100%;
     height: 100%;
     display: block;
+    border-radius: var(--radius-sm, 6px);
+    object-fit: cover;
   }
 
   .nav-sidebar__brand-text {

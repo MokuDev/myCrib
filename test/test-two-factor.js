@@ -98,7 +98,7 @@ test('ein unbestaetigtes Geheimnis sperrt niemanden aus', () => {
   const { secret, uri, qr } = twoFactor.beginSetup(db, user);
 
   assert.equal(secret.length, 32);
-  assert.ok(uri.startsWith('otpauth://totp/Yuvomi:'));
+  assert.ok(uri.startsWith('otpauth://totp/myCrib:'));
   assert.ok(qr.startsWith('data:image/svg+xml;base64,'));
 
   // Angelegt, aber nicht scharf: der Login darf hier NICHT nach einem Code fragen.

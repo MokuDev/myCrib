@@ -59,7 +59,7 @@ export function taskScopeWhere(alias, { includeFuture = false, includeSubtasks =
   // Listeneintrag: allein gezeigt fehlt ihr der Satz, zu dem sie gehört.
   if (!includeSubtasks) parts.push(`${alias}.parent_task_id IS NULL`);
 
-  // `start_date` ist Yuvomis „ab wann taucht das auf" - eine Aufgabe ohne
+  // `start_date` ist myCribs „ab wann taucht das auf" - eine Aufgabe ohne
   // Startdatum gilt als sofort begonnen.
   if (!includeFuture) parts.push(`(${alias}.start_date IS NULL OR ${alias}.start_date <= ${bind})`);
 

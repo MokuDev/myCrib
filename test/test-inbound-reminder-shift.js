@@ -239,7 +239,7 @@ describe('#1377 - die Erinnerung wandert mit dem verschobenen Termin', () => {
 });
 
 // --------------------------------------------------------------------------
-// Semantik: dieselbe wie beim Verschieben in Yuvomi
+// Semantik: dieselbe wie beim Verschieben in myCrib
 // --------------------------------------------------------------------------
 describe('#1377 - was beim Mitwandern gilt', () => {
   beforeEach(resetTables);

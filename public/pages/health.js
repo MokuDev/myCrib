@@ -1733,7 +1733,7 @@ function dueRowMarkup(dose, med, log) {
 //
 // „Bei Bedarf" gab es seit jeher als Feld, als Abzeichen und als Spalte - nur
 // keinen Knopf: beide Buchungspfade hingen an `data-schedule-id`, und ein
-// Bedarfsmedikament hat definitionsgemaess keinen Zeitplan. Yuvomi versprach
+// Bedarfsmedikament hat definitionsgemaess keinen Zeitplan. myCrib versprach
 // hier etwas, das es nicht einloeste.
 //
 // Der Abschnitt steht bewusst EINMAL da und wird von beiden Tabs benutzt

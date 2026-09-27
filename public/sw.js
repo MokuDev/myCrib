@@ -414,7 +414,7 @@ self.addEventListener('activate', (event) => {
         keys
           // Versions-Caches der laufenden Release behalten; alles andere entfernen —
           // inklusive alter Vorversions-Caches UND der Legacy-`oikos-*`-Caches aus der
-          // Zeit vor dem Yuvomi-Rename (Cache-Invalidierung, kein User-Eingriff nötig).
+          // Zeit vor dem myCrib-Rename (Cache-Invalidierung, kein User-Eingriff nötig).
           .filter((key) => !ALL_CACHES.includes(key) && key !== API_CACHE)
           .map((key) => caches.delete(key))
       )
@@ -673,9 +673,9 @@ self.addEventListener('push', (event) => {
   try {
     payload = event.data ? event.data.json() : {};
   } catch {
-    payload = { title: 'Yuvomi', body: event.data ? event.data.text() : '' };
+    payload = { title: 'myCrib', body: event.data ? event.data.text() : '' };
   }
-  const title = payload.title || 'Yuvomi';
+  const title = payload.title || 'myCrib';
   const options = {
     body: payload.body || '',
     icon: '/icons/icon-192.png',

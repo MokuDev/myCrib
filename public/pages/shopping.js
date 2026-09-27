@@ -1228,7 +1228,7 @@ const ITEM_TAGS_VISIBLE = 1;
 /**
  * Gespiegelte VTODO-CATEGORIES eines Einkaufspostens (#586).
  *
- * Anzeige, keine Bedienung: die Etiketten gehören der CalDAV-Quellliste, Yuvomi
+ * Anzeige, keine Bedienung: die Etiketten gehören der CalDAV-Quellliste, myCrib
  * verwaltet sie hier nicht und schreibt sie auch nicht zurück. Deshalb <span>
  * statt Button - anders als in den Aufgaben, wo ein Klick danach filtert.
  */

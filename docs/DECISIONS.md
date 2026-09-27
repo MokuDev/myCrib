@@ -1,7 +1,7 @@
 # Decisions made once
 
-[SCOPE.md](SCOPE.md) says what Yuvomi will not become. This page is for the other kind of
-answer: something Yuvomi does build, where the *shape* was argued out once in a thread and
+[SCOPE.md](SCOPE.md) says what myCrib will not become. This page is for the other kind of
+answer: something myCrib does build, where the *shape* was argued out once in a thread and
 would otherwise be argued again in the next one. Each entry states the rule in a sentence or
 two, the reason, where the rule lives in the code, and what would reopen it. The full
 reasoning stays where it was made - in the thread and in the CHANGELOG entry of the release
@@ -20,7 +20,7 @@ the direction those threads add up to is in [ROADMAP.md](ROADMAP.md).
 update.** It is granted per person, by an explicit and visible act, and the default is
 closed.
 
-Yuvomi is a household planner, not a company tool. The admin is usually a parent, and the
+myCrib is a household planner, not a company tool. The admin is usually a parent, and the
 other members are partners, teenagers and grandparents with a privacy of their own. Somebody
 who marked an entry private did so trusting that private means private. A right that reaches
 into existing private data cannot be inferred from a field people filled in for another
@@ -54,7 +54,7 @@ The same rule was reached three times, each time from a different module:
   sharing a single document deliberately is the owner's act, and that path already exists.
 
 The task lock in v2.30.0 rests on the same reasoning from the other side: a family role says
-who somebody is, not what they may do, and Yuvomi had already replaced that inference with
+who somebody is, not what they may do, and myCrib had already replaced that inference with
 explicit grants once.
 
 ### Where the rule lives
@@ -197,7 +197,7 @@ The question arrives in different clothes: a pet that should be assignable (#846
 who has a schedule but will never log in (#787), a wall tablet that must not count as a family
 member (#913), a babysitter who is in the house for one evening (#777), and finally the
 question underneath all of them, whether being *visible as a person* is a property or a
-relationship (#1007). Yuvomi had already answered it twice in the code before anybody asked:
+relationship (#1007). myCrib had already answered it twice in the code before anybody asked:
 housekeeping staff are `users` rows filtered out of the member list, split-expense guests are
 `users` rows with `access_scope = 'split_guest'`. Two kinds of person without a normal login,
 each with its own side table and its own predicate. The decision is to say that out loud
@@ -347,7 +347,7 @@ into another module's page to get one.
 The rule was reached a fourth time in September 2026, from household chores. #736 asked for a
 cleaning plan for households without a cleaning helper, and @Kyrodan's daily routines, in the
 same thread and in his wall-display vision in #913, asked for chores that reset, credit the
-person who did them and stay out of the calendar. Yuvomi already had two answers to "do this
+person who did them and stay out of the calendar. myCrib already had two answers to "do this
 again some days after it was last done": the Housekeeping decay tasks (`frequency_days` counted
 from `last_completed`) and tasks with `recurrence_from_completion`. It is the same arithmetic,
 and only the task side carries assignees, points, a completion history and reminders. Growing
@@ -388,8 +388,8 @@ Housekeeping decay tasks people, points or a history of their own.
 ## 7. Data the household owns, not data we tend
 
 **A field or a row earns its place when it stays true without anybody tending it.** A fact the
-household states about its own things is that kind of data, and Yuvomi stores it. A catalogue of
-facts about the world, which somebody here would have to keep correct forever, is not, and Yuvomi
+household states about its own things is that kind of data, and myCrib stores it. A catalogue of
+facts about the world, which somebody here would have to keep correct forever, is not, and myCrib
 declines it even when the same screen would benefit from both.
 
 The rule was written down first as a refusal, in [SCOPE.md](SCOPE.md) against #714: a product
@@ -407,8 +407,8 @@ it is a statement about their own recipe and their own shelf, and it keeps being
 tending it. So the answer split along the line rather than along the feature, and stage one became
 reachable (#1314) while the catalogue stayed declined.
 
-That is what the rule is for. Both threads asked "may Yuvomi know what this ingredient is", and the
-answer is that Yuvomi may know what *you* said it is.
+That is what the rule is for. Both threads asked "may myCrib know what this ingredient is", and the
+answer is that myCrib may know what *you* said it is.
 
 ### Where the rule lives
 
@@ -440,7 +440,7 @@ arithmetic over ingredients would be the catalogue. Entry 8 records where that p
 
 ## 8. A number somebody typed, not a number somebody looked up
 
-**Nutrition enters Yuvomi as a figure a person states about their own recipe or their own meal.
+**Nutrition enters myCrib as a figure a person states about their own recipe or their own meal.
 Values per portion on a recipe, a daily target per person and a logged intake are the household's
 own data, and they are agreed and ticketed, not yet built. What stays declined is the step in
 between: turning "200 g flour"
@@ -521,7 +521,7 @@ copying them, which makes an edit today change what somebody ate last month.
 
 ## 9. A shipped name follows the reader until somebody renames it
 
-**What Yuvomi ships as a starting point - a category, a payment method, and with step 4 of #736 a
+**What myCrib ships as a starting point - a category, a payment method, and with step 4 of #736 a
 set of chores - carries a translation key and a name on its row. As long as nobody renames it,
 every reader sees it in their own language (`label_key ? t(label_key) : name`); a rename drops the
 translation key and makes the text the household's. A shipped chore also carries a fixed key

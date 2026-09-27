@@ -46,7 +46,7 @@ function channelDefaults(provider = 'gotify') {
       provider: 'webhook',
       name: '',
       enabled: false,
-      // Leere Vorlage = Yuvomi-Standardbody. Empfaenger mit eigenem Pflichtschema
+      // Leere Vorlage = myCrib-Standardbody. Empfaenger mit eigenem Pflichtschema
       // (Discord, Slack) tragen hier ihre Form ein, statt einen Adapter je Dienst
       // zu brauchen (#692).
       config: { baseUrl: '', payloadTemplate: '' },

@@ -2,7 +2,7 @@
  * Test: Einkaufsliste per Mail senden (#944)
  * Zweck: Die Zusagen der Versandroute, allen voran die eine, die sie sicher
  *        macht: DER EMPFAENGER IST EINE ID, NIE EINE ADRESSE. Naehme die Route
- *        eine Adresse aus dem Rumpf, waere Yuvomi fuer jeden angemeldeten
+ *        eine Adresse aus dem Rumpf, waere myCrib fuer jeden angemeldeten
  *        Nutzer ein offener Mailversender - beliebiger Inhalt an beliebige
  *        Empfaenger, abgeschickt ueber den SMTP-Server des Haushalts und auf
  *        dessen Ruf.

@@ -1,7 +1,7 @@
 /**
  * Modul: Feed-Abos (persoenlich)
  * Zweck: Die vier schreibgeschuetzten ICS-Feeds, mit denen eine Person
- *        Yuvomi-Daten in ihrem eigenen Kalenderprogramm abonniert - der
+ *        myCrib-Daten in ihrem eigenen Kalenderprogramm abonniert - der
  *        Haushaltskalender, die Inventar-Fristen, der Zyklus und der eigene
  *        Schichtplan.
  *

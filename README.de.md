@@ -12,11 +12,13 @@
   </p>
 
   <p>
-    <a href="https://github.com/ulsklyc/yuvomi/releases"><img src="https://img.shields.io/github/v/release/ulsklyc/yuvomi?style=flat-square&color=6C3AED&label=release" alt="Neuestes Release"></a>
-    <a href="https://github.com/ulsklyc/yuvomi/stargazers"><img src="https://img.shields.io/github/stars/ulsklyc/yuvomi?style=flat-square&color=6C3AED&label=stars" alt="GitHub-Sterne"></a>
+    <a href="https://github.com/MokuDev/myCrib/releases"><img src="https://img.shields.io/github/v/release/MokuDev/myCrib?style=flat-square&color=6C3AED&label=release" alt="Neuestes Release"></a>
+    <a href="https://github.com/MokuDev/myCrib/stargazers"><img src="https://img.shields.io/github/stars/MokuDev/myCrib?style=flat-square&color=6C3AED&label=stars" alt="GitHub-Sterne"></a>
     <a href="https://github.com/ulsklyc/yuvomi/pkgs/container/yuvomi"><img src="https://img.shields.io/badge/ghcr.io-yuvomi-2496ED?style=flat-square&logo=docker&logoColor=white" alt="Docker-Image"></a>
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=flat-square" alt="MIT-Lizenz"></a>
   </p>
+
+  <p><sub>Ein Fork von <a href="https://github.com/ulsklyc/yuvomi">ulsklyc/yuvomi</a>, hier für den Einsatz in meinem eigenen Haushalt gepflegt.</sub></p>
 
   <p>
     <a href="#installieren"><strong>→ In Minuten installieren</strong></a>&nbsp;&nbsp;·&nbsp;
@@ -125,7 +127,7 @@ Such dir deinen Weg aus: [Docker oder Podman](#docker-oder-podman) für volle Ko
 [geführte Einrichtung](#geführte-einrichtung) im Browser oder den
 [App-Store deines NAS](#aus-dem-app-store-deines-nas) ganz ohne Terminal.
 
-- **Image** - `ghcr.io/ulsklyc/`<wbr>`yuvomi:latest`, rund 500 MB.
+- **Image** - `ghcr.io/ulsklyc/`<wbr>`yuvomi:latest`, rund 500 MB. Dieser Fork veröffentlicht noch kein eigenes Image, daher zieht `docker-compose.yml` weiterhin das von Upstream.
 - **Braucht** - 256 MB RAM und einen Port, standardmäßig 3000.
 - **Browser** - alles wie vorgesehen ab Chrome und Edge 117, Firefox 129 und Safari 17.5. Bis hinunter zu Chrome 87, Firefox 79 und Safari 14.1 (iOS 14.5) startet und scrollt es noch, schlichter und mit einzelnen fehlenden Funktionen ([gemessen am 21. September 2026](docs/installation.md#browser-support)).
 - **Schreibt** - vier Volumes, die dir gehören: Daten, Backups, Module, Dokumente.
@@ -141,8 +143,8 @@ Unter Podman lädst du `podman-compose.yml` statt `docker-compose.yml` und start
 Fedora und CentOS Stream brauchen.
 
 ```bash
-curl -O https://raw.githubusercontent.com/ulsklyc/yuvomi/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/ulsklyc/yuvomi/main/.env.example
+curl -O https://raw.githubusercontent.com/MokuDev/myCrib/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/MokuDev/myCrib/main/.env.example
 cp .env.example .env
 openssl rand -hex 32   # SESSION_SECRET
 openssl rand -hex 32   # DB_ENCRYPTION_KEY
@@ -168,7 +170,7 @@ Ein Einrichtungsassistent im Browser, in 24 Sprachen. Er erkennt Docker oder Pod
 Single Sign-on und geplante Backups ein, startet dann den Container und legt dein Admin-Konto an.
 
 ```bash
-git clone https://github.com/ulsklyc/yuvomi.git && cd yuvomi
+git clone https://github.com/MokuDev/myCrib.git && cd myCrib
 node tools/installer/install-server.js
 ```
 
@@ -253,7 +255,7 @@ zurückliegen; wo sie und die Quellen oben sich widersprechen, gelten die oben.
   </p>
   <p>
     <a href="#installieren"><strong>→ In Minuten installieren</strong></a>&nbsp;&nbsp;·&nbsp;
-    <a href="https://github.com/ulsklyc/yuvomi/discussions"><strong>Frag nach</strong></a>
+    <a href="https://github.com/MokuDev/myCrib/issues"><strong>Frag nach</strong></a>
   </p>
   <br>
   <sub>MIT-lizenziert, siehe <a href="LICENSE">LICENSE</a>.</sub>

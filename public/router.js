@@ -67,7 +67,7 @@ import {
 //
 // WARUM DER TITEL HIER STEHT UND NICHT IN EINER ZWEITEN LISTE: er stand einmal
 // daneben, in einer Map in routeTitle(). Die Liste wuchs, die Map nicht, und
-// /forgot-password, /reset-password und /join lieferten „Yuvomi · Yuvomi" -
+// /forgot-password, /reset-password und /join lieferten „myCrib · myCrib" -
 // WCAG 2.4.2 ist Level A, und es traf ausgerechnet die drei Wege, über die ein
 // neues Familienmitglied hereinkommt (Audit 2026-08-08, P1-2). Eine Route ohne
 // Titel soll auffallen, nicht still auf den App-Namen fallen; der Guard in
@@ -467,7 +467,7 @@ const NAV_SECTION_LABEL_KEYS = Object.freeze({
   [NAV_SECTION.customModules]: 'nav.sectionCustomModules',
 });
 
-const DEFAULT_APP_NAME = 'Yuvomi';
+const DEFAULT_APP_NAME = 'myCrib';
 const APP_NAME_STORAGE_KEY = 'yuvomi-app-name';
 const APP_VERSION_STORAGE_KEY = 'yuvomi-app-version';
 
@@ -1885,45 +1885,14 @@ function renderAppShell(container) {
   const sidebarLogo = document.createElement('div');
   sidebarLogo.className = 'nav-sidebar__logo';
 
-  // SVG-Logomark aus docs/logo.svg — Gradient via CSS-Tokens
+  // Logomark: eigenes Icon-Artwork aus /icons/icon-192.png
   const logomark = document.createElement('div');
   logomark.className = 'nav-sidebar__logomark';
   logomark.setAttribute('aria-hidden', 'true');
-  const SVG_NS = 'http://www.w3.org/2000/svg';
-  const logoSvg = document.createElementNS(SVG_NS, 'svg');
-  logoSvg.setAttribute('viewBox', '0 0 160 160');
-  logoSvg.setAttribute('fill', 'none');
-  const defs = document.createElementNS(SVG_NS, 'defs');
-  const grad = document.createElementNS(SVG_NS, 'linearGradient');
-  const gradId = `yuvomi-logo-bg-${Math.random().toString(36).slice(2, 7)}`;
-  grad.setAttribute('id', gradId);
-  grad.setAttribute('x1', '0'); grad.setAttribute('y1', '0');
-  grad.setAttribute('x2', '160'); grad.setAttribute('y2', '160');
-  grad.setAttribute('gradientUnits', 'userSpaceOnUse');
-  const stop0 = document.createElementNS(SVG_NS, 'stop');
-  stop0.setAttribute('offset', '0%');
-  stop0.style.stopColor = 'var(--color-accent)';
-  const stop1 = document.createElementNS(SVG_NS, 'stop');
-  stop1.setAttribute('offset', '100%');
-  stop1.style.stopColor = 'var(--color-accent-secondary)';
-  grad.appendChild(stop0); grad.appendChild(stop1);
-  defs.appendChild(grad);
-  logoSvg.appendChild(defs);
-  const bgRect = document.createElementNS(SVG_NS, 'rect');
-  bgRect.setAttribute('width', '160'); bgRect.setAttribute('height', '160');
-  bgRect.setAttribute('rx', '36'); bgRect.setAttribute('fill', `url(#${gradId})`);
-  logoSvg.appendChild(bgRect);
-  // Drei transluzente, ineinander übergehende Kreise (Familie); kein Sheen in der Sidebar
-  const marks = document.createElementNS(SVG_NS, 'g');
-  marks.setAttribute('fill', 'white');
-  marks.setAttribute('fill-opacity', '0.82');
-  for (const [cx, cy, r] of [[64, 72, 27], [100, 78, 25], [80, 106, 24]]) {
-    const c = document.createElementNS(SVG_NS, 'circle');
-    c.setAttribute('cx', String(cx)); c.setAttribute('cy', String(cy)); c.setAttribute('r', String(r));
-    marks.appendChild(c);
-  }
-  logoSvg.appendChild(marks);
-  logomark.appendChild(logoSvg);
+  const logoImg = document.createElement('img');
+  logoImg.src = '/icons/icon-192.png';
+  logoImg.alt = '';
+  logomark.appendChild(logoImg);
   sidebarLogo.appendChild(logomark);
 
   const sidebarBrandText = document.createElement('div');
@@ -2562,7 +2531,7 @@ const _toolbarHandles = new WeakMap();
  * darin, das Siegel erbt.
  *
  * DRITTANBIETER-MODULE BEKOMMEN KEINES, und das ist kein Loch: das Siegel ist
- * Yuvomis eigene Ausweisform. Ein fremdes Modul ist kein Raum dieser Familie,
+ * myCribs eigene Ausweisform. Ein fremdes Modul ist kein Raum dieser Familie,
  * und sein Icon steht in keiner Zeile von MODULE_ICON.
  */
 function headSealIcon(mod) {
@@ -4611,14 +4580,14 @@ window.addEventListener('error', (e) => {
   // Ressource-Ladefehler (z.B. fehlgeschlagenes Bild): ignorieren
   if (e.target && e.target !== window) return;
   if (RESIZE_OBSERVER_NOTICE.test(e.message || '')) return;
-  console.error('[Yuvomi] Unbehandelter Fehler:', e.error ?? e.message);
+  console.error('[myCrib] Unbehandelter Fehler:', e.error ?? e.message);
   showToast(t('common.unexpectedError'), 'danger');
 });
 
 window.addEventListener('unhandledrejection', (e) => {
   // Auth-Fehler werden bereits von auth:expired behandelt
   if (e.reason?.status === 401) return;
-  console.error('[Yuvomi] Unbehandeltes Promise-Rejection:', e.reason);
+  console.error('[myCrib] Unbehandeltes Promise-Rejection:', e.reason);
   showToast(friendlyError(e.reason), 'danger');
   e.preventDefault(); // Konsolenfehler unterdrücken (bereits geloggt)
 });

@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.svg" alt="" width="92" />
+  <img src="docs/logo.png" alt="" width="92" />
 
   <h1>myCrib</h1>
 
@@ -247,7 +247,7 @@ zurückliegen; wo sie und die Quellen oben sich widersprechen, gelten die oben.
 
 <div align="center">
   <br>
-  <img src="docs/logo.svg" alt="" width="48" />
+  <img src="docs/logo.png" alt="" width="48" />
   <p><strong>Ein Zuhause für deinen Haushalt. Und es bleibt deins.</strong></p>
   <p>
     Einmal installiert. Kein Konto bei uns, kein Abo,<br>

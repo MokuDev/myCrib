@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="docs/logo.svg" alt="" width="92" />
+  <img src="docs/logo.png" alt="" width="92" />
 
   <h1>myCrib</h1>
 
@@ -245,7 +245,7 @@ the sources above disagree, the ones above are right.
 
 <div align="center">
   <br>
-  <img src="docs/logo.svg" alt="" width="48" />
+  <img src="docs/logo.png" alt="" width="48" />
   <p><strong>One home for your household. Yours to keep.</strong></p>
   <p>
     Install it once. No account with us, no subscription,<br>

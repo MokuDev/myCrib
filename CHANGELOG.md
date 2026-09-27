@@ -15,8 +15,7 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [1.0.0] - 2026-09-27
 
-- **hallo welt :)** myCrib's own version count starts here, at 1.0.0 - everything above this line
-  was still counted as Yuvomi's.
+- **hallo welt :) (und mary)**
 
 ### Added
 

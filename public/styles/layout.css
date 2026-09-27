@@ -5066,13 +5066,6 @@ p.field-hint--warn[hidden] {
   color: var(--color-warning, var(--color-text-secondary));
 }
 
-/* „Version X ist verfügbar" - dieselbe Nachricht wie der Punkt an der
-   Navigation, deshalb derselbe Akzent statt einer Warnfarbe (#490). */
-.changelog-version-note--update {
-  color: var(--color-accent);
-  font-weight: var(--font-weight-medium);
-}
-
 .changelog-status {
   padding: var(--space-4);
   border: 1px solid var(--color-border-subtle);

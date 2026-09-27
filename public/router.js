@@ -3090,27 +3090,16 @@ function renderChangelog(panel, payload) {
   panel.querySelector('#changelog-current-version').textContent = versionText(currentVersion);
   panel.querySelector('#changelog-latest-version').textContent = versionText(latestVersion);
 
-  // Steht ein Update an, ist das die Nachricht - ob die laufende Version in der
-  // GitHub-Liste auftaucht, interessiert dann niemanden mehr.
-  //
-  // Der mitgelieferte Stand geht beidem vor: er kann per Konstruktion nichts
-  // ueber neuere Versionen wissen, also waere sowohl "Version X ist verfuegbar"
-  // als auch "diese Version steht in den GitHub-Releases" eine Aussage ueber
-  // etwas, das gerade niemand nachsehen konnte (#838).
-  const local = data.source === 'local';
-  const updateAvailable = !local && isNewerVersion(latestVersion, currentVersion);
+  // Der Server liest ausschliesslich die mitgelieferte CHANGELOG.md - er kann
+  // per Konstruktion nichts ueber eine neuere Version wissen, also waere
+  // "Version X ist verfuegbar" eine Aussage ueber etwas, das hier niemand
+  // nachsehen konnte. Die einzige offene Frage ist, ob der laufende Stand
+  // ueberhaupt einen eigenen Abschnitt hat.
   const note = panel.querySelector('#changelog-version-note');
-  if (local) {
-    note.textContent = t('changelog.offlineNotice');
-  } else if (updateAvailable) {
-    note.textContent = t('changelog.updateAvailable', { version: displayVersion(latestVersion) });
-  } else {
-    note.textContent = data.current_in_releases
-      ? t('changelog.currentFound')
-      : t('changelog.currentMissing');
-  }
-  note.classList.toggle('changelog-version-note--warning', local || (!updateAvailable && !data.current_in_releases));
-  note.classList.toggle('changelog-version-note--update', updateAvailable);
+  note.textContent = data.current_in_releases
+    ? t('changelog.ownChangelogNotice')
+    : t('changelog.currentMissing');
+  note.classList.toggle('changelog-version-note--warning', !data.current_in_releases);
 
   // Der Nutzer sieht die Liste gerade - der Punkt an der Navigation hat seinen
   // Zweck erfüllt und verschwindet, bis eine noch neuere Version erscheint.

@@ -32,7 +32,7 @@
 
 services:
   yuvomi:
-    image: ghcr.io/ulsklyc/yuvomi:latest
+    image: ghcr.io/mokudev/mycrib:latest
     container_name: yuvomi
     restart: unless-stopped
     ports:

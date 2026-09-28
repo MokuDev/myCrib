@@ -464,7 +464,7 @@ function renderMatrix(container) {
   panel.replaceChildren();
   panel.insertAdjacentHTML('beforeend', `
     <div class="perm-matrix__head">
-      <h3 class="perm-matrix__subject">${esc(subjectTitle())}</h3>
+      <h2 class="perm-matrix__subject">${esc(subjectTitle())}</h2>
       <p class="perm-matrix__hint">${esc(
         state.mode === 'role' ? t('settings.permRoleLegend') : t('settings.permMemberLegend'),
       )}</p>

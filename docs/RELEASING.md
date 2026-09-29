@@ -98,7 +98,11 @@ the last tag is an interface release.
 
     Read the body back. A successful `create` reports the URL either way.
 12. **Downstream.** `gh run list --workflow=docker-publish.yml --limit 1` must show success (a
-    failed image build silently stalls TrueNAS too). Then look the Umbrel PR up rather than
+    failed image build silently stalls TrueNAS too). If it shows no run *at all* for the tag,
+    the push did not start one - dispatch the workflow against the tag ref instead
+    (`gh workflow run docker-publish.yml --ref vX.Y.Z`). The result is the same image and the
+    same tags: `github.ref` is then `refs/tags/vX.Y.Z`, which is what the `latest` condition in
+    the workflow reads. This happened for v1.0.0. Then look the Umbrel PR up rather than
     assuming a number - the workflow renames the open PR if there is one and opens a new one only
     once the previous one was merged:
 

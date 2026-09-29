@@ -87,7 +87,13 @@ test('the image carries provenance and an SBOM, and is signed by digest', () => 
   assert.match(signStep, /DIGEST: \$\{\{ steps\.build\.outputs\.digest \}\}/);
   const signs = signStep.match(/cosign sign --yes "[^"]*@\$\{DIGEST\}"/g) || [];
   assert.equal(signs.length, 1, 'the image must be signed by digest');
-  assert.ok(signs.some((l) => l.includes('${REGISTRY}/${IMAGE_NAME}@')), 'primary image signed');
+  // `${IMAGE_NAME,,}` UND NICHT `${IMAGE_NAME}`: `github.repository` traegt die
+  // Schreibweise des Repos (`MokuDev/myCrib`), OCI-Referenzen duerfen aber nur
+  // klein sein - cosign scheiterte sonst schon am Parsen, waehrend Build und
+  // Push gruen blieben, weil `docker/metadata-action` selbst normalisiert. Die
+  // Zusicherung haelt die Kleinschreibung fest, damit sie beim naechsten Umbau
+  // der Zeile nicht still wieder herausfaellt.
+  assert.ok(signs.some((l) => l.includes('${REGISTRY}/${IMAGE_NAME,,}@')), 'primary image signed, lowercase reference');
   assert.doesNotMatch(signStep, /cosign sign --yes "[^"]*:\$\{\{/, 'never sign by tag');
 
   const permissions = workflow.slice(workflow.indexOf('\npermissions:'), workflow.indexOf('\nenv:'));

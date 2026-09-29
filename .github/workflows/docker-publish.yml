@@ -121,8 +121,17 @@ jobs:
       # without reading the code; docs/installation.md carries the verify
       # command, and test:docker-publish keeps that command's identity in
       # step with this file.
+      # `${IMAGE_NAME,,}` STATT `${IMAGE_NAME}`: KLEINGESCHRIEBEN, SONST GAR NICHT.
+      #
+      # `IMAGE_NAME` ist `github.repository`, und das traegt die Schreibweise des
+      # Repos - hier `MokuDev/myCrib`. OCI-Referenzen duerfen aber nur Kleinbuch-
+      # staben enthalten, also scheiterte cosign schon am Parsen, nicht am
+      # Signieren ("could not parse reference", Lauf 36530308390). Aufgefallen
+      # ist es erst in diesem Fork: `docker/metadata-action` oben normalisiert
+      # selbst, Build und Push liefen deshalb sauber durch, und upstream
+      # (`ulsklyc/yuvomi`) ist ohnehin durchgehend klein geschrieben.
       - name: Sign the image
         env:
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME,,}@${DIGEST}"

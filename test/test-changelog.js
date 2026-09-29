@@ -526,7 +526,26 @@ test('veroeffentlichte CHANGELOG-Abschnitte stehen noch so da wie am Tag', (t) =
     headText, referenceText, referenceVersion, RELEASED_SECTION_EDITS, { packageVersion });
 
   // Reichweite: bricht die Abschnittstrennung, vergleicht der Guard nichts und ist gruen.
-  assert.ok(checked >= 10, `nur ${checked} Abschnitte gegen v${referenceVersion} verglichen`);
+  //
+  // GEZAEHLT WIRD GEGEN DEN TAG, NICHT GEGEN EINE FESTE ZAHL. Hier stand `>= 10`, und
+  // das war eine Annahme aus dem Upstream, wo CHANGELOG.md hunderte veroeffentlichter
+  // Abschnitte trug. Dieser Fork hat die Datei bei null neu angefangen: Mit dem einen
+  // Abschnitt [1.0.0] ist die Schwelle unerreichbar, der Test fiel beim allerersten Tag
+  // durch - und haette es bei v1.1.0 und v1.2.0 wieder getan.
+  //
+  // Die Ueberschriften kommen per Regex aus dem Tag-Text und NICHT aus
+  // releasedSections(): sonst waere die Zusicherung im Kreis gefuehrt. Bricht die
+  // Abschnittstrennung, liefe `checked` auf 0 - die erwartete Zahl aber mit, und 0 >= 0
+  // waere gruen, genau das Loch, das diese Zeile stopfen soll. So ist sie sogar strenger
+  // als die 10: verlangt wird JEDER Abschnitt bis zum Referenz-Tag, und das waechst mit.
+  const publishedHeadings = new Set(
+    [...lf(referenceText).matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1]),
+  ).size;
+  assert.ok(publishedHeadings > 0, `v${referenceVersion} traegt keinen einzigen Release-Abschnitt`);
+  assert.ok(
+    checked >= publishedHeadings,
+    `nur ${checked} von ${publishedHeadings} Abschnitten gegen v${referenceVersion} verglichen`,
+  );
   assert.equal(offenders.length, 0, [
     `Veroeffentlichte CHANGELOG-Abschnitte weichen von v${referenceVersion} ab:`,
     ...offenders.map((o) => `  [${o.version}] ${o.detail}`),

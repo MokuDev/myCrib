@@ -312,12 +312,15 @@ Docker pulls `ghcr.io/mokudev/mycrib:latest` automatically. No build step, no No
 > ```bash
 > cosign verify ghcr.io/mokudev/mycrib:1.0.0 \
 >   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
->   --certificate-identity-regexp '^https://github.com/mokudev/mycrib/.github/workflows/docker-publish.yml@refs/tags/v'
+>   --certificate-identity-regexp '^https://github.com/MokuDev/myCrib/.github/workflows/docker-publish.yml@refs/tags/v'
 > ```
 >
-> A passing check prints the certificate's claims, including the tag it was built from;
-> anything else means the image is not one this repository released. The `main` tag is
-> signed too, under `refs/heads/main`, which the pattern above deliberately excludes.
+> The image reference is lowercase because OCI requires it; the identity is not, because it
+> comes from the OIDC certificate, which carries the repository's own spelling - and the
+> pattern is matched case-sensitively. A passing check prints the certificate's claims,
+> including the tag it was built from; anything else means the image is not one this
+> repository released. The `main` tag is signed too, under `refs/heads/main`, which the
+> pattern above deliberately excludes.
 > Provenance and SBOM travel inside the image: `docker buildx imagetools inspect
 > ghcr.io/mokudev/mycrib:1.0.0 --format '{{ json .Provenance }}'`.
 

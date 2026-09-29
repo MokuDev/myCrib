@@ -124,6 +124,16 @@ test('the installation guide verifies against this workflow identity', () => {
   const block = installation.match(/cosign verify[\s\S]*?refs\/tags\/v'/);
   assert.ok(block, 'installation.md must show a cosign verify command');
   assert.match(block[0], /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
-  assert.match(block[0], /--certificate-identity-regexp '\^https:\/\/github\.com\/mokudev\/mycrib\/\.github\/workflows\/docker-publish\.yml@refs\/tags\/v'/);
+  // DIE IDENTITAET TRAEGT DIE SCHREIBWEISE DES REPOS, DIE IMAGE-REFERENZ NICHT.
+  // Der Image-Name muss klein sein (OCI), die Identitaet kommt dagegen aus dem
+  // OIDC-Zertifikat und steht dort so, wie das Repo heisst - im Signatur-
+  // Zertifikat von v1.0.0 nachgelesen:
+  //   URI:https://github.com/MokuDev/myCrib/.github/workflows/docker-publish.yml@refs/tags/v1.0.0
+  // cosign vergleicht das Muster case-sensitiv, ein kleingeschriebenes Regex
+  // passt also auf gar nichts: der Befehl in der Anleitung scheiterte bei jedem
+  // Betreiber, waehrend hier alles gruen blieb. Beide Schreibweisen stehen
+  // deshalb woertlich in der Zusicherung.
+  assert.match(block[0], /--certificate-identity-regexp '\^https:\/\/github\.com\/MokuDev\/myCrib\/\.github\/workflows\/docker-publish\.yml@refs\/tags\/v'/);
+  assert.match(block[0], /cosign verify ghcr\.io\/mokudev\/mycrib:/);
   assert.match(workflow, /^name: Docker Publish$/m);
 });

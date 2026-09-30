@@ -4179,7 +4179,8 @@
         "whatsNewMore": "Na liście poniżej jest jeszcze {{count}} zmian.",
         "whatsNewMore_one": "Na liście poniżej jest jeszcze jedna zmiana.",
         "whatsNewMore_few": "Na liście poniżej są jeszcze {{count}} zmiany.",
-        "whatsNewMore_many": "Na liście poniżej jest jeszcze {{count}} zmian."
+        "whatsNewMore_many": "Na liście poniżej jest jeszcze {{count}} zmian.",
+        "ownChangelogNotice": "To jest własny dziennik zmian myCrib, dołączony do aplikacji."
     },
     "forgotPassword": {
         "title": "Zresetuj hasło",

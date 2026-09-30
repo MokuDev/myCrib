@@ -4067,7 +4067,8 @@
         "whatsNewSince": "Od verze {{version}}, kterou jsi viděl naposledy.",
         "whatsNewMore": "V seznamu níže je dalších {{count}} změn.",
         "whatsNewMore_one": "V seznamu níže je ještě jedna změna.",
-        "whatsNewMore_few": "V seznamu níže jsou další {{count}} změny."
+        "whatsNewMore_few": "V seznamu níže jsou další {{count}} změny.",
+        "ownChangelogNotice": "Toto je vlastní seznam změn myCrib, dodávaný s aplikací."
     },
     "forgotPassword": {
         "title": "Obnovit heslo",

@@ -1,4 +1,4 @@
-<!-- version: 2.71.0 -->
+<!-- version: 1.1.0 -->
 This update adds Brazilian Portuguese and fixes several things people ran into after 2.70.0.
 
 Brazilian Portuguese is now its own language in the app, next to the existing Portuguese. A browser set to Brazilian Portuguese picks it on its own.

@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Mới trong ứng dụng của bạn",
         "whatsNewSince": "Kể từ phiên bản {{version}}, phiên bản bạn xem lần trước.",
         "whatsNewMore": "Còn {{count}} thay đổi nữa trong danh sách bên dưới.",
-        "whatsNewMore_one": "Còn một thay đổi nữa trong danh sách bên dưới."
+        "whatsNewMore_one": "Còn một thay đổi nữa trong danh sách bên dưới.",
+        "ownChangelogNotice": "Đây là nhật ký thay đổi riêng của myCrib, đi kèm với ứng dụng."
     },
     "forgotPassword": {
         "title": "Đặt lại mật khẩu",

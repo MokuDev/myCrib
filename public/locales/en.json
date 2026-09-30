@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "New in your app",
         "whatsNewSince": "Since version {{version}}, the one you last saw.",
         "whatsNewMore": "{{count}} more changes are in the list below.",
-        "whatsNewMore_one": "One more change is in the list below."
+        "whatsNewMore_one": "One more change is in the list below.",
+        "ownChangelogNotice": "This is myCrib's own changelog, bundled with the app."
     },
     "forgotPassword": {
         "title": "Reset password",

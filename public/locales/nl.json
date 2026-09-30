@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Nieuw in je app",
         "whatsNewSince": "Sinds versie {{version}}, de laatste die je zag.",
         "whatsNewMore": "Er staan nog {{count}} wijzigingen in de lijst hieronder.",
-        "whatsNewMore_one": "Er staat nog één wijziging in de lijst hieronder."
+        "whatsNewMore_one": "Er staat nog één wijziging in de lijst hieronder.",
+        "ownChangelogNotice": "Dit is myCrib's eigen wijzigingslogboek, meegeleverd met de app."
     },
     "forgotPassword": {
         "title": "Wachtwoord opnieuw instellen",

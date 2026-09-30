@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Baru di aplikasimu",
         "whatsNewSince": "Sejak versi {{version}}, yang terakhir kamu lihat.",
         "whatsNewMore": "Ada {{count}} perubahan lagi di daftar di bawah.",
-        "whatsNewMore_one": "Ada satu perubahan lagi di daftar di bawah."
+        "whatsNewMore_one": "Ada satu perubahan lagi di daftar di bawah.",
+        "ownChangelogNotice": "Ini adalah log perubahan milik myCrib sendiri, disertakan bersama aplikasi."
     },
     "forgotPassword": {
         "title": "Atur ulang kata sandi",

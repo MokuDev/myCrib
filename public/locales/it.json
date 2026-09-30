@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Novità nella tua app",
         "whatsNewSince": "Dalla versione {{version}}, l’ultima che hai visto.",
         "whatsNewMore": "Ci sono altri {{count}} cambiamenti nell’elenco qui sotto.",
-        "whatsNewMore_one": "C'è un altro cambiamento nell’elenco qui sotto."
+        "whatsNewMore_one": "C'è un altro cambiamento nell’elenco qui sotto.",
+        "ownChangelogNotice": "Questo è il registro delle modifiche proprio di myCrib, incluso con l'app."
     },
     "forgotPassword": {
         "title": "Reimposta password",

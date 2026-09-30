@@ -1,13 +1,14 @@
 <div align="center">
-  <img src="docs/logo.png" alt="myCrib logo" width="92" />
+  <img src="docs/logo.png" alt="" width="92" />
 
   <h1>myCrib</h1>
 
-  <p><strong>The self-hosted family planner.<br>One home instead of many subscriptions.</strong></p>
+  <p><strong>One private home for everything that keeps a household running.</strong></p>
 
   <p>
-    Tasks, calendar, budget, meals, health and more for a family, a couple or just you, on a
-    server you own. Out of the box, only a version check leaves it.
+    Tasks, calendar, budget, groceries, meals, health and more - for a family, a couple,
+    or just you. Twenty modules for one household, usually two to six people, on a server you
+    own, and out of the box the only thing that leaves it is a version check.
   </p>
 
   <p>
@@ -20,86 +21,68 @@
   <p><sub>A fork of <a href="https://github.com/ulsklyc/yuvomi">ulsklyc/yuvomi</a>, kept here for my own household's setup.</sub></p>
 
   <p>
-    <a href="https://yuvomi.cloud/"><strong>→ Take the tour on yuvomi.cloud</strong></a>&nbsp;&nbsp;·&nbsp;
-    <a href="#install"><strong>Install&nbsp;in&nbsp;minutes</strong></a>&nbsp;&nbsp;·&nbsp;
+    <a href="#install"><strong>→ Install in minutes</strong></a>&nbsp;&nbsp;·&nbsp;
+    <a href="https://yuvomi.cloud/"><strong>Screenshots &amp; tour</strong></a>&nbsp;&nbsp;·&nbsp;
     <a href="#documentation"><strong>Docs</strong></a>&nbsp;&nbsp;·&nbsp;
     <a href="CHANGELOG.md"><strong>Changelog</strong></a>
   </p>
 
   <sub><a href="README.de.md">Auf Deutsch lesen</a></sub>
 
+  <br><br>
+
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-dark-web.webp">
-    <img src="docs/screenshots/dashboard-light-web.webp" alt="The myCrib overview: today's events, tasks and shopping for the whole family, with the family, budget and birthdays below" width="820">
+    <img src="docs/screenshots/dashboard-light-web.webp" alt="The myCrib dashboard: today's tasks, calendar events, meals and the shopping list on one screen" width="820">
   </picture>
 
-  <sub><b>20</b> modules&nbsp;&nbsp;·&nbsp; <b>25</b> languages&nbsp;&nbsp;·&nbsp; <b>0</b> trackers&nbsp;&nbsp;·&nbsp; optional&nbsp;<b>AES&#8209;256</b>&nbsp;database&nbsp;encryption</sub>
+  <sub><b>20</b> modules&nbsp;&nbsp;·&nbsp; <b>25</b> languages&nbsp;&nbsp;·&nbsp; <b>0</b> trackers&nbsp;&nbsp;·&nbsp; optional&nbsp;<b>AES&#8209;256</b>&nbsp;database&nbsp;encryption&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
 </div>
 
 Most households glue their life together from a dozen paid apps, each with its own account, its
 own subscription and its own copy of your data on someone else's server. myCrib puts all of it in
-one place that belongs to you, running as a container on any home server or NAS.
+one place that belongs to you, running as a container on any home server or NAS. Every module is
+independent, so you use what fits and switch off what doesn't.
 
 ---
 
-## Many apps, one place
+## One app instead of a dozen subscriptions
 
 | Instead of juggling… | myCrib gives you |
 |---|---|
 | a to-do &amp; task app | **Tasks** - Kanban, deadlines, recurring, multi-assignment |
-| a family calendar app | **Calendar** - sync, subscriptions, per-event visibility |
+| a shared calendar subscription | **Calendar** - sync, subscriptions, per-event visibility |
+| a cost-splitting app | **Shared expenses** - shared costs with debt simplification |
+| a budgeting app | **Budget** - income, expenses, accounts, savings goals |
 | a meal planner &amp; recipe app | **Meals &amp; Recipes** - weekly planner with shopping export |
 | a grocery-list app | **Shopping** - shared, aisle-organized lists |
-| a budgeting &amp; cost-splitting app | **Budget** - income, expenses, accounts, savings goals, shared costs with debt simplification |
-| a document manager | **Documents** - searchable family files in folders |
+| a pantry &amp; expiry tracker | **Pantry** - stock, storage location, best-before dates |
+| a document manager | **Documents** - tagged, searchable family files |
+| a home-inventory app | **Inventory** - owned belongings, purchase price, warranty, linked receipts |
+| a notes app &amp; contacts sync | **Notes &amp; Contacts** - Markdown notes, CardDAV sync |
 
 ## The modules talk to each other
 
 This is the part a folder full of separate apps cannot do:
 
-- **One import turns the week's meal plan into a shopping list.** The next seven days come pre-selected, and every ingredient lands on the shared list, sorted by aisle.
-- **The last jar out of the pantry goes on the list with one tap.** After the shop, one button books what you ticked off back into the pantry, with amount and unit.
-- **A ticked-off chore pays out.** Points on a task go to whoever did it - the assignee, or the person picked when it is ticked off - and are spent in a reward catalog you control.
+- **The week's meal plan writes the shopping list.** Plan Thursday, and the ingredients are on the list before anyone walks to the shop.
+- **The last jar out of the pantry is already on the list.** Tick items off after a shop and they book back into the pantry with their quantity.
+- **A ticked-off chore pays out.** Points on a task land on the assigned member's account, and the reward catalog spends them.
 - **A filed receipt hangs on the booking.** Upload it once and it belongs to the transaction, the shared expense and the inventory item at the same time.
-
-## On the kitchen wall, in every pocket
-
-<div align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/dashboard-wall-dark-web.webp">
-    <img src="docs/screenshots/dashboard-wall-light-web.webp" alt="myCrib wall mode on a landscape tablet: the time in large type, today's tasks and doses, who is up today, the weather and one-tap kitchen timers" width="720">
-  </picture>
-</div>
-
-- **The tablet on the kitchen wall** shows today's plan and who is up in wall mode, readable across the room. It has an account of its own: tap a task, pick who did it, and the points go to them. When it sits idle, an Immich screensaver can show your own photos.
-- **The app on every phone** goes on the home screen straight from the browser, no app store. Reminders arrive as push notifications even while it is closed (your server needs HTTPS for that), and the last shopping list you opened stays readable without signal.
-- **Every member joins by invite link** and picks their own password; a child without a phone gets an account created directly. Per family role, each module is full, read only or not at all.
-
-[More on yuvomi.cloud](https://yuvomi.cloud/#family)
 
 ## The twenty modules
 
-Switch off what your household doesn't need, and it disappears from everyone's menu. Inventory,
-Waste collection and Schedule start switched off.
-
-- **Plan** - Tasks · Calendar · Schedule · Notes
-- **Household** - Meals · Recipes · Shopping · Pantry · Housekeeping · Waste collection · Documents · Inventory · Rewards
-- **People** - Health · Contacts · Birthdays
-- **Finance** - Budget
-- **Settings** - Family · Reminders · API Tokens · Backup
-
-<details>
-<summary><b>Every module in one line</b></summary>
+Turn on what your household needs; the rest stays out of the way.
 
 | Module | In one line |
 |---|---|
 | **Tasks** | Kanban board with deadlines, subtasks, recurring chores, comments and a history of who ticked off what. |
-| **Shopping** | Shared lists sorted by aisle, with swipe gestures and an import from the meal plan. |
+| **Shopping** | Shared lists sorted by aisle, with swipe gestures and one-tap import from the meal plan. |
 | **Meals** | Weekly drag-and-drop planner with a recipe sidebar and direct export to the shopping list. |
 | **Recipes** | Create and scale recipes, fill meal slots, or mirror a Mealie or Tandoor instance read-only. |
 | **Pantry** | Amounts, storage locations and best-before dates, with a reminder before something expires. |
 | **Calendar** | Two-way Google and CalDAV sync, Outlook push, subscriptions, holidays and per-event visibility. |
-| **Documents** | Searchable family files in folders, stored locally, on WebDAV or in Google Drive. |
+| **Documents** | Tagged, searchable family files in folders, stored locally, on WebDAV or in Google Drive. |
 | **Inventory** | What you own, with purchase price, warranty, linked receipts, a service log and recurring deadline reminders. Off by default. |
 | **Budget** | Income, expenses, accounts, loans, subscriptions and shared expenses with debt simplification. |
 | **Housekeeping** | Household staff: schedules, check-in/out, billing, chores and supply requests. |
@@ -110,14 +93,15 @@ Waste collection and Schedule start switched off.
 | **Notes &amp; Contacts** | Markdown sticky notes with tappable checklists, plus contacts with CardDAV sync and vCard import/export. |
 | **Birthdays** | Birthdays and optional name days, with calendar entries, ages and reminders. |
 | **Family** | Member profiles with roles, and invite links where new members pick their own password. |
-| **Reminders** | For tasks, events, medications, warranties, best-before dates, expiring documents and pickups - in-app, push, Gotify, ntfy, webhook or email. |
-| **API Tokens** | Bearer tokens with an OpenAPI 3.1 spec and a built-in MCP endpoint for AI agents. |
-| **Backup** | Manual and scheduled backups with optional WebDAV upload and pre-restore rollback; a backup from another installation restores right in the browser. |
+| **Reminders** | For tasks, events, warranties, best-before dates and pickups - in-app, push, Gotify, ntfy, webhook or email. |
+| **API Tokens** | Bearer tokens with an OpenAPI 3.0 spec and a built-in MCP endpoint for AI agents. |
+| **Backup** | Manual and scheduled backups with pre-restore rollback and optional cloud upload. |
 
-</details>
-
-Every module in full detail is in the [spec](docs/SPEC.md); building your own drop-in module - with
-its own dashboard widgets, permissions and translations - is covered in the [module guide](MODULES.md).
+Two more things you only get on your own server: **wall mode** turns the kitchen tablet into a
+readable-from-across-the-room display, and an **Immich screensaver** rotates your own photos when
+the screen goes idle. Every module in full detail is in the [spec](docs/SPEC.md); building your own
+drop-in module - with its own dashboard widgets, permissions and translations - is covered in the
+[module guide](MODULES.md).
 
 ---
 
@@ -132,11 +116,6 @@ disk, and copying it is the whole export, as long as documents are stored in the
 Scheduled backups write a restorable archive on top of that, and the documented API pulls anything
 out in whatever shape you need.
 
-**How safe is access from outside?** Every account can add a second factor (TOTP, with recovery
-codes), and an admin can require it for the whole household; new members join through an invite
-link and pick their own password. With single sign-on through an OIDC provider, password login can
-be switched off for the household, and a lost phone is signed out from any of your other devices.
-
 **What does it cost?** Nothing. myCrib is free and MIT-licensed. You provide the server; there is
 no subscription, no upsell and no paid tier.
 
@@ -148,20 +127,14 @@ Pick your way in: [Docker or Podman](#docker-or-podman) for full control, the
 [guided setup](#guided-setup) wizard in your browser, or your [NAS app store](#from-your-nas-app-store)
 without a terminal.
 
-- **Image** - `ghcr.io/ulsklyc/`<wbr>`yuvomi:latest`, about 500 MB, for amd64 and arm64 (Raspberry Pi 4/5).
+- **Image** - `ghcr.io/mokudev/`<wbr>`mycrib:latest`, about 500 MB.
 - **Needs** - 256 MB RAM and one port, 3000 by default.
-- **Encryption key** - optional, but there is no way back: a lost or changed key never opens the database again, not by you and not by us. The guided setup and Umbrel generate one for you; with Compose, TrueNAS or Unraid you set it yourself, so write it down.
-
-<details>
-<summary><b>Requirements, network and your data</b></summary>
-
 - **Browsers** - everything as designed from Chrome and Edge 117, Firefox 129 and Safari 17.5. Down to Chrome 87, Firefox 79 and Safari 14.1 (iOS 14.5) it still starts and scrolls, with a plainer look and some features missing ([measured 21 September 2026](docs/installation.md#browser-support)).
 - **Writes** - four volumes you own: data, backups, modules, documents.
 - **Outbound** - out of the box, one update check against the GitHub releases API. Block it and nothing breaks, only the hint about a newer version stays away. Everything else reaches out only when you use or switch on a feature that needs it: opening the calendar settings loads the list of holiday countries from openholidaysapi.org, finding a logo for a subscription looks up the service's website, and weather, public holidays, exchange rates, calendar and contact sync, recipe mirrors, Immich, Paperless or Papra, push and notification channels, cloud storage and backup connect once you switch them on.
-- **Your LAN** - calendar subscriptions, notification channels (webhook, Gotify, ntfy), WebDAV document storage, recipe mirrors and waste-collection feeds on private or internal addresses stay blocked until you opt in ([how](docs/installation.md#environment-variables)). Paperless and Papra are the exception: they may reach the LAN out of the box.
+- **Your LAN** - calendar subscriptions, WebDAV storage and recipe mirrors on private or internal addresses stay blocked until you opt in ([how](docs/installation.md#environment-variables)).
+- **Encryption key** - optional, but there is no way back: a lost or changed key never opens the database again, not by you and not by us. The guided setup and Umbrel generate one for you; with Compose, TrueNAS or Unraid you set it yourself, so write it down.
 - **Your data** - one SQLite file at `/data/yuvomi.db`, plus the folder, WebDAV or Drive if you moved documents there.
-
-</details>
 
 ### Docker or Podman
 
@@ -179,8 +152,7 @@ openssl rand -hex 32   # DB_ENCRYPTION_KEY
 
 > **Now open `.env` and replace both `REPLACE_WITH_…` placeholders** with the two values you just
 > generated, in that order, and write the second one down: it is the database key, and nothing can
-> recover it. With a placeholder left in, myCrib refuses to start. To run without encryption, clear
-> the `DB_ENCRYPTION_KEY` line instead of filling it.
+> recover it. To run without encryption, clear the line instead of filling it.
 
 ```bash
 docker compose up -d
@@ -191,27 +163,21 @@ page does not load, `docker compose logs` (on Podman, `podman compose -f podman-
 usually names the reason, and the
 [troubleshooting guide](docs/installation.md#troubleshooting) covers the common ones.
 
-On **Proxmox**, the same steps run inside a small Debian LXC: see the
-[Proxmox guide on yuvomi.cloud](https://yuvomi.cloud/install.html#proxmox).
-
 ### Guided setup
 
-A setup wizard in your browser, in 25 languages. It detects Docker or Podman, sets up single sign-on
-and scheduled backups, prepares myCrib for an HTTPS reverse proxy (the certificate stays with your
-proxy), then starts the container and creates your admin account.
+A setup wizard in your browser, in 25 languages. It detects Docker or Podman, configures HTTPS,
+single sign-on and scheduled backups, then starts the container and creates your admin account.
 
 ```bash
 git clone https://github.com/MokuDev/myCrib.git && cd myCrib
 node tools/installer/install-server.js
 ```
 
-Open **http://localhost:8090** on the server itself; the wizard answers nowhere else. From another
-device, open a tunnel first, `ssh -L 8090:localhost:8090 user@server`, then open the same address
-there. Needs Node.js 22+ on the host; the container ships its own Node 24.
+Open **http://localhost:8090**. Needs Node.js 22+ on the host; the container ships its own Node 24.
 
 ### From your NAS app store
 
-**TrueNAS SCALE**, **Umbrel** and **Unraid** all carry myCrib: search for it in the app catalog and
+**TrueNAS SCALE**, **Umbrel** and **Unraid** all carry Yuvomi: search for it in the app catalog and
 install, no terminal required. New to containers? The **[installation guide](docs/installation.md)**
 covers engine setup, HTTPS, backups and troubleshooting step by step.
 
@@ -222,7 +188,7 @@ covers engine setup, HTTPS, backups and troubleshooting step by step.
 
 > **Health is not a medical device.** No diagnostic claims are made. Health data is sensitive, so enable database encryption (`DB_ENCRYPTION_KEY`, SQLCipher).
 
-> **External document storage needs its own backup.** Database backups hold document metadata and links, not binaries stored in a local folder, on WebDAV, or in Google Drive; back up the selected target separately. myCrib visibility settings only control access through myCrib. Anyone with access to the connected `myCrib/Documents` Google Drive folder can view all files stored there.
+> **External document storage needs its own backup.** Database backups hold document metadata and links, not binaries stored in a local folder, on WebDAV, or in Google Drive; back up the selected target separately. myCrib visibility settings only control access through myCrib. Anyone with access to the connected `Yuvomi/Documents` Google Drive folder can view all files stored there.
 
 > **Self-hosting in a GDPR context?** If you run myCrib in the EU/EEA and process other people's data, read [privacy for self-hosters](docs/PRIVACY-FOR-SELFHOSTERS.md) before going live. It covers third-country assessments for every external service, data-processing-agreement notes, log-retention guidance and a records-of-processing template.
 
@@ -233,12 +199,12 @@ covers engine setup, HTTPS, backups and troubleshooting step by step.
 
 <br>
 
-myCrib was renamed from **Oikos** to avoid a trademark conflict with an unrelated product. Same code, same data, same maintainer.
+Yuvomi was renamed from **Oikos** to avoid a trademark conflict with an unrelated product. Same code, same data, same maintainer.
 
 - Old links (`github.com/ulsklyc/oikos`) redirect here automatically.
 - The Docker image moved to `ghcr.io/ulsklyc/yuvomi`; the old `ghcr.io/ulsklyc/oikos` keeps working, so update at your convenience.
 - Existing data and settings are fully preserved on upgrade.
-- Some catalog slugs keep the technical name `oikos` (e.g. Unraid `oikos-…`) so existing installations upgrade seamlessly. Search for **myCrib**; an entry still shown as *oikos* is the same app.
+- Some catalog slugs keep the technical name `oikos` (e.g. Unraid `oikos-…`) so existing installations upgrade seamlessly. Search for **Yuvomi**; an entry still shown as *oikos* is the same app.
 
 </details>
 
@@ -249,7 +215,7 @@ myCrib was renamed from **Oikos** to avoid a trademark conflict with an unrelate
 - **No build step** - pure ES modules and plain CSS. No bundler, no transpiler, no framework, no runtime CDN.
 - **Apple HIG in the Liquid Glass language** - the system font stack and Apple's type scale, capsule controls, inset-grouped lists and spring motion, verified for WCAG AA in light and dark.
 - **Privacy first** - fully self-hosted, optional SQLCipher AES-256 database encryption, zero telemetry.
-- **Sign-in for a whole household** - two-factor authentication, invite links, optional password reset by email and single sign-on with any OIDC provider; see [how safe access from outside is](#before-you-commit).
+- **Sign-in that scales to a household** - optional two-factor authentication (TOTP with recovery codes, enforceable household-wide), invite links instead of handed-over passwords, and optional self-service password reset by email. Optional single sign-on works with any OIDC provider. One switch decides whether an unknown identity gets an account, so a provider shared beyond your household opens no door, and another makes SSO the only way in.
 - **25 languages** with automatic detection. A separate household setting decides the language of entries myCrib creates itself, so an exported calendar speaks your household's language instead of English.
 
 <p align="center">
@@ -267,7 +233,6 @@ myCrib was renamed from **Oikos** to avoid a trademark conflict with an unrelate
 
 ## Documentation
 
-- **See it** - [Tour and screenshots on yuvomi.cloud](https://yuvomi.cloud/)&nbsp;&nbsp;·&nbsp; [Install guide on yuvomi.cloud](https://yuvomi.cloud/install.html)
 - **Run it** - [Installation](docs/installation.md)&nbsp;&nbsp;·&nbsp; [Security](SECURITY.md)&nbsp;&nbsp;·&nbsp; [Privacy for self-hosters](docs/PRIVACY-FOR-SELFHOSTERS.md)&nbsp;&nbsp;·&nbsp; [Notification webhooks](docs/notification-webhooks.md)&nbsp;&nbsp;·&nbsp; [Immich screensaver](docs/immich-screensaver.md)
 - **Build on it** - [Spec &amp; data model](docs/SPEC.md)&nbsp;&nbsp;·&nbsp; [Third-party modules](MODULES.md)&nbsp;&nbsp;·&nbsp; [Contributing](CONTRIBUTING.md)
 - **Follow the project** - [Changelog](CHANGELOG.md)&nbsp;&nbsp;·&nbsp; [Roadmap](docs/ROADMAP.md)&nbsp;&nbsp;·&nbsp; [Decisions](docs/DECISIONS.md)&nbsp;&nbsp;·&nbsp; [Scope](docs/SCOPE.md)&nbsp;&nbsp;·&nbsp; [Backlog](BACKLOG.md)&nbsp;&nbsp;·&nbsp; [Releasing](docs/RELEASING.md)
@@ -280,7 +245,7 @@ the sources above disagree, the ones above are right.
 
 <div align="center">
   <br>
-  <img src="docs/logo.png" alt="myCrib logo" width="48" />
+  <img src="docs/logo.png" alt="" width="48" />
   <p><strong>One home for your household. Yours to keep.</strong></p>
   <p>
     Install it once. No account with us, no subscription,<br>
@@ -288,9 +253,8 @@ the sources above disagree, the ones above are right.
   </p>
   <p>
     <a href="#install"><strong>→ Install in minutes</strong></a>&nbsp;&nbsp;·&nbsp;
-    <a href="https://yuvomi.cloud/"><strong>Take the tour</strong></a>&nbsp;&nbsp;·&nbsp;
-    <a href="https://github.com/ulsklyc/yuvomi/discussions"><strong>Ask a question</strong></a>
+    <a href="https://github.com/MokuDev/myCrib/issues"><strong>Ask a question</strong></a>
   </p>
   <br>
-  <sub>MIT licensed, see <a href="LICENSE">LICENSE</a>. More at <a href="https://yuvomi.cloud/">yuvomi.cloud</a>.</sub>
+  <sub>MIT licensed, see <a href="LICENSE">LICENSE</a>.</sub>
 </div>

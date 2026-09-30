@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Bago sa app mo",
         "whatsNewSince": "Mula sa bersyong {{version}}, ang huli mong nakita.",
         "whatsNewMore": "May {{count}} pang pagbabago sa listahan sa ibaba.",
-        "whatsNewMore_one": "May {{count}} pang pagbabago sa listahan sa ibaba."
+        "whatsNewMore_one": "May {{count}} pang pagbabago sa listahan sa ibaba.",
+        "ownChangelogNotice": "Ito ang sariling changelog ng myCrib, kasama sa app."
     },
     "forgotPassword": {
         "title": "I-reset ang password",

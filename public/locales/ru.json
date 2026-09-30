@@ -4179,7 +4179,8 @@
         "whatsNewMore": "В списке ниже ещё {{count}} изменений.",
         "whatsNewMore_one": "В списке ниже ещё {{count}} изменение.",
         "whatsNewMore_few": "В списке ниже ещё {{count}} изменения.",
-        "whatsNewMore_many": "В списке ниже ещё {{count}} изменений."
+        "whatsNewMore_many": "В списке ниже ещё {{count}} изменений.",
+        "ownChangelogNotice": "Это собственный журнал изменений myCrib, поставляемый вместе с приложением."
     },
     "forgotPassword": {
         "title": "Сброс пароля",

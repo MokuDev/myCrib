@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "내 앱의 새로운 점",
         "whatsNewSince": "마지막으로 본 버전 {{version}} 이후의 변경 사항입니다.",
         "whatsNewMore": "아래 목록에 {{count}}건의 변경이 더 있습니다.",
-        "whatsNewMore_one": "아래 목록에 1건의 변경이 더 있습니다."
+        "whatsNewMore_one": "아래 목록에 1건의 변경이 더 있습니다.",
+        "ownChangelogNotice": "이것은 앱과 함께 제공되는 myCrib 자체 변경 이력입니다."
     },
     "forgotPassword": {
         "title": "비밀번호 재설정",

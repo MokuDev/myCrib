@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Nytt i din app",
         "whatsNewSince": "Sedan version {{version}}, den du såg senast.",
         "whatsNewMore": "Ytterligare {{count}} ändringar finns i listan nedan.",
-        "whatsNewMore_one": "Ytterligare en ändring finns i listan nedan."
+        "whatsNewMore_one": "Ytterligare en ändring finns i listan nedan.",
+        "ownChangelogNotice": "Det här är myCribs egen ändringslogg, som levereras med appen."
     },
     "forgotPassword": {
         "title": "Återställ lösenord",

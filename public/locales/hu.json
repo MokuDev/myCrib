@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Újdonságok az alkalmazásodban",
         "whatsNewSince": "A(z) {{version}} verzió óta, amelyet legutóbb láttál.",
         "whatsNewMore": "Az alábbi listában további {{count}} változás szerepel.",
-        "whatsNewMore_one": "Az alábbi listában még egy változás szerepel."
+        "whatsNewMore_one": "Az alábbi listában még egy változás szerepel.",
+        "ownChangelogNotice": "Ez a myCrib saját változásnaplója, amely az alkalmazással együtt érkezik."
     },
     "forgotPassword": {
         "title": "Jelszó visszaállítása",

@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "Novedades en tu app",
         "whatsNewSince": "Desde la versión {{version}}, la última que viste.",
         "whatsNewMore": "Hay {{count}} cambios más en la lista de abajo.",
-        "whatsNewMore_one": "Hay un cambio más en la lista de abajo."
+        "whatsNewMore_one": "Hay un cambio más en la lista de abajo.",
+        "ownChangelogNotice": "Este es el propio registro de cambios de myCrib, incluido con la aplicación."
     },
     "forgotPassword": {
         "title": "Restablecer contraseña",

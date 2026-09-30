@@ -441,7 +441,6 @@ const SPAET_OHNE_RIEGEL = new Map([
 const LESEN_NACH_AWAIT = new Map([
   ['server/routes/backup.js|/webdav/files', 'listet die Dateien auf dem WebDAV-Server, schreibt nichts'],
   ['server/routes/cardav.js|/accounts', 'liest die Konten, der Aufruf ist synchron'],
-  ['server/routes/changelog.js|/', 'GitHub-Releases, Cache im Speicher'],
   ['server/routes/dms.js|/search', 'DMS-Adapter (Paperless, Papra) ohne Datenbank'],
   ['server/routes/dms.js|/thumbnail', 'DMS-Adapter ohne Datenbank'],
   ['server/routes/documents.js|/:id/thumbnail', 'Vorschaubild nur fuer DMS-Dokumente, DMS-Adapter ohne Datenbank'],

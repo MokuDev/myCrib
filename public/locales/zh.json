@@ -3953,7 +3953,8 @@
         "whatsNewTitle": "你的应用有什么新变化",
         "whatsNewSince": "自你上次查看的版本 {{version}} 以来。",
         "whatsNewMore": "下方列表中还有 {{count}} 项变更。",
-        "whatsNewMore_one": "下方列表中还有 1 项变更。"
+        "whatsNewMore_one": "下方列表中还有 1 项变更。",
+        "ownChangelogNotice": "这是 myCrib 自己的更新日志，随应用一同提供。"
     },
     "forgotPassword": {
         "title": "重置密码",

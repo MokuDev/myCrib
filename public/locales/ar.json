@@ -4292,7 +4292,8 @@
         "whatsNewMore_one": "هناك تغيير آخر في القائمة أدناه.",
         "whatsNewMore_few": "هناك {{count}} تغييرات أخرى في القائمة أدناه.",
         "whatsNewMore_two": "هناك تغييران آخران في القائمة أدناه.",
-        "whatsNewMore_many": "هناك {{count}} تغييرًا آخر في القائمة أدناه."
+        "whatsNewMore_many": "هناك {{count}} تغييرًا آخر في القائمة أدناه.",
+        "ownChangelogNotice": "هذا سجل التغييرات الخاص بتطبيق myCrib، المرفق مع التطبيق."
     },
     "forgotPassword": {
         "title": "إعادة تعيين كلمة المرور",

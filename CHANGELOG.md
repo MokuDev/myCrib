@@ -13,6 +13,49 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-09-30
+
+- **Der erste Abgleich mit dem Ursprungsprojekt seit dem Fork.**
+
+### Added
+
+- **Everything upstream built between 27 and 30 September.** 65 commits from `ulsklyc/yuvomi`
+  (their v2.70.0 and v2.71.0), taken over as one merge rather than picked apart: the calendar
+  learns swipe and keyboard navigation and shows the picked day below the month grid on a phone,
+  documents preview their own first page, the pantry gets an "Expiring soon" tile, the overview
+  shows what is still open in shared expenses, and a long pass over budget, dashboard, settings
+  and the kitchen tabs. Their application code merged without a single conflict; what did
+  conflict was this fork's own naming, nothing functional.
+
+- **Brazilian Portuguese (pt-BR).** Upstream added the locale for the app, the web installer and
+  the CLI installer; it arrives named after this fork like every other language.
+
+### Fixed
+
+- **Shared expenses no longer carry ledger rows of expenses that are gone** (schema v227). Until
+  now a deleted account took its expenses and shares with it but left the ledger rows behind, and
+  the balances kept counting them - with no list anywhere that explained the difference. The
+  migration removes the orphans once; new ones cannot appear.
+
+- **A recurring booking keeps its own definition** (schema v228, upstream #1035). The first row of
+  a series was two things at once: the template every future occurrence is built from, and an
+  ordinary booking someone entered. "Change all future ones" therefore rewrote a booking that
+  could be years old - measured, the rent from January 2020 moved to the new account on an
+  account switch, and both balances were wrong afterwards. The series now has a definition of its
+  own and the original becomes a normal booking.
+
+- **Thirty-five more fixes from upstream**, among them: reminders, medication and housekeeping
+  check-ins follow the household's clock instead of the device's; a restore waits for work that
+  runs after the response and refuses while a server still uses the database; CalDAV and WebDAV
+  ask for the password again when the server or username changes; plural forms (few, dual, many)
+  for every counting string; and the installed iPhone app loses the grey strip under its tab bar.
+
+- **The release guide pointed at the wrong repository.** `docs/RELEASING.md` had not been touched
+  when the app was renamed: it named upstream's image and its legacy mirror, claimed the in-app
+  changelog reads the GitHub release (this fork reads the file), and told the maintainer to create
+  the release in `ulsklyc/yuvomi`. It also says now, plainly, that the Umbrel step does not work
+  in this fork rather than pretending a repository name fixes it.
+
 ## [1.0.0] - 2026-09-27
 
 - **hallo welt :) (und mary)**

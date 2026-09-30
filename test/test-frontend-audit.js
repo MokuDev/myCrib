@@ -8,6 +8,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { SETTINGS_DOMAINS, SETTINGS_LEAVES } from '../public/settings/registry.js';
 import { eachRule } from './css-rules.js';
+import { keySetDiff } from './i18n-plural-keys.js';
 import { withoutHtmlComments, withoutBlockComments, withoutCommentsKeepingLines } from './source-text.js';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8').replace(/\r/g, '');
@@ -1290,17 +1291,18 @@ test('jede Sub-Tab-Leiste erklärt ihre Semantik, und zwar die, die ihre Routen 
   assert.doesNotMatch(kitchen, /panelFor/,
     'ein Modulwechsel hat kein Panel im selben Dokument');
 
-  // Gesundheit: ein Modul, alle Panels gleichzeitig im DOM -> echte Tabs.
+  // Gesundheit: seit R10 keine Leiste mehr - die Uebersicht ist die
+  // Navigation (Liste "Alle Bereiche"), jeder Bereich hat eine Pfad-Adresse
+  // ueber den Liste-+-Detail-Baustein. Kommt eine Leiste zurueck, muss sie
+  // hier ihre Semantik erklaeren.
   const health = read('../public/utils/health-tabs.js');
-  assert.match(health, /semantics:\s*'tabs'/,
-    'die Gesundheits-Leiste tauscht ein Panel im selben Dokument; das sind Tabs');
-  assert.match(health, /panelFor:\s*\(route\) =>[\s\S]*?data-health-panel/,
-    'die Tabs müssen ihre echten Panels benennen');
-
-  // Und die Panels müssen existieren, sonst zeigt panelFor ins Leere.
+  assert.doesNotMatch(health, /renderSubTabs|semantics:/,
+    'Gesundheit hat seit R10 keine Leiste - die Uebersicht ist die Navigation');
   const healthPage = read('../public/pages/health.js');
   assert.match(healthPage, /data-health-panel="\$\{esc\(panel\.route\)\}"/,
-    'health.js muss die Panels mit genau dem Attribut rendern, das panelFor sucht');
+    'health.js rendert jeden Bereich als eigenes Panel');
+  assert.match(healthPage, /mountMasterDetail\(\{[\s\S]{0,200}address: healthAddress/,
+    'die Bereiche waehlt der Baustein ueber ihre Pfad-Adresse, nicht eine eigene Tab-Logik');
   assert.doesNotMatch(healthPage, /function showPanel\(/,
     'Auswahl und Panel-Sichtbarkeit sind eine Operation - zwei Besitzer laufen auseinander');
 });
@@ -1702,7 +1704,7 @@ test('module-specific settings leaves preserve their required controls and behav
   // Die per-user-Vorgaben sind nach personal-calendar gezogen; hier bleibt nur
   // Haushaltweites plus der Verweis dorthin (Critique 2026-07-27).
   assert.doesNotMatch(calendar, /id="calendar-default-assign-me"|js-default-reminder/);
-  assert.match(calendar, /\/settings\/personal\/calendar/);
+  assert.match(calendar, /\/settings\/modules\/calendar\?section=personal-calendar/);
   assert.doesNotMatch(calendar, /caldav|carddav|google|apple|subscriptions|sync accounts/i);
   assert.doesNotMatch(calendar, /#[0-9a-f]{6}/i);
   assert.match(calendar, /id="holiday-country" disabled/);
@@ -1935,7 +1937,8 @@ test('die Kalender-Abos liegen im persoenlichen Blatt, nicht hinter dem Admin-Ga
   assert.ok(leaf, 'personal-calendar-subscriptions fehlt in der Registry');
   assert.match(leaf[0], /adminOnly: false/,
     'das Blatt der Kalender-Abos darf nicht adminOnly sein - der Server gatet sie nicht');
-  assert.match(leaf[0], /domainId: 'personal'/);
+  // Seit R10 ein Abschnitt "Fuer mich" im Modulblatt Kalender.
+  assert.match(leaf[0], /scope: 'mine'/);
 
   // Und die Gegenrichtung: was an Zugangsdaten des Haushalts haengt, bleibt
   // drueben. Taucht hier ein CalDAV- oder OAuth-Endpunkt auf, ist die Trennung
@@ -2346,9 +2349,9 @@ test('Recipes expose meal-type suitability controls for planner integrations', (
   const recipesCss = read('../public/styles/recipes.css');
 
   assert.match(recipesPage, /normalizeRecipeMealTypes/);
-  assertKeysExistInEveryLocale(['recipes.dragToMealsHint']);
+  assertKeysExistInEveryLocale(['recipes.railHint']);
   assert.match(recipesPage, /id="recipe-meal-types"/);
-  assert.match(recipesPage, /input type="checkbox" value="\$\{option\.key\}" checked/);
+  assert.match(recipesPage, /class="filter-chip recipe-meal-types__chip" data-meal-type="\$\{option\.key\}" aria-pressed=/);
   assert.match(recipesPage, /meal_types/);
   assert.match(recipesCss, /\.recipe-meal-types\s*\{/);
   assert.match(recipesCss, /\.recipe-card__meal-types\s*\{/);
@@ -2362,7 +2365,7 @@ test('Meals page adds a recipe sidebar and randomize planner controls', () => {
   // Wochenplans statt eines losen Kopfknopfs (Verhalten: test-meals.js).
   assert.match(mealsPage, /action: 'randomize-plan', label: t\('meals\.randomizePlan'\)/);
   assert.match(mealsPage, /id="recipe-sidebar"/);
-  assert.match(mealsPage, /recipes\.dragToMealsHint/);
+  assert.match(mealsPage, /recipes\.railHint/);
   assert.match(mealsPage, /function renderRecipeSidebar/);
   assert.match(mealsPage, /function openRandomizeModal/);
   assert.match(mealsPage, /function wireRecipeSidebar/);
@@ -4021,9 +4024,17 @@ test('wer eine Pille zeigt, markiert seinen Scrollport', () => {
   assert.match(layout, /\.page-scrollport[^{]*\{[^}]*padding-block-end:[^;]*--shell-tail/,
     'die Rolle muss den Nachlauf auch wirklich setzen - sonst prueft der Rest hier eine Klasse ohne Wirkung');
 
+  // STANDARD-PORT: Dokumente hat keinen eigenen Scrollport, es scrollt in
+  // `.app-content`. Dort traegt der Platzhalter `.page-transition::after` den
+  // Nachlauf, und --shell-tail enthaelt --bulk-pill-tail (R11 H4, gemessen 390px:
+  // 156px = Leiste 76 + Pille 80). Die Regel dazu steht hier mit.
+  const STANDARD_PORT = ['/documents.js'];
+  assert.match(layout, /\.app-content:not\(:has\(\.page-scrollport\)\) > \.page-transition::after\s*\{[^}]*block-size:\s*var\(--shell-tail\)/,
+    'der Standard-Port muss den Nachlauf am Platzhalter tragen - sonst deckt die Ausnahme unten nichts');
   for (const page of walkJsFiles('../public/pages/')) {
     const src = read(page);
     if (!/\bsetBulkPill\s*\(/.test(src)) continue;
+    if (STANDARD_PORT.some((name) => page.endsWith(name))) continue;
     assert.match(src, /page-scrollport/,
       `${page}: zeigt eine Sammelaktions-Pille, markiert aber seinen Scrollport nicht - `
       + 'sie verdeckt dann am Listenende die Zeilen, auf die sie sich bezieht');
@@ -5553,9 +5564,9 @@ test('das Shell-Material behält im Reduced-Transparency-Fallback seinen dunklen
     seen += 1;
     const bg = rule.body.match(/background-color:\s*([^;]+)/)?.[1]?.trim();
     assert.ok(bg, `${rule.selector} muss im Fallback einen opaken Grund setzen`);
-    assert.match(bg, /--neutral-800/,
+    assert.match(bg, /--toast-bg/,
       `${rule.selector} braucht seinen EIGENEN dunklen Grund - der helle Akzent gehört dem Chip, `
-      + 'und die Schrift auf diesem Material ist --neutral-50');
+      + 'und die Schrift auf diesem Material ist --toast-text');
   }
 
   assert.ok(seen >= 1,
@@ -5871,10 +5882,13 @@ test('die beiden Küchen-Editoren sind derselbe Dialog', () => {
     'die Checkbox muss eingekleidet sein und die Stimme tragen, auch im Modal');
   assert.match(shopping, /class="form-check pantry-transfer__clear"/,
     'die folgenreichste Checkbox des Moduls („Artikel von der Einkaufsliste löschen", standardmäßig aktiv) war die unauffälligste');
-  assert.match(read('../public/pages/recipes.js'), /class="form-check recipe-meal-types__option"/,
-    'die Mahlzeit-Typen im Rezept-Formular waren die zweite nackte System-Checkbox');
+  // Die Mahlzeit-Typen im Rezept-Formular waren die zweite nackte System-
+  // Checkbox; seit der Re-Critique 2026-09-28 (A4 P2-7) sind sie Umschalt-Chips
+  // (filter-chip, aria-pressed) statt Checkbox plus Farbbadge.
+  assert.match(read('../public/pages/recipes.js'), /class="filter-chip recipe-meal-types__chip"/,
+    'die Mahlzeit-Typen im Rezept-Formular sind Umschalt-Chips');
   // Die Modul-CSS dürfen die Geometrie nicht zurückholen.
-  for (const [file, selector] of [['shopping.css', '.pantry-transfer__clear'], ['recipes.css', '.recipe-meal-types__option']]) {
+  for (const [file, selector] of [['shopping.css', '.pantry-transfer__clear']]) {
     const block = read(`../public/styles/${file}`).match(new RegExp(`\\${selector}\\s*\\{([^}]*)\\}`))?.[1] ?? '';
     assert.doesNotMatch(block, /display:|align-items:|cursor:/,
       `${file}: ${selector} darf Geometrie und Zielgröße nicht doppelt pflegen - das leistet .form-check`);
@@ -6320,7 +6334,10 @@ test('responsive adaptation keeps all four Kitchen tabs readable on narrow phone
   );
   assert.doesNotMatch(
     kitchenTabs,
-    /@media \(max-width:\s*639px\)[\s\S]*\.kitchen-tabs-bar\s*\{[^}]*padding-inline/,
+    // Die ANFANGSKANTE ist die Fluchtlinie. `padding-inline-end: 0` ist
+    // erlaubt: in Rezepte/Vorrat endet die Leiste per Rand vor Lupe und
+    // Werkzeugmenue, und der Rand traegt dort schon den Abstand (R9, Sonde 20).
+    /@media \(max-width:\s*639px\)[\s\S]*\.kitchen-tabs-bar\s*\{[^}]*padding-inline(?:-start)?\s*:/,
     'kitchen-tabs-bar darf --page-inline-pad aus .sub-tabs-bar nicht überschreiben',
   );
   // Die Labels werden NICHT gekürzt - die Leiste scrollt lieber.
@@ -6865,6 +6882,7 @@ test('⌘K bei offener Suche: kein zweiter Focus-Trap, und Schliessen gibt den F
     setStatus: () => {},
     createFocusTrap: () => () => {},
     returnFocus: (el) => returned.push(el),
+    combo: { clear() {}, refresh() {} },
   };
   const make = new Function(...Object.keys(env), `
     let _searchTrapHandler = null;
@@ -7229,8 +7247,9 @@ test('phase 7 locale files keep the de reference key set complete', () => {
   for (const file of LOCALES) {
     const data = JSON.parse(readFileSync(new URL(file, LOCALE_DIR), 'utf8'));
     const keys = new Set(flattenLocaleKeys(data));
-    const missing = [...referenceKeys].filter((key) => !keys.has(key));
-    const extra = [...keys].filter((key) => !referenceKeys.has(key));
+    // Zusaetzlich erlaubt: die Pluralvarianten der eigenen Sprache (#1473, Regel
+    // in test/i18n-plural-keys.js) - `_few` in cs.json, nicht in en.json.
+    const { missing, extra } = keySetDiff(referenceKeys, keys, file.replace(/\.json$/, ''));
 
     assert.deepEqual(missing, [], `${file} is missing locale keys`);
     assert.deepEqual(extra, [], `${file} has extra locale keys`);
@@ -7882,7 +7901,6 @@ test('Feldkanten tragen --color-border-control und halten 3:1 auf jedem Feldgrun
     ['.search-result + .search-result', 'Trennlinie zwischen zwei Treffern'],
     ['.search-scope', 'Bereichs-Chip in der Suche; ein Knopf, kein Feld'],
     ['.search-scope:hover', 'Hover desselben Chips'],
-    ['.documents-selectbar', 'Aktionsleiste der Mehrfachauswahl ("select" als Auswaehlen); Trennlinie'],
     ['.rrule-fields', 'Gruppe der Wiederholungsfelder; Gruppenkante, die Felder darin tragen ihre eigene'],
     ['.schedule-day-row-fields', 'Gruppe der Felder eines Wochentags; linke Gruppenlinie'],
     ['.note-category-selection', 'Chip der gewaehlten Notiz-Kategorie; Knopf, kein Feld'],
@@ -7927,6 +7945,137 @@ test('Feldkanten tragen --color-border-control und halten 3:1 auf jedem Feldgrun
   const staleExceptions = [...NOT_A_FIELD.keys()].filter((key) => !usedExceptions.has(key));
   assert.deepEqual(staleExceptions, [],
     'NOT_A_FIELD nennt Selektoren, die keine Regel mit Kartenkante mehr treffen - Eintrag entfernen.');
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Die ausgeschaltete Schalterbahn haelt 3:1 (#1572)
+ *
+ * Die `.toggle`-Bahn stand im Aus-Zustand auf --neutral-300: gerendert 1,65:1
+ * auf Weiss und 1,46:1 auf dem dunklen -raised. Ein Schalter, der aus war,
+ * verschwand in seiner Zeile - WCAG 1.4.11 verlangt fuer die Grenze eines
+ * Bedienelements 3:1. Die Bahn selbst ist die Grenze (randlose Kapsel), also
+ * misst der Guard ihre Fuellung.
+ *
+ * Abgeleitet, nicht behauptet: Bahn- und Knopffarbe liest er aus den Regeln
+ * (`.toggle__track` und sein `::after`), nicht aus einem Token-Namen, und
+ * rechnet sie gegen jede Flaeche, auf der ein Schalter steht - Karte, Modal,
+ * Settings-Blatt (-work, -raised), Modal-Feldgrund (-2), Buehne, erhoehte
+ * Flaeche und die Zeile im Hover (`.toggle-row:hover` wechselt auf
+ * --color-surface-hover, erhoeht auf -elevated-hover). Dazu der Knopf gegen
+ * die Bahn: im Aus-Zustand traegt er den Zustand, eine Bahn in Knopffarbe
+ * liesse die Position nicht erkennen. Beide Dark-Bloecke, weil beide gelten.
+ * ──────────────────────────────────────────────────────────────────────────── */
+test('die ausgeschaltete Schalterbahn haelt 3:1 auf jeder Flaeche, auf der ein Schalter steht', () => {
+  const { light, dark } = themeTokenMaps();
+  const scheme = darkSchemeBlock(read('../public/styles/tokens.css'));
+  assert.ok(scheme, 'prefers-color-scheme-Dark-Block in tokens.css nicht gefunden');
+  const darkScheme = new Map(light);
+  for (const [k, v] of parseTokenMap(scheme[1])) darkScheme.set(k, v);
+
+  const styles = new URL('../public/styles/', import.meta.url);
+  const rules = readdirSync(styles)
+    .filter((entry) => entry.endsWith('.css') && entry !== 'tokens.css')
+    .flatMap((file) => [...eachRule(readFileSync(new URL(file, styles), 'utf8'))].map((rule) => ({ ...rule, file })));
+  const background = (body) => {
+    let found = null;
+    for (const m of body.matchAll(/(?:^|;)\s*background(?:-color)?\s*:\s*([^;]+)/g)) found = m[1].trim();
+    return found;
+  };
+  const tokenOf = (value) => String(value ?? '').match(/^var\(\s*(--[\w-]+)\s*\)$/)?.[1] ?? null;
+
+  // Die Bahn im Ruhezustand: jede Regel, deren Glied auf `.toggle__track` endet,
+  // ohne :checked (an) und ohne :disabled (von 1.4.11 ausgenommen).
+  const offTrack = rules.flatMap(({ selector, body, file }) => selector.split(',')
+    .map((part) => part.trim())
+    .filter((part) => /\.toggle__track$/.test(part) && !/:checked|:disabled/.test(part))
+    .map((part) => ({ part, file, value: background(body) })))
+    .filter(({ value }) => value);
+  assert.ok(offTrack.some(({ part, file }) => part === '.toggle__track' && file === 'layout.css'),
+    `Die Basisregel .toggle__track (layout.css) mit Hintergrund wurde nicht gefunden - der Guard misst nichts. Gefunden: ${offTrack.map(({ file, part }) => `${file} ${part}`).join(', ')}`);
+  const knob = rules.find(({ selector, file }) => file === 'layout.css' && selector.trim() === '.toggle__track::after');
+  const knobToken = tokenOf(knob && background(knob.body));
+  assert.ok(knobToken, 'Der Knopf (.toggle__track::after, layout.css) setzt keinen Token-Hintergrund - der Guard misst nichts.');
+
+  const GROUNDS = [
+    '--color-surface', '--color-surface-work', '--color-surface-raised', '--color-surface-2', '--color-bg',
+    '--color-surface-elevated', '--color-surface-hover', '--color-surface-elevated-hover',
+  ];
+  const findings = [];
+  for (const { part, file, value } of offTrack) {
+    const token = tokenOf(value);
+    if (!token) { findings.push(`${file} ${part}: Bahn ohne Token (${value})`); continue; }
+    for (const [theme, map] of [['light', light], ['dark [data-theme]', dark], ['dark prefers-color-scheme', darkScheme]]) {
+      const track = resolveColor(token, map);
+      if (!/^#[0-9a-f]{6}$/i.test(track ?? '')) { findings.push(`${theme}: ${token} loest nicht auf eine Hex-Farbe auf (${track})`); continue; }
+      for (const ground of GROUNDS) {
+        const bg = resolveColor(ground, map);
+        assert.ok(/^#[0-9a-f]{6}$/i.test(bg ?? ''), `${theme}: ${ground} loest nicht auf eine Hex-Farbe auf (${bg})`);
+        const ratio = contrastRatio(track, bg);
+        if (ratio + 0.005 < 3) findings.push(`${theme}: ${file} ${part} ${token} (${track}) auf ${ground} (${bg}) ${ratio.toFixed(2)}:1`);
+      }
+      const knobHex = resolveColor(knobToken, map);
+      const knobRatio = contrastRatio(knobHex, track);
+      if (knobRatio + 0.005 < 3) findings.push(`${theme}: Knopf ${knobToken} (${knobHex}) auf ${token} (${track}) ${knobRatio.toFixed(2)}:1`);
+    }
+  }
+  assert.deepEqual(findings, [],
+    'Die ausgeschaltete Schalterbahn unterschreitet 3:1 (WCAG 1.4.11) - gegen eine Flaeche, auf der Schalter stehen, oder gegen ihren Knopf. '
+    + 'Die Bahn traegt --color-switch-off (tokens.css, #1572).');
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Der Schalterknopf spiegelt in RTL (#1572)
+ *
+ * In `ar` und `fa` setzt die App `dir=rtl`. Apple (und jede RTL-Plattform)
+ * spiegelt den Schalter: "an" steht auf der fuehrenden Seite, in RTL also
+ * links. Die App liess den Knopf physisch rechts einrasten (`left: 3px`,
+ * `translateX(18px)`), der Installer spiegelt seit #1571 - zwei Schalter,
+ * zwei Richtungen.
+ *
+ * Zwei Haelften, beide ueber den Regelscanner:
+ *   1. keine Knopfregel setzt `left`/`right` - die Ruhelage ist logisch
+ *      (`inset-inline-start`), und mindestens eine Knopfregel setzt sie;
+ *   2. jede Knopfregel mit `translateX(N)` hat im selben At-Kontext ihr
+ *      `[dir="rtl"]`-Gegenstueck mit `translateX(-N)` - translateX kennt
+ *      keine Schreibrichtung, sonst liefe der Knopf in RTL aus der Bahn.
+ * ──────────────────────────────────────────────────────────────────────────── */
+test('der Schalterknopf spiegelt in RTL: an steht auf der fuehrenden Seite', () => {
+  const styles = new URL('../public/styles/', import.meta.url);
+  const RTL = /\[dir="rtl"\]\s*/g;
+  const KNOB = /\.toggle__track::after$/;
+  const physical = [];
+  const logical = [];
+  const moves = [];
+  const rtlMoves = new Map();
+
+  for (const file of readdirSync(styles).filter((n) => n.endsWith('.css'))) {
+    for (const { selector, body, at } of eachRule(read(`../public/styles/${file}`))) {
+      const parts = selector.split(',').map((part) => part.trim()).filter((part) => KNOB.test(part));
+      if (!parts.length) continue;
+      const shift = body.match(/(?:^|;)\s*transform\s*:\s*translateX\(\s*(-?[\d.]+)px\s*\)/)?.[1];
+      for (const part of parts) {
+        const isRtl = RTL.test(part);
+        RTL.lastIndex = 0;
+        if (/(?:^|;)\s*(?:left|right)\s*:/.test(body)) physical.push(`${file} {${part}}`);
+        if (/(?:^|;)\s*inset-inline-start\s*:/.test(body)) logical.push(`${file} {${part}}`);
+        if (shift === undefined) continue;
+        const key = `${file}||${at.join(' | ')}||${part.replace(RTL, '').trim()}`;
+        if (isRtl) rtlMoves.set(key, Number(shift));
+        else moves.push({ key, file, part, shift: Number(shift) });
+      }
+    }
+  }
+
+  // Reichweite vor dem Urteil - ohne Fundstellen prueft die Zusicherung nichts.
+  assert.ok(moves.length >= 1, `erwartet: eine Knopfregel mit translateX, gefunden: ${moves.length}`);
+  assert.deepEqual(physical, [],
+    'Der Schalterknopf steht physisch (left/right) - in RTL bleibt er rechts. Ruhelage per inset-inline-start.');
+  assert.ok(logical.length >= 1, 'Keine Knopfregel setzt inset-inline-start - die Ruhelage folgt der Schreibrichtung nicht.');
+  const unmirrored = moves
+    .filter(({ key, shift }) => rtlMoves.get(key) !== -shift)
+    .map(({ file, part, shift, key }) => `${file} {${part}}: translateX(${shift}px), RTL-Gegenstueck ${rtlMoves.has(key) ? `translateX(${rtlMoves.get(key)}px)` : 'fehlt'}`);
+  assert.deepEqual(unmirrored, [],
+    'Der Weg des Schalterknopfs braucht in RTL das umgekehrte Vorzeichen ([dir="rtl"] ... translateX(-N)), sonst rastet "an" auf der falschen Seite ein.');
 });
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -8531,8 +8680,8 @@ test('--color-ink-on-vivid traegt auf jedem Modulakzent, --color-text-on-accent 
  * getoenten Flaechen (`--color-*-light`) werden aber fast immer im Zustand
  * gesetzt und die Textfarbe in der Basis:
  *
- *     .contact-menu-item--danger        { color: var(--color-danger); }
- *     .contact-menu-item--danger:hover  { background: var(--color-danger-light); }
+ *     .popover-menu__item--danger        { color: var(--color-danger); }
+ *     .popover-menu__item--danger:hover  { background: var(--color-danger-light); }
  *
  * Zwei Bloecke, ein Bauteil - der Blockguard sah nie beide zusammen. Genau so
  * sind in Runde 8 zwei Stellen davongedriftet: `--color-danger` wanderte von
@@ -9349,17 +9498,14 @@ test('contacts keep one primary call action and disclose the rest through a labe
   // (grün) über row-action--success (Audit F1).
   assert.match(contactsPage, /href="tel:[\s\S]*class="row-action row-action--success"/);
   // Sekundäraktionen leben im „Mehr"-Menü als BESCHRIFTETE Einträge (Icon + Text),
-  // identisch auf Desktop und Mobile — behebt das „nackte Icons"-Problem.
-  assert.match(contactsPage, /class="contact-menu-item"[\s\S]*contact-menu-item__icon[\s\S]*<span>/);
+  // identisch auf Desktop und Mobile. Seit R16 (Re-Critique 2026-09-28) ist es
+  // das geteilte Menü aus utils/popover-menu.js - Popover, Pfeiltasten und
+  // aria-expanded baut es dort; Verhalten: test-module-readonly-ui.js.
+  assert.match(contactsPage, /popoverMenuHtml\(\{[\s\S]*triggerClass: 'row-action contact-more-menu__trigger'/);
   // Löschen ist ein abgesetzter Danger-Eintrag im selben Menü.
-  assert.match(contactsPage, /contact-menu-item contact-menu-item--danger[\s\S]*data-action="delete"/);
-  // Menü-Eintrag trägt Textlabel (kein reines Icon mehr).
-  assert.match(contactsCss, /\.contact-menu-item\s*\{[\s\S]*min-height:\s*var\(--target-md\)/);
-  // Das Panel ist ein Popover (Top-Layer) statt eines absolut positionierten
-  // Menüs im Scroll-Container.
-  assert.match(contactsCss, /\.contact-more-menu__panel\s*\{[\s\S]*position:\s*fixed/);
-  assert.match(contactsPage, /popovertarget="\$\{menuId\}"/);
-  assert.match(contactsPage, /id="\$\{menuId\}" popover/);
+  assert.match(contactsPage, /action: 'delete'[\s\S]*danger: true/);
+  // Keine private Panel-Kopie mehr neben dem geteilten Menü.
+  assert.doesNotMatch(contactsCss, /\.contact-more-menu__panel|\.contact-menu-item/);
 });
 
 test('contacts keyboard shortcut and aria-live result count are wired', () => {
@@ -10873,9 +11019,11 @@ test('Rechtevergabe ist auf dem Telefon beschriftet und mit dem Finger bedienbar
   // à 34x30px). `pointer: coarse` deckt das Tablet im Querformat.
   const touchQuery = '@media (max-width: 1023px), (pointer: coarse)';
   assert.ok(css.includes(touchQuery), 'Touch endet nicht bei 767px');
-  const mobile = css.slice(css.indexOf(touchQuery, css.indexOf('.perm-modeswitch {')));
+  // Seit R14 ist der Modus-Umschalter der Kanon `.segmented` (Touch-Mass aus
+  // --target-base in panel.css); hier bleiben die Chips der Subjekt-Auswahl.
+  const mobile = css.slice(css.indexOf(touchQuery, css.indexOf('.perm-mode {')));
   assert.ok(mobile.includes('.perm-seg__label'), 'Der Touch-Block muss das Label sichtbar schalten');
-  assert.match(mobile, /\.perm-modeswitch__btn,\s*\.perm-chip \{ min-height: var\(--target-base\); \}/);
+  assert.match(mobile, /\.perm-chip \{ min-height: var\(--target-base\); \}/);
   assert.match(mobile, /\.perm-seg__opt \{[^}]*min-height: var\(--target-base\);/s);
   // Gestapelt statt segmentiert: vier Stufen mit Wort passen bei 390px nicht
   // neben den Modulnamen.
@@ -12159,6 +12307,13 @@ test('row lists sit in exactly one carrier', () => {
   // Werte werden ausgelesen und geprueft, nicht per Lookahead ausgeschlossen:
   // `border-radius:\s*(?!0)` ist wahr, sobald `\s*` leer matchen darf - der
   // Lookahead sieht dann das Leerzeichen statt der Null.
+  //
+  // UEBER `eachRule()`, NICHT UEBER DEN ROHEN TEXT (#1456). Die erste Fassung
+  // las die Stylesheets mit eigenen Regexen, und `(?:^|;)\s*border-radius:`
+  // beginnt nie hinter einem Kommentar: in `.countdown-item` steht einer
+  // zwischen dem vorigen `;` und dem Radius, und der Guard sah ihn nicht. Das
+  // Urteil ueber die Zeile fiel damit am Kommentar, nicht an der Regel.
+  // `eachRule()` streift Kommentare vorher ab.
   const declared = (body, prop) => {
     const hits = [...body.matchAll(new RegExp(`(?:^|;)\\s*${prop}:([^;]*)`, 'g'))];
     return hits.map((m) => m[1].trim());
@@ -12170,33 +12325,62 @@ test('row lists sit in exactly one carrier', () => {
     { prop: 'background-color', isCard: (v) => /^var\(--color-surface(-work|-raised|-elevated)?\)$/.test(v) },
   ];
 
+  // BENANNTE AUSNAHMEN, und jede muss noch gesehen werden: ein Eintrag, den
+  // der Guard nicht mehr trifft, ist eine Ausnahme ohne Gegenstand und faellt
+  // unten als veraltet auf. Der Schluessel traegt den WERT - ein anderer
+  // Radius an derselben Zeile ist wieder ein Befund.
+  const EXEMPT = new Map([
+    ['dashboard.css .countdown-item border-radius: var(--radius-sm)',
+      'Radius fuer Fokusring und Hover-Flaeche, keine Flaeche und kein Schatten im Ruhezustand '
+      + '(Begruendung am Selektor). Ob ein solcher Radius an einer flachen Zeile als Kartenmerkmal '
+      + 'zaehlt, ist offen (#1456) - `.list-row` traegt keinen.'],
+  ]);
+  const exemptSeen = new Set();
+  let rowCount = 0;
+
   const offenders = [];
   for (const name of files) {
-    const css = read(`../public/styles/${name}`);
-    // `X + X { … border-top … }` — derselbe Selektor auf beiden Seiten ist die
+    const rules = [...eachRule(read(`../public/styles/${name}`))];
+    const parts = (rule) => rule.selector.split(',').map((part) => part.trim());
+    // `X + X { … border-top … }` - derselbe Selektor auf beiden Seiten ist die
     // Signatur der Haarlinien-Trennung (im Unterschied zu `.a + .b`, das ein
     // Geschwister-Abstand sein kann).
-    const seen = new Set();
-    for (const m of css.matchAll(/(?:^|[},])\s*(\.[\w-]+)\s*\+\s*\1\s*\{([^}]*)\}/g)) {
-      const [, selector, body] = m;
-      if (!/border-top:/.test(body)) continue;
-      if (seen.has(selector)) continue;
-      seen.add(selector);
+    const rows = new Set();
+    for (const rule of rules) {
+      if (!/(?:^|;)\s*border-top:/.test(rule.body)) continue;
+      for (const part of parts(rule)) {
+        const pair = part.match(/^(\.[\w-]+)\s*\+\s*\1$/);
+        if (pair) rows.add(pair[1]);
+      }
+    }
 
-      // Basisregel des Selektors: exakt `X {`, nicht `.foo X {` und nicht
-      // `X--modifier {` (cssRuleBody matcht ungebunden, siehe Handoff-Falle).
-      const base = css.match(new RegExp(`(?:^|[},])\\s*\\${selector}\\s*\\{([^}]*)\\}`, 'm'));
-      if (!base) continue;
-      for (const marker of CARD_MARKERS) {
-        for (const value of declared(base[1], marker.prop)) {
-          if (marker.isCard(value)) {
-            offenders.push(`${name} ${selector} traegt ${marker.prop}: ${value} — eine Zeile in einer Liste ist keine Karte`);
+    rowCount += rows.size;
+
+    // Basisregel des Selektors: exakt `X`, nicht `.foo X` und nicht
+    // `X--modifier` - in jeder Regel, die ihn fuehrt, auch in einem At-Block.
+    for (const selector of rows) {
+      for (const rule of rules) {
+        if (!parts(rule).includes(selector)) continue;
+        for (const marker of CARD_MARKERS) {
+          for (const value of declared(rule.body, marker.prop)) {
+            if (!marker.isCard(value)) continue;
+            const id = `${name} ${selector} ${marker.prop}: ${value}`;
+            if (EXEMPT.has(id)) {
+              exemptSeen.add(id);
+              continue;
+            }
+            offenders.push(`${name} ${selector} traegt ${marker.prop}: ${value} - eine Zeile in einer Liste ist keine Karte`);
           }
         }
       }
     }
   }
+
+  // Ein Guard, der keine Zeilenliste gefunden hat, darf nicht urteilen.
+  assert.ok(rowCount > 0, 'Keine `X + X { border-top }`-Zeile gefunden - der Guard hat nichts gemessen.');
   assert.deepEqual(offenders, []);
+  assert.deepEqual([...EXEMPT.keys()].filter((id) => !exemptSeen.has(id)), [],
+    'Ausnahmen, die der Guard nicht mehr trifft - Eintrag streichen');
 });
 
 // --------------------------------------------------------------------------
@@ -13180,10 +13364,10 @@ test('the collapsing header is wired once, by the shell', () => {
  * beide verworfen:
  *
  * (a) „Der Blur steht in einem `@supports`-Block." Klingt nach dem Wortlaut der
- *     Regel und ist die falsche Frage. Sechs Flaechen setzen ihn ausserhalb
+ *     Regel und ist die falsche Frage. Fuenf Flaechen setzen ihn ausserhalb
  *     (`.onboarding-overlay`, `.document-viewer__pdf-indicator`,
- *     `.more-backdrop`, `.search-overlay`, `.modal-overlay`, `body::after` in
- *     pwa.css) und KEINE davon ist ein Verstoss: der
+ *     `.more-backdrop`, `.search-overlay`, `.modal-overlay`) und KEINE davon
+ *     ist ein Verstoss: der
  *     Zugaenglichkeits-Fallback dieser App haengt nicht am Block, sondern am
  *     TOKEN. `--blur-2xs..lg` kippen unter `prefers-reduced-transparency` und
  *     `prefers-contrast: more` selbst auf `blur(0px)` - beide Bloecke stehen in
@@ -17163,6 +17347,17 @@ function declaredCompositionModes(src) {
 const usesListDetail = (src) => /app-page--list-detail/.test(src)
   && /from\s+'\/utils\/master-detail\.js'/.test(src);
 
+/**
+ * Liste + Detail mit eigener Shell statt Baustein. Die Einstellungen (R10, S3)
+ * sind Router-Routen je Blatt mit Dirty-Guard und Soft-Update; der Baustein
+ * schreibt pushState am Router vorbei. Sie stehen deshalb im Regime, aber mit
+ * eigenem Container - der muss an derselben Schwelle umschalten (PAGE-019).
+ * Die Liste schrumpft nur: haengt eine Seite den Baustein ein, faellt sie raus.
+ */
+const OWN_LIST_DETAIL_SHELL = new Map([
+  ['settings.js', { css: 'settings.css', container: 'settings-surface' }],
+]);
+
 test('PAGE-017: jede Seite steht in genau einem der drei Breitenregime', () => {
   const { section, rows } = widthRegimeTable();
   // Die drei Namen sind die Regel - ein viertes Regime in der Tabelle waere
@@ -17191,6 +17386,10 @@ test('PAGE-017: jede Seite steht in genau einem der drei Breitenregime', () => {
     assert.ok(scope.includes(file), `PAGE-017 ${file}: steht in der Tabelle, ist aber keine Seite hinter der Shell`);
   }
 
+  for (const name of OWN_LIST_DETAIL_SHELL.keys()) {
+    assert.equal(byFile.get(name), 'Liste + Detail',
+      `PAGE-017 ${name}: steht als eigene Liste-+-Detail-Shell in der Ausnahmeliste, aber nicht im Regime`);
+  }
   for (const name of scope) {
     const regime = byFile.get(name);
     const src = withoutBlockComments(withoutHtmlComments(read(`../public/pages/${name}`)));
@@ -17203,6 +17402,12 @@ test('PAGE-017: jede Seite steht in genau einem der drei Breitenregime', () => {
         assert.ok(modes.some((m) => m === 'reading' || m === 'form'),
           `PAGE-017 ${name}: Lesemass verlangt reading/form, deklariert ist ${modes.join(',') || 'nichts'}`);
       }
+    } else if (regime === 'Liste + Detail' && OWN_LIST_DETAIL_SHELL.has(name)) {
+      const { css, container } = OWN_LIST_DETAIL_SHELL.get(name);
+      assert.ok(!usesListDetail(src),
+        `PAGE-017 ${name}: haengt den Baustein ein - aus OWN_LIST_DETAIL_SHELL streichen`);
+      assert.match(read(`../public/styles/${css}`), new RegExp(`@container\\s+${container}\\s*\\(min-width:`),
+        `PAGE-017 ${name}: eigene Liste-+-Detail-Shell ohne @container ${container} in ${css}`);
     } else if (regime === 'Liste + Detail') {
       assert.ok(usesListDetail(src) || modes.includes('split'),
         `PAGE-017 ${name}: Liste + Detail verlangt .app-page--list-detail plus utils/master-detail.js (oder split)`);
@@ -17262,6 +17467,29 @@ test('PAGE-019: der Liste-+-Detail-Baustein misst die Modulflaeche an der Schwel
     if (sel === '.split-view__detail' && /display\s*:\s*flex/.test(body)) shownInside = true;
     if (sel === '.split-view') gridInside = body;
   }
+  // Jede weitere Split-Abfrage (Modul-CSS nur im Split, eigene Shells aus
+  // OWN_LIST_DETAIL_SHELL) steht an derselben Zahl: eine Stelle, die bei einem
+  // Schwellenwechsel stehen bliebe, schaltete ihr Modul an einer anderen
+  // Breite um als den Baustein - Liste und Detail kaemen auseinander.
+  const splitContainers = ['module-surface', ...[...OWN_LIST_DETAIL_SHELL.values()].map((entry) => entry.container)];
+  const splitQuery = new RegExp(`@container\\s+(${splitContainers.join('|')})\\s*\\(min-width:\\s*([0-9.]+)(\\w+)\\)`, 'g');
+  let splitQueries = 0;
+  for (const file of readdirSync(new URL('../public/styles/', import.meta.url)).filter((name) => name.endsWith('.css'))) {
+    for (const m of read(`../public/styles/${file}`).matchAll(splitQuery)) {
+      splitQueries += 1;
+      assert.equal(`${m[2]}${m[3]}`, `${threshold}rem`,
+        `PAGE-019: ${file} schaltet @container ${m[1]} bei ${m[2]}${m[3]}, tokens.css --layout-split-threshold steht bei ${threshold}rem`);
+    }
+  }
+  assert.ok(splitQueries >= 3, `PAGE-019: nur ${splitQueries} Split-Abfragen gefunden - der Scan ist blind`);
+  // Die Navigationslisten im Split (Einstellungen, Gesundheit) teilen EINE
+  // Breite aus tokens.css - zwei Schreibweisen derselben 320px liefen sonst
+  // beim ersten Nachjustieren auseinander.
+  assert.match(tokens, /--layout-nav-list:\s*[0-9.]+rem/, 'tokens.css: --layout-nav-list fehlt');
+  assert.match(read('../public/styles/settings.css'), /--settings-list-width:\s*var\(--layout-nav-list\)/,
+    'PAGE-019: die Einstellungs-Liste nimmt --layout-nav-list');
+  assert.match(read('../public/styles/health.css'), /\.health-split\s*\{\s*grid-template-columns:\s*var\(--layout-nav-list\)/,
+    'PAGE-019: die Gesundheits-Liste nimmt --layout-nav-list');
   assert.ok(containerRule && /container\s*:\s*module-surface\s*\/\s*inline-size/.test(containerRule),
     'PAGE-019: .app-page--list-detail muss der benannte Container module-surface sein - die Abfrage misst die Seitenwurzel');
   assert.ok(hiddenOutside, 'PAGE-019: unter der Schwelle muss die Detailspalte fehlen (display: none)');
@@ -19010,35 +19238,18 @@ test('die Achsenschrift einer CHART-Flaeche skaliert nicht mit dem Diagramm', ()
 
 /* "Mitglied hinzufuegen" verlor den Fokus (Critique 2026-09-26): der Knopf
  * verschwand, das Formular erschien UNTER der Zwei-Faktor-Karte, der Fokus
- * fiel auf BODY. Die Einladung derselben Seite macht es richtig - Formular am
- * Ort, erstes Feld fokussiert. Geprueft wird Ort UND Fokusweg in beide
- * Richtungen, fuer beide Formulare der Seite. */
-test('Familie: Mitglied- und Einladungsformular erscheinen am Knopf und geben den Fokus zurueck', () => {
+ * fiel auf BODY. Seit R14 (A7 P2-4) sind Mitglied und Einladung Blatt-Dialoge
+ * mit Kanon-Fuss: der Knopf bleibt stehen, der Dialog gibt den Fokus beim
+ * Schliessen an ihn zurueck (modal.js), und nach dem Anlegen schliesst er mit
+ * force, statt ein Formular wegzublenden. Die Form haelt
+ * test-settings-navigation.js ("R14: Familie legt im Blatt-Dialog an"). */
+test('Familie: Mitglied und Einladung oeffnen einen Dialog, der Knopf bleibt Fokusziel', () => {
   const src = read('../public/settings/pages/admin-family.js');
-  const at = (needle) => {
-    const i = src.indexOf(needle);
-    assert.ok(i >= 0, `${needle} fehlt`);
-    return i;
-  };
-  const membersCard = at('id="members-card"');
-  const formCard = at('id="add-member-form-card"');
-  const twoFactor = at('id="two-factor-household-card"');
-  assert.ok(membersCard < formCard && formCard < twoFactor,
-    'das Formular steht direkt unter der Mitgliederliste, nicht hinter der Zwei-Faktor-Karte');
-
-  const handler = (openNeedle) => {
-    const start = at(openNeedle);
-    return src.slice(start, src.indexOf('});', start) + 3);
-  };
-  assert.match(handler("addMemberBtn.addEventListener('click'"), /#new-username'\)\??\.focus\(/,
-    'Oeffnen setzt den Fokus ins erste Feld');
-  assert.match(handler("cancelAddMember.addEventListener('click'"), /#add-member-btn'\)\??\.focus\(\)|addMemberBtn\??\.focus\(\)/,
-    'Abbrechen gibt den Fokus an den wieder sichtbaren Knopf zurueck');
-  const submit = src.slice(at("addMemberForm.addEventListener('submit'"), at('bindDeleteButtons(container);\n  bindEditButtons(container, currentUser, users);\n}'));
-  assert.match(submit, /#add-member-btn'\)\??\.focus\(\)|addMemberBtn\??\.focus\(\)/,
-    'nach dem Anlegen verschwindet das Formular - der Fokus geht an den Knopf, nicht an BODY');
-  assert.match(handler("container.querySelector('#cancel-add-invite')?.addEventListener('click'"), /addBtn\.focus\(\)/,
-    'auch das Einladungsformular gibt beim Abbrechen den Fokus zurueck');
+  assert.doesNotMatch(src, /id="add-member-form-card"|id="add-invite-form-card"/, 'kein Inline-Formular mehr');
+  assert.match(src, /addMemberBtn\.addEventListener\('click', \(\) => openAddMemberModal\(/);
+  assert.doesNotMatch(src, /addMemberBtn\.hidden = true|addBtn\.hidden = true/, 'der Knopf verschwindet nicht - er ist das Ziel der Fokus-Rueckgabe');
+  const submit = src.slice(src.indexOf('function openAddMemberModal('), src.indexOf('function bindEvents('));
+  assert.match(submit, /closeModal\(\{ force: true \}\)/, 'nach dem Anlegen schliesst der Dialog und gibt den Fokus zurueck');
 });
 
 /* Lucide ersetzt `<i data-lucide>` durch ein `<svg>` - eine Regel auf `… i`

@@ -81,12 +81,37 @@
  * sie liest, steht bei `.shell-bottom-stack[data-dock]` in layout.css.
  */
 
+import { PERSISTENT_TOAST_SELECTOR } from './toast-surface.js';
+
 /** Was als offener Dialog zaehlt: jede Dialogrolle, sichtbar und nicht inert. */
 export const DIALOG_SELECTOR = '[role="dialog"]';
 
-/** Die ausgezeichneten Bedienleisten eines Dialogs. */
+/**
+ * DIE DETAILSPALTE VON LISTE+DETAIL ZAEHLT WIE EIN DIALOG (Re-Critique
+ * 2026-09-28, A3 P1-1). Sie ist keiner - kein Hintergrund, keine Fokusfalle -,
+ * aber ihr Fuss ist eine Bedienleiste wie der eines Dialogs: bei 1280x800
+ * lag der Erinnerungs-Toast auf "Loeschen" im Fuss der Aufgabe, und
+ * `elementFromPoint` auf der Knopfmitte lieferte den Toast. Ein Klick dort
+ * verwarf die Erinnerung, statt zu loeschen - #1160, nur ohne Dialog.
+ *
+ * Unter der Split-Schwelle ist die Spalte `display: none` und faellt von
+ * selbst heraus. Ueber einem MODALEN Dialog zaehlt sie nicht: dann liegt sie
+ * unter seinem Hintergrund und ist ohnehin nicht zu erreichen.
+ *
+ * WAS SIE NICHT ERBT: das Weichen des dauerhaften Toasts (R9 M14). Die
+ * Erinnerung weicht einem Dialog, weil sie dort ueber einem Formular stuende,
+ * in dem gerade jemand schreibt. Die Spalte steht, solange eine Zeile gewaehlt
+ * ist - wiche die Erinnerung ihr, saehe man sie am Desktop fast nie.
+ */
+export const PANE_SELECTOR = '.split-view__detail';
+
+/** Dialog oder Detailspalte: jede Flaeche, deren Leisten der Stapel frei haelt. */
+const SURFACE_SELECTOR = `${DIALOG_SELECTOR}, ${PANE_SELECTOR}`;
+
+/** Die ausgezeichneten Bedienleisten eines Dialogs (und der Detailspalte). */
 export const ACTION_ZONE_SELECTOR =
-  '.modal-panel__header, .modal-panel__footer, .modal-actions, [data-dialog-actions]';
+  '.modal-panel__header, .modal-panel__footer, .modal-actions, [data-dialog-actions], '
+  + '.split-view__detail-head, .split-view__detail-footer';
 
 /**
  * Immer dazu: die Bedienelemente selbst. `summary` ist der Ausloeser einer
@@ -127,13 +152,16 @@ function overlapArea(a, b) {
  *        bleiben muessen, solange daneben Platz ist (die sichtbare untere Navigation)
  * @param {DOMRect|object|null} [input.focused=null] das fokussierte Element im
  *        Dialog; es zaehlt wie eine Bedienleiste (WCAG 2.4.11)
+ * @param {boolean} [input.beside=true] Lage 2 und 3 (ueber und unter dem
+ *        Dialog) erlaubt. Nicht an der Detailspalte: ueber ihr steht der
+ *        Seitenkopf mit seinen Werkzeugen, unter ihr nichts.
  * @returns {null | {top: number, covers: boolean}} null = der Stapel bleibt,
  *          wo er steht; `covers` = auch diese Lage beruehrt eine Leiste
  */
 export function chooseToastPlacement({
   viewport, gap, safeTop = 0, safeBottom = 0,
   stack, dockedHeight, dockedWidth, dockedCenter,
-  primary, dialogs, zones: marked, keepClear = [], focused = null,
+  primary, dialogs, zones: marked, keepClear = [], focused = null, beside = true,
 }) {
   if (!dialogs.some((d) => intersects(stack, d))) return null;
   const zones = focused ? [...marked, focused] : marked;
@@ -155,7 +183,7 @@ export function chooseToastPlacement({
   const result = (top) => ({ top, covers: !clear(top, zones) });
 
   // 2. und 3.: neben dem Dialog, ohne ihn zu beruehren.
-  for (const top of [primary.top - gap - h, primary.bottom + gap]) {
+  for (const top of beside ? [primary.top - gap - h, primary.bottom + gap] : []) {
     if (inView(top) && clear(top, dialogs)) return result(top);
   }
 
@@ -199,6 +227,37 @@ export function chooseToastPlacement({
   return result(best);
 }
 
+/**
+ * MUSS EIN DAUERHAFTER TOAST WEICHEN? (R9 M14) Ja, sobald die gewaehlte Lage
+ * einen offenen Dialog beruehrt - auch dort, wo sie keine Bedienleiste
+ * verdeckt (Lage 4 und 5 oben). Eine Rueckmeldung mit Frist darf dort fuenf
+ * Sekunden stehen; eine Erinnerung stand dort dreissig, ueber dem Formular,
+ * in dem jemand gerade schreibt. Neben dem Dialog (Lage 1 bis 3) bleibt sie
+ * sichtbar. Rein, damit sie ohne Browser pruefbar ist.
+ *
+ * @param {object} input
+ * @param {null|{top:number}} input.decision  Ergebnis von chooseToastPlacement
+ * @param {DOMRect|object} input.stack        Lage am eigenen Platz
+ * @param {number} input.dockedHeight
+ * @param {number} input.dockedWidth
+ * @param {number} input.dockedCenter
+ * @param {Array<DOMRect|object>} input.dialogs
+ * @returns {boolean}
+ */
+export function persistentToastMustYield({
+  decision, stack, dockedHeight, dockedWidth, dockedCenter, dialogs,
+}) {
+  const rect = decision
+    ? {
+      top: decision.top,
+      bottom: decision.top + dockedHeight,
+      left: dockedCenter - dockedWidth / 2,
+      right: dockedCenter + dockedWidth / 2,
+    }
+    : stack;
+  return dialogs.some((d) => intersects(rect, d));
+}
+
 function isOpen(el) {
   if (el.closest('[inert]')) return false;
   // OHNE `opacityProperty`: ein Dialog faehrt mit Deckkraft 0 ein, und gemessen
@@ -217,6 +276,23 @@ function isOpen(el) {
 
 function openDialogs() {
   return [...document.querySelectorAll(DIALOG_SELECTOR)].filter(isOpen);
+}
+
+const isModal = (d) => d.getAttribute('aria-modal') === 'true' || d.classList.contains('modal-panel');
+
+/**
+ * Die offenen Detailspalten - nur, solange kein modaler Dialog offen ist
+ * (dessen Hintergrund deckt sie ab). Siehe PANE_SELECTOR.
+ */
+function openPanes(dialogEls) {
+  if (dialogEls.some(isModal)) return [];
+  return [...document.querySelectorAll(PANE_SELECTOR)].filter(isOpen);
+}
+
+/** Dialoge und Detailspalten - alles, dessen Leisten der Stapel frei haelt. */
+function openSurfaces() {
+  const dialogs = openDialogs();
+  return [...dialogs, ...openPanes(dialogs)];
 }
 
 /**
@@ -260,7 +336,7 @@ function clippedRect(el, dialog) {
 function focusedRect(dialogEls) {
   const active = document.activeElement;
   if (!active || active === document.body || active === document.documentElement) return null;
-  const dialog = active.closest(DIALOG_SELECTOR);
+  const dialog = active.closest(SURFACE_SELECTOR);
   if (!dialog || active === dialog || !dialogEls.includes(dialog)) return null;
   if (active.getClientRects().length === 0) return null;
   return clippedRect(visibleFocusTarget(active), dialog);
@@ -286,7 +362,7 @@ function visibleRects(elements, dialog) {
  */
 function dialogZones(dialog) {
   const own = (selector) => [...dialog.querySelectorAll(selector)]
-    .filter((el) => el.closest(DIALOG_SELECTOR) === dialog);
+    .filter((el) => el.closest(SURFACE_SELECTOR) === dialog);
   const zones = [
     ...visibleRects(own(ACTION_ZONE_SELECTOR), dialog),
     ...visibleRects(own(CONTROL_SELECTOR), dialog),
@@ -353,7 +429,10 @@ function untuck(stack) {
  * etwas geaendert hat.
  */
 function tuckAllButNewest(stack) {
-  const toasts = [...stack.querySelectorAll('.toast')].filter((t) => t.getClientRects().length > 0);
+  // Schon zurueckgenommene (ein dauerhafter Toast, der dem Dialog weicht)
+  // zaehlen nicht mit - sonst bliebe ausgerechnet er als der „juengste" stehen.
+  const toasts = [...stack.querySelectorAll('.toast')]
+    .filter((t) => !t.classList.contains('toast--tucked') && t.getClientRects().length > 0);
   if (toasts.length < 2) return false;
   // Ohne Nummer (vor der Beobachtung eingefuegt) gilt ein Toast als aelter als
   // jeder nummerierte, und unter diesen entscheidet die DOM-Reihenfolge.
@@ -371,6 +450,11 @@ function tuckAllButNewest(stack) {
 
 function undock(stack) {
   untuck(stack);
+  clearDock(stack);
+}
+
+/** Der Stapel steht wieder an seinem Platz; Zurueckgenommenes bleibt es. */
+function clearDock(stack) {
   delete stack.dataset.dock;
   stack.style.removeProperty('--toast-dock-top');
   stack.style.removeProperty('--toast-dock-center');
@@ -387,13 +471,14 @@ export function placeToastStack(stack) {
   const rect = stack.getBoundingClientRect();
   if (rect.height === 0) return null;
 
-  const dialogEls = openDialogs();
+  const realDialogs = openDialogs();
+  const dialogEls = [...realDialogs, ...openPanes(realDialogs)];
   if (!dialogEls.length) return null;
   // Ausgerichtet wird am obersten MODALEN Dialog; eine Datumswahl oder ein
   // Popover in ihm bekommt keine eigene Lage, zaehlt aber als Bedienflaeche.
-  const modal = dialogEls.filter((d) => d.getAttribute('aria-modal') === 'true'
-    || d.classList.contains('modal-panel'));
-  const candidates = modal.length ? modal : dialogEls;
+  // Ohne Dialog richtet sich der Stapel an der Detailspalte aus.
+  const modal = realDialogs.filter(isModal);
+  const candidates = modal.length ? modal : (realDialogs.length ? realDialogs : dialogEls);
   const primaryEl = candidates[candidates.length - 1];
 
   const dialogs = dialogEls.map((d) => d.getBoundingClientRect());
@@ -436,14 +521,45 @@ export function placeToastStack(stack) {
     zones,
     keepClear: uncoveredChrome(),
     focused: focusedRect(dialogEls),
+    beside: realDialogs.length > 0,
   };
   let decision = chooseToastPlacement(input);
   // Kein freier Platz fuer den ganzen Stapel: nur der letzte Toast bleibt sichtbar.
   if (decision?.covers && tuckAllButNewest(stack)) {
     decision = chooseToastPlacement({ ...input, dockedHeight: stack.getBoundingClientRect().height });
   }
+  // Ein dauerhafter Toast, dessen Lage den Dialog beruehrt, weicht ganz (R9
+  // M14) - zurueckgenommen wie oben, er kommt mit dem Schliessen wieder. Der
+  // Rest des Stapels sucht seine Lage danach ohne ihn, von vorn.
+  const persistent = [...stack.querySelectorAll(PERSISTENT_TOAST_SELECTOR)]
+    .filter((t) => t.getClientRects().length > 0);
+  // Nur ein echter Dialog laesst ihn weichen, nicht die Detailspalte.
+  const yielded = persistent.length > 0 && realDialogs.length > 0 && persistentToastMustYield({
+    ...input,
+    decision,
+    dockedHeight: stack.getBoundingClientRect().height,
+    dialogs: realDialogs.map((d) => d.getBoundingClientRect()),
+  });
+  if (yielded) {
+    untuck(stack);
+    for (const toast of persistent) {
+      toast.classList.add('toast--tucked');
+      toast.inert = true;
+    }
+    const rest = [...stack.querySelectorAll('.toast')].some((t) => !t.classList.contains('toast--tucked'));
+    if (!rest) {
+      clearDock(stack);
+      return null;
+    }
+    const again = { ...input, stack: stack.getBoundingClientRect(), dockedHeight: stack.getBoundingClientRect().height };
+    decision = chooseToastPlacement(again);
+    if (decision?.covers && tuckAllButNewest(stack)) {
+      decision = chooseToastPlacement({ ...again, dockedHeight: stack.getBoundingClientRect().height });
+    }
+  }
   if (!decision) {
-    undock(stack);
+    if (yielded) clearDock(stack);
+    else undock(stack);
     return null;
   }
   stack.style.setProperty('--toast-dock-top', `${decision.top}px`);
@@ -469,7 +585,7 @@ export function watchToastPlacement(stack) {
   const occupied = () => Boolean(stack.querySelector(':scope > :not(:empty)'));
 
   function observeDialogs() {
-    const current = occupied() ? openDialogs() : [];
+    const current = occupied() ? openSurfaces() : [];
     if (current.length === observedDialogs.length && current.every((d, i) => d === observedDialogs[i])) return;
     observedDialogs = current;
     dialogMutations.disconnect();

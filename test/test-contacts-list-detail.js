@@ -84,12 +84,34 @@ test('die Karte der Spalte bietet nur an, was der Kontakt hat, und setzt Daten a
     'ohne Organisation keine Unterzeile (die Kategorie steht als Zeile darunter)');
 });
 
-test('die Organisation steht in der Spalte einmal (Karte), in der Leseansicht wie bisher als Zeile', () => {
+test('die Organisation steht einmal - in der Karte, in Spalte und Blatt (R9 M12)', () => {
+  // Bis R9 bekam nur die Spalte die Karte, das Blatt fuehrte die Organisation
+  // deshalb als Zeile. Seit die Karte auch im mobilen Blatt steht, waere die
+  // Zeile in beiden Wegen dieselbe Angabe ein zweites Mal.
   const org = (sections) => sections.find((s) => s.icon === 'building-2');
-  assert.equal(org(contacts.renderContactDetail(KONTAKT)).hidden, false,
-    'unter der Schwelle bleibt die Leseansicht, wie sie war');
-  assert.equal(org(contacts.renderContactDetail(KONTAKT, { inPane: true })).hidden, true,
-    'in der Spalte traegt sie die Karte - zweimal dieselbe Zeile waere Rauschen');
+  assert.equal(org(contacts.renderContactDetail(KONTAKT)).hidden, true,
+    'die Karte traegt sie - zweimal dieselbe Zeile waere Rauschen');
+});
+
+test('das mobile Blatt bekommt dieselbe Karte mit Schnellaktionen wie die Spalte (R9 M12)', () => {
+  // Gemessen vorher im Blatt `hasTiles: false`: Anrufen hiess, die Nummer in
+  // den Zeilen zu suchen - genau das, wofuer die Karte da ist.
+  const vorn = [];
+  const pane = { prepend: (node) => vorn.push(node) };
+  const overlay = {
+    querySelector: (sel) => (sel === '.modal-panel__body > .detail-view__pane' ? pane : null),
+  };
+  const root = { getElementById: (id) => (id === 'shared-modal-overlay' ? overlay : null) };
+  const card = contacts.mountContactCard(KONTAKT, null, root);
+  assert.ok(card, 'ohne Spalte haengt die Karte im Blatt');
+  assert.equal(vorn[0], card, 'zuoberst in den Zeilen - dort blendet das Formular sie mit aus');
+  assert.match(card.className, /\bcontact-card\b/);
+  assert.match(card.className, /\bcontact-card--sheet\b/, 'mit der Blatt-Variante (kein eigener Luftraum ueber dem Kopf)');
+  const bar = card.childNodes.find((n) => n.className === 'contact-card__actions');
+  assert.equal(bar?.childNodes.length, 3, 'Anrufen, E-Mail und Karte auch im Blatt');
+
+  assert.equal(contacts.mountContactCard(KONTAKT, null, { getElementById: () => null }), null,
+    'ohne offenes Blatt haengt sie nirgends');
 });
 
 test('die Seite haengt Liste + Detail ein: Klick ueber den Baustein, Signal des Routers, Leerzustand', () => {
@@ -271,5 +293,66 @@ test('in die Spalte befoerdert, aber das Verwerfen abgelehnt: das Blatt bleibt v
   } finally {
     delete globalThis.__openModal;
     delete globalThis.__closeModal;
+  }
+});
+
+
+// ── R10 L8: Kontaktfilter am Desktop ──────────────────────────────────────
+
+test('Kontaktfilter: nur belegte Kategorien, die aktive bleibt, und mit einer Kategorie gar keine Reihe (A5 P2-6)', () => {
+  const saved = { categories: contacts.state.categories, contacts: contacts.state.contacts, active: contacts.state.activeCategory };
+  try {
+    contacts.state.categories = ['doctor', 'school', 'authority', 'insurance', 'craftsman', 'emergency', 'other']
+      .map((key) => ({ key, icon: 'tag', name: key }));
+    contacts.state.contacts = [{ id: 1, category: 'doctor' }, { id: 2, category: 'school' }, { id: 3, category: 'doctor' }];
+    contacts.state.activeCategory = null;
+    assert.deepEqual(contacts.filterCategoryKeys(), ['doctor', 'school'], 'leere Kategorien sind Sackgassen');
+    contacts.state.activeCategory = 'insurance';
+    assert.deepEqual(contacts.filterCategoryKeys(), ['doctor', 'school', 'insurance'], 'der aktive Filter bleibt, sonst kein Weg zurueck');
+    contacts.state.activeCategory = null;
+    contacts.state.contacts = [{ id: 1, category: 'doctor' }];
+    assert.deepEqual(contacts.filterCategoryKeys(), [], 'eine Kategorie: nichts zu filtern');
+  } finally {
+    contacts.state.categories = saved.categories;
+    contacts.state.contacts = saved.contacts;
+    contacts.state.activeCategory = saved.active;
+  }
+});
+
+test('Kontaktfilter: die Gruppe heisst nach ihrer Frage, und am Zeigergeraet bricht die Reihe um', () => {
+  const js = read('../public/pages/contacts.js');
+  assert.match(js, /id="contacts-filters" role="group" aria-label="\$\{t\('contacts\.categoryLabel'\)\}"/,
+    'die Gruppe hiess „Alle" - der Name des ersten Chips, nicht der Frage');
+  const css = read('../public/styles/contacts.css');
+  const wrap = [...eachRule(css)].find((r) => r.selector.trim() === '.contacts-filters'
+    && r.at.some((a) => /hover:\s*hover/.test(a) && /pointer:\s*fine/.test(a)));
+  assert.ok(wrap && /flex-wrap:\s*wrap/.test(wrap.body), 'eine Maus hat keine waagerechte Geste');
+});
+
+test('Neuer Kontakt ist nicht als „Arzt" vorbelegt: aktive Filterkategorie, sonst misc (Re-Critique 2026-09-28 P2-5)', () => {
+  // `state.categories[0]` war die Vorbelegung - das Formular oeffnete auch
+  // unter „Alle" mit Arzt samt Stethoskop, und der Nachbar wurde zum Arzt.
+  const saved = { categories: contacts.state.categories, active: contacts.state.activeCategory, user: contacts.state.user };
+  const gewaehlt = (html) => {
+    const select = html.match(/<select[^>]*id="cm-category"[^>]*>([\s\S]*?)<\/select>/)?.[1];
+    assert.ok(select, 'Kategorie-Select nicht gefunden');
+    return [...select.matchAll(/<option value="([^"]*)"([^>]*)>/g)].filter(([, , attrs]) => /\bselected\b/.test(attrs)).map(([, v]) => v);
+  };
+  try {
+    contacts.state.user = { id: 1, role: 'admin' };
+    contacts.state.categories = [
+      { key: 'doctor', icon: 'stethoscope' }, { key: 'school', icon: 'school' }, { key: 'misc', icon: 'tag' },
+    ];
+    contacts.state.activeCategory = null;
+    assert.deepEqual(gewaehlt(contacts.buildContactForm({ mode: 'create' }).content), ['misc'], 'unter „Alle": misc');
+    contacts.state.activeCategory = 'school';
+    assert.deepEqual(gewaehlt(contacts.buildContactForm({ mode: 'create' }).content), ['school'], 'unter einem Filter: dessen Kategorie');
+    contacts.state.activeCategory = null;
+    const edit = contacts.buildContactForm({ mode: 'edit', contact: { ...KONTAKT, emails: [], phones: [] } }).content;
+    assert.deepEqual(gewaehlt(edit), ['doctor'], 'Bearbeiten behaelt die Ist-Kategorie');
+  } finally {
+    contacts.state.categories = saved.categories;
+    contacts.state.activeCategory = saved.active;
+    contacts.state.user = saved.user;
   }
 });

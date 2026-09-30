@@ -20,6 +20,7 @@ import { wireTablist } from '/utils/tablist.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { findPageFab } from '/utils/fab.js';
 import { emptyStateHTML } from '/utils/empty-state.js';
+import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
 import { isNavModuleReadOnly } from '/permissions.js';
 
 let state = {
@@ -162,19 +163,21 @@ export async function render(container, { user, embedded = false, onAddableChang
   setHtml(container, `
     <div class="split-page app-page app-page--split" data-composition="split">
       ${head}
-      <section class="metric-grid" id="split-summary"></section>
+      <!-- Mobil EINE Zeile statt drei Karten (R14 P1): die Glance-Zeile
+           klappt die Kennzahl-Zeile auf (metric-glance.js, budget.css). -->
+      <div id="split-glance"></div>
+      <section class="metric-grid budget-glance-details" id="split-summary"></section>
       <div class="split-layout">
         <aside class="split-groups-panel">
-          <div class="split-panel-head">
-            <div class="split-panel-title">${t('splitExpenses.groups')}</div>
-            ${readOnly() ? '' : `<button class="btn btn--icon" id="split-add-group" aria-label="${t('splitExpenses.addGroup')}" ${isSplitGuest() ? 'hidden' : ''}>
-              <i data-lucide="plus" aria-hidden="true"></i>
-            </button>`}
-          </div>
           <!-- Das geteilte Suchfeld (gefuellte Kapsel) statt eines eigenen mit
                sichtbarem Label darueber, das nur den Platzhalter wiederholte
-               (Komponenten-Kanon, Critique 2026-09-26 P1). -->
-          ${renderPageSearch({
+               (Komponenten-Kanon, Critique 2026-09-26 P1). Es steht IM Kopf
+               der Liste, die es filtert (.section-toolbar wie das Hauptbuch,
+               R14 P1): mobil in seiner Icon-Form statt einer eigenen 48px-Zeile
+               vor der ersten Gruppe. -->
+          <div class="split-panel-head section-toolbar">
+            <div class="split-panel-title">${t('splitExpenses.groups')}<span class="list-group__count split-panel-count" id="split-group-count"></span></div>
+            ${renderPageSearch({
     id: 'split-group-search',
     label: t('splitExpenses.searchGroups'),
     placeholder: t('splitExpenses.searchGroups'),
@@ -182,6 +185,10 @@ export async function render(container, { user, embedded = false, onAddableChang
     clearLabel: t('common.searchClear'),
     className: 'split-search',
   })}
+            ${readOnly() ? '' : `<button class="btn btn--icon" id="split-add-group" aria-label="${t('splitExpenses.addGroup')}" ${isSplitGuest() ? 'hidden' : ''}>
+              <i data-lucide="plus" aria-hidden="true"></i>
+            </button>`}
+          </div>
           <!-- Geteilter Umschalter-Baustein des Budget-Moduls statt eigener
                Pillen-Optik, und role="radiogroup" statt role="group": eine
                Einfachauswahl, die ihren Zustand ansagt und über die geteilte
@@ -474,16 +481,36 @@ function renderSummary() {
   // (Critique 2026-07-30, P0).
   // Rolle `total`: die Richtung steht im Label („Du bekommst" / „Du schuldest"),
   // nicht im Vorzeichen - deshalb der Ton explizit statt aus der Zahl.
+  // Die Zahl der Gruppen steht auch am Kopf der Liste, die sie zaehlt - mobil
+  // ist sie dort die einzige (split-expenses.css, R10 L11).
+  const count = _container.querySelector('#split-group-count');
+  if (count) count.textContent = String(state.groups.length);
+  const owedText = owed.length ? owed.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency);
+  const owingText = owing.length ? owing.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency);
+  const glance = _container.querySelector('#split-glance');
+  if (glance) {
+    const expanded = summary?.classList?.contains('is-expanded') ?? false;
+    setHtml(glance, metricGlanceHtml({
+      id: 'split-glance-more',
+      controls: 'split-summary',
+      expanded,
+      label: t('splitExpenses.youAreOwed'),
+      value: owedText,
+      tone: owed.length ? 'positive' : 'neutral',
+      flows: [{ label: t('splitExpenses.youOwe'), amount: owingText, tone: owing.length ? 'negative' : '' }],
+    }));
+    wireMetricGlance(glance, 'split-glance-more');
+  }
   setHtml(summary, `
     <div class="metric-card metric-card--positive">
       <div class="metric-card__label">${t('splitExpenses.youAreOwed')}</div>
-      <div class="metric-card__value">${owed.length ? owed.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency)}</div>
+      <div class="metric-card__value">${owedText}</div>
     </div>
     <div class="metric-card metric-card--negative">
       <div class="metric-card__label">${t('splitExpenses.youOwe')}</div>
-      <div class="metric-card__value">${owing.length ? owing.map((r) => money(r.amount, r.currency)).join(' · ') : money(0, state.meta.default_currency)}</div>
+      <div class="metric-card__value">${owingText}</div>
     </div>
-    <div class="metric-card">
+    <div class="metric-card split-summary-groups">
       <div class="metric-card__label">${isArchivedView() ? t('splitExpenses.statusArchived') : t('splitExpenses.activeGroups')}</div>
       <div class="metric-card__value">${state.groups.length}</div>
     </div>
@@ -778,15 +805,42 @@ function renderActivity() {
 }
 
 /**
- * Welche Ausgabe Migration v226 wiederhergestellt hat (#1382): Titel und
- * gebuchter Betrag, damit mehrere Eintraege "Buchung wiederhergestellt"
- * unterscheidbar sind. Den Betrag rechnet der Server in `amount` um - er
- * kennt die Nachkommastellen je Waehrung (ISO 4217), der Browser nicht.
+ * Welche Ausgabe Migration v226 wiederhergestellt (#1382) oder v227 entfernt
+ * hat (#1445): Titel und gebuchter Betrag, damit mehrere solcher Eintraege
+ * unterscheidbar sind. Eine entfernte Ausgabe steht in keiner Liste mehr -
+ * was der Eintrag nennt, kommt allein aus seinen Metadaten. Den Betrag
+ * rechnet der Server in `amount` um - er kennt die Nachkommastellen je
+ * Waehrung (ISO 4217), der Browser nicht.
  */
+const LEDGER_REPAIR_ACTIVITY = new Set(['ledger_restored', 'ledger_removed']);
+
 function restoredDetail(item) {
-  if (item.type !== 'ledger_restored' || !item.metadata?.title) return '';
+  if (!LEDGER_REPAIR_ACTIVITY.has(item.type) || !item.metadata?.title) return '';
   const { title, amount, currency } = item.metadata;
   const sum = amount != null && currency ? ` · ${money(amount, currency)}` : '';
+  return `<span class="split-activity-payment">${esc(`${title}${sum}`)}</span>`;
+}
+
+/**
+ * WELCHE AUSGABE (Re-Critique 2026-09-27, A5 P2-8 / R10 L11). Der Verlauf las
+ * fuenfmal „Ausgabe erstellt - Alex Johnson - 23.09.2026", ohne zu sagen,
+ * welche - daneben nannte „Letzte Ausgaben" das Objekt. Den Titel legt der
+ * Server beim Schreiben in die Metadaten (expense_*, recurring_created); den
+ * Betrag kennt die geladene Ausgabenliste der Gruppe. Eine geloeschte Ausgabe
+ * steht dort nicht mehr - dann bleibt der Titel allein, ein Betrag waere
+ * geraten. Ein Kommentar traegt keinen Titel; er nennt die Ausgabe, an der er
+ * haengt, sofern sie geladen ist.
+ */
+const EXPENSE_ACTIVITY = new Set(['expense_created', 'expense_edited', 'expense_deleted', 'comment_added', 'recurring_created']);
+
+function expenseDetail(item) {
+  if (!EXPENSE_ACTIVITY.has(item.type)) return '';
+  const expense = item.entity_type === 'expense' && item.entity_id != null
+    ? state.expenses.find((e) => e.id === Number(item.entity_id))
+    : null;
+  const title = item.metadata?.title || expense?.title;
+  if (!title) return '';
+  const sum = expense ? ` · ${money(expense.amount, expense.currency)}` : '';
   return `<span class="split-activity-payment">${esc(`${title}${sum}`)}</span>`;
 }
 
@@ -804,7 +858,7 @@ function activityItemHtml(item, actionable) {
   const params = settlement ? paymentParams(settlement) : null;
   const detail = settlement
     ? `<span class="split-activity-payment">${esc(t('splitExpenses.paymentDetail', params))}</span>`
-    : restoredDetail(item);
+    : restoredDetail(item) || expenseDetail(item);
   const reversed = settlement?.reversed_at
     ? `<span class="split-activity-reversed">${esc(t('splitExpenses.paymentReversed'))}</span>`
     : '';
@@ -1738,4 +1792,6 @@ export const __test = {
   renderActivity, onActivityClick, loadGroupData, loadMoreActivity, groupFromQuery,
   renderMainForTest(container) { _container = container; renderMain(); },
   renderGroupsForTest(container) { _container = container; renderGroups(); },
+  // R10 L11: die Gruppenzahl steht am Kopf der Liste (test-split-activity-ui.js).
+  renderSummaryForTest(container) { _container = container; renderSummary(); },
 };

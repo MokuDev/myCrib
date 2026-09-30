@@ -156,9 +156,16 @@ test('die Hoehe der klebenden Spalte rechnet ab ihrer gemessenen Oberkante bis z
     && r.at.some((a) => /module-surface/.test(a)));
   assert.ok(rule, 'Regel der klebenden Detailspalte fehlt');
   assert.match(rule.body, /position:\s*sticky/);
-  const maxHeight = rule.body.match(/max-height:\s*([^;]+);/)?.[1] ?? '';
+  // R10 L3 (A8 P1-2): VOLLE Hoehe (`height`, nicht `max-height` - sonst eine
+  // 301px-Karte) und buendig mit der Liste (kein Versatz nach unten).
+  assert.doesNotMatch(rule.body, /max-height\s*:/, 'die Spalte ist ein Ort, keine mit dem Inhalt wachsende Karte');
+  assert.doesNotMatch(rule.body, /margin-block-start\s*:/, 'die Spalte beginnt buendig mit der Liste');
+  const maxHeight = rule.body.match(/(?:^|;|\s)height:\s*([^;]+);/)?.[1] ?? '';
   // Die Oberkante ist der Messwert; ohne ihn (erster Frame) der Klebestand.
-  assert.match(maxHeight, /^calc\(var\(--viewport-height\) - var\(--inventory-detail-top, calc\(var\(--inventory-head-block, 0px\) \+ var\(--space-3\)\)\) - var\(--space-4\)\)$/);
+  // Und sie endet ueber dem Nachlauf der Shell (Installationsbanner, FAB):
+  // eine klebende Spalte bis an den Fensterrand liegt sonst mit ihrem Fuss
+  // darunter (R10, test:dashboard-surface-browser).
+  assert.match(maxHeight, /^calc\(var\(--viewport-height\) - var\(--inventory-detail-top, calc\(var\(--inventory-head-block, 0px\) \+ var\(--space-3\)\)\) - var\(--space-4\) - var\(--shell-tail, 0px\)\)$/);
   // Rechnung am gemessenen Fall: 900 - 133 - 16 = 751, Unterkante 884 < 900.
   const top = 133; const vh = 900; const space4 = 16;
   assert.ok(top + (vh - top - space4) <= vh);
@@ -192,4 +199,256 @@ test('unter der Schwelle: das Blatt eines Gegenstands geht nach dem Laden nur au
   const mount = src.slice(src.indexOf('_md = mountMasterDetail({'));
   assert.match(mount.slice(0, mount.indexOf('\n    });')), /openNarrow: openItemNarrow,/,
     'der Baustein ruft den Weg, der sein Signal weiterreicht');
+});
+
+
+// ── R10 L3: Detail gegliedert, Status nur als Ausnahme, Kennzahlen als Zeilen ──
+
+test('die Zeile nennt den Status nur, wenn er vom Normalfall abweicht (A6 P3-3)', () => {
+  assert.doesNotMatch(inventory.renderItemRow({ ...ITEM, status: 'active' }), /inventory-status-badge/,
+    '„Vorhanden" in jeder Zeile ist Rauschen');
+  assert.match(inventory.renderItemRow({ ...ITEM, status: 'sold' }), /inventory-status-badge--sold/,
+    'die Ausnahme bleibt sichtbar');
+});
+
+test('das Detail ist gegliedert: Kopfzeilen, dann Kauf / Garantie / Zustand / Belege statt dreizehn loser Zeilen', async () => {
+  const { installMiniDom } = await import('./mini-dom.js');
+  const restore = installMiniDom();
+  let sections;
+  try {
+    sections = inventory.renderItemDetail({ ...ITEM, condition: 'good' }, { timeline: [] }, () => {}, false);
+  } finally { restore(); }
+  const groups = sections.filter((s) => Array.isArray(s.rows)).map((s) => s.group);
+  assert.deepEqual(groups, [
+    'inventory.detailGroupPurchase', 'inventory.detailGroupWarranty',
+    'inventory.detailGroupCondition', 'inventory.detailGroupRecords',
+  ]);
+  assert.ok(sections.length <= 7, `oberste Ebene ${sections.length} Eintraege - wieder eine lose Liste`);
+  const labels = (g) => sections.find((s) => s.group === g).rows.map((r) => r.label);
+  assert.ok(labels('inventory.detailGroupPurchase').includes('inventory.purchasePriceLabel'));
+  assert.ok(labels('inventory.detailGroupWarranty').includes('inventory.warrantyMonthsLabel'));
+  assert.ok(labels('inventory.detailGroupCondition').includes('inventory.statusLabel'), 'das Detail nennt den Status immer');
+  // Keine Zeile ging beim Gliedern verloren.
+  const all = sections.flatMap((s) => (Array.isArray(s.rows) ? s.rows : [s])).map((r) => r.label);
+  assert.equal(all.length, 19, 'alle Angaben des Gegenstands stehen weiter im Detail');
+});
+
+test('die geteilte Leseansicht zeichnet Gruppen mit Titel und laesst leere ganz weg', async () => {
+  const { installMiniDom, MiniElement } = await import('./mini-dom.js');
+  const restore = installMiniDom();
+  const hadHtmlElement = 'HTMLElement' in globalThis;
+  const savedHtmlElement = globalThis.HTMLElement;
+  globalThis.HTMLElement = MiniElement;
+  try {
+    const dv = await import('../public/components/detail-view.js');
+    const pane = globalThis.document.createElement('div');
+    dv.openDetailView({
+      title: 'Fernseher',
+      pane,
+      sections: [
+        { icon: 'map-pin', label: 'Ort', value: 'Wohnzimmer' },
+        { group: 'Kauf', rows: [{ icon: 'banknote', label: 'Preis', value: '999 EUR' }, { label: 'Haendler', value: '' }] },
+        { group: 'Leer', rows: [{ label: 'Nichts', value: '' }] },
+      ],
+    });
+    const html = pane.outerHTML;
+    assert.equal(html.match(/class="detail-group"/g)?.length, 1, 'eine Gruppe ohne Inhalt faellt samt Titel weg');
+    assert.match(html, /<section class="detail-group" aria-label="Kauf"><h3 class="detail-group__title">Kauf<\/h3>/);
+    assert.doesNotMatch(html, /Leer|Haendler/, 'leere Zeilen und Gruppen stehen nicht da');
+    assert.match(html, /999 EUR/);
+  } finally {
+    restore();
+    if (hadHtmlElement) globalThis.HTMLElement = savedHtmlElement; else delete globalThis.HTMLElement;
+  }
+});
+
+test('in der Spalte: Kennzahlen als Zeilen ohne Wortbruch, nicht als drei 136px-Kacheln (A8 P1-2)', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/inventory.css', import.meta.url), 'utf8');
+  const inSplit = [...eachRule(css)].filter((r) => r.at.some((a) => /module-surface/.test(a)));
+  const body = (sel) => inSplit.filter((r) => r.selector.trim() === sel).map((r) => r.body).join(';');
+  assert.match(body('.inventory-list .metric-grid'), /grid-template-columns:\s*minmax\(0, 1fr\)/, 'eine Kennzahl je Zeile');
+  assert.match(body('.inventory-list .metric-grid > .metric-card'), /flex-direction:\s*row/, 'Wort links, Zahl rechts');
+  const label = body('.inventory-list .metric-grid .metric-card__label');
+  assert.match(label, /overflow-wrap:\s*normal/, 'kein Bruch mitten im Wort („AUFMERKSAMKE/IT")');
+  assert.match(label, /white-space:\s*nowrap/);
+});
+
+// Review R11: der Kilometerstand-Trend rechnet X nach dem Datum. Zwei
+// Wartungen am selben Tag gaben der Achse keine Spanne, und jeder Punkt fiel
+// auf die linke Kante - ein Punkt, keine Linie. Die geteilte Geometrie
+// (utils/chart.js#chartTimePositions) verteilt dann nach dem Index.
+test('Kilometerstand: Wartungen am selben Tag fallen nicht auf einen Punkt', async () => {
+  const { chartScales } = await import('../public/utils/chart.js');
+  const { left, right } = chartScales();
+  const cxOf = (svg) => [...svg.matchAll(/<circle cx="([\d.]+)"/g)].map((m) => Number(m[1]));
+
+  const gleicherTag = inventory.odometerChartMarkup([
+    { date: '2026-05-01', value: 12000 },
+    { date: '2026-05-01', value: 12040 },
+  ], 'km');
+  const cx = cxOf(gleicherTag);
+  assert.equal(cx.length, 2, 'zwei Messpunkte - der Test liest das Markup nicht mehr');
+  assert.ok(Math.abs(cx[0] - left) < 0.5, `erster Punkt bei ${cx[0]}, erwartet ${left}`);
+  assert.ok(Math.abs(cx[1] - right) < 0.5, `zweiter Punkt bei ${cx[1]}, erwartet ${right} - nicht auf dem ersten`);
+
+  // Mit Spanne bleibt es die Zeitachse: der Februar steht bei seinem Tag.
+  const verteilt = cxOf(inventory.odometerChartMarkup([
+    { date: '2026-01-01', value: 1000 },
+    { date: '2026-02-01', value: 1500 },
+    { date: '2026-12-31', value: 9000 },
+  ], 'km'));
+  const erwartet = left + (31 / 364) * (right - left);
+  assert.ok(Math.abs(verteilt[1] - erwartet) < 1, `Februar bei ${verteilt[1]}, erwartet ${erwartet.toFixed(1)}`);
+});
+
+// ---------------------------------------------------------------------------
+// Die Kategorie hat eine Adresse (Re-Critique 2026-09-28, A6 P1-1 / A8 P2-1)
+// ---------------------------------------------------------------------------
+// `openCategory()` setzte nur `state.view`; die URL blieb `/inventory`. Casey
+// wischte zurueck und landete im vorigen Modul statt in der Kategorienliste.
+// Jetzt: `/inventory?category=<key>` per pushState, Zurueck/Vor stellt die
+// Ebene aus der Adresse wieder her, und oben steht „‹ Inventar".
+
+/** Eine History, die mitschreibt, und eine Adresse, die ihr folgt. */
+function withHistory(start, fn) {
+  const saved = { history: globalThis.history, location: globalThis.location };
+  const entries = [{ state: null, url: start }];
+  let index = 0;
+  const loc = { pathname: '', search: '' };
+  const setUrl = (url) => { const [p, q = ''] = url.split('?'); loc.pathname = p; loc.search = q ? `?${q}` : ''; };
+  setUrl(start);
+  const hist = {
+    get state() { return entries[index].state; },
+    pushState(state, _t, url) { entries.splice(index + 1); entries.push({ state, url }); index += 1; setUrl(url); },
+    replaceState(state, _t, url) { entries[index] = { state, url }; setUrl(url); },
+    back() { index -= 1; setUrl(entries[index].url); hist.backs += 1; },
+    backs: 0,
+  };
+  globalThis.history = hist;
+  globalThis.location = loc;
+  try { return fn({ hist, entries: () => entries.map((e) => e.url), loc }); } finally {
+    globalThis.history = saved.history;
+    globalThis.location = saved.location;
+  }
+}
+
+async function withInventoryState(fn) {
+  const { installMiniDom } = await import('./mini-dom.js');
+  const abraeumen = installMiniDom();
+  const vorher = { items: inventory.state.items, categories: inventory.state.categories, view: inventory.state.view, active: inventory.state.activeCategory };
+  inventory.state.items = [ITEM, { ...ITEM, id: 7, category: 'vehicles' }];
+  inventory.state.categories = [{ key: 'electronics', name: 'Elektronik' }, { key: 'vehicles', name: 'Fahrzeuge' }];
+  inventory.state.view = 'browse';
+  inventory.state.activeCategory = null;
+  try { return await fn(); } finally {
+    Object.assign(inventory.state, { items: vorher.items, categories: vorher.categories, view: vorher.view, activeCategory: vorher.active });
+    abraeumen();
+  }
+}
+
+test('W1: eine Kategorie oeffnen legt einen History-Eintrag mit ihrer Adresse an', async () => {
+  await withInventoryState(() => withHistory('/inventory', ({ entries, hist }) => {
+    inventory.openCategory('vehicles');
+    assert.equal(inventory.state.view, 'category');
+    assert.deepEqual(entries(), ['/inventory', '/inventory?category=vehicles'], 'pushState, nicht nur ein Zustandswechsel');
+    assert.equal(hist.state?.path, '/inventory?category=vehicles', 'der Router liest `path` bei popstate');
+  }));
+});
+
+test('W1: Zurueck/Vor stellt die Ebene aus der Adresse wieder her', async () => {
+  await withInventoryState(() => withHistory('/inventory', ({ loc }) => {
+    inventory.openCategory('vehicles');
+    // Zurueck: die Adresse ist wieder die Kategorienliste.
+    loc.search = '';
+    inventory.syncLevelFromAddress();
+    assert.equal(inventory.state.view, 'browse', 'Zurueck fuehrt zur Kategorienliste, nicht aus dem Modul');
+    assert.equal(inventory.state.activeCategory, null);
+    // Vor: die Kategorie steht wieder da.
+    loc.search = '?category=electronics';
+    inventory.syncLevelFromAddress();
+    assert.equal(inventory.state.view, 'category');
+    assert.equal(inventory.state.activeCategory, 'electronics');
+    // Eine Adresse mit einer Kategorie, die es nicht (mehr) gibt: Startseite.
+    loc.search = '?category=weg';
+    inventory.syncLevelFromAddress();
+    assert.equal(inventory.state.view, 'browse');
+  }));
+});
+
+test('W1: „‹ Inventar" geht den Schritt zurueck, den das Oeffnen angelegt hat - sonst ein neuer Eintrag', async () => {
+  await withInventoryState(() => withHistory('/inventory', ({ hist, entries }) => {
+    inventory.openCategory('vehicles');
+    inventory.backToBrowse();
+    assert.equal(hist.backs, 1, 'direkt aus der Liste geoeffnet: history.back() wie Apples Zurueck-Knopf');
+  }));
+  await withInventoryState(() => withHistory('/inventory?category=vehicles', ({ hist, entries }) => {
+    // Per Link hereingekommen: kein Eintrag, zu dem es zurueckginge.
+    inventory.syncLevelFromAddress();
+    inventory.backToBrowse();
+    assert.equal(hist.backs, 0);
+    assert.deepEqual(entries(), ['/inventory?category=vehicles', '/inventory']);
+    assert.equal(inventory.state.view, 'browse');
+  }));
+});
+
+test('W1: der Deep-Link auf einen Gegenstand schreibt auch seine Kategorie in die Adresse', async () => {
+  await withInventoryState(() => withHistory('/inventory?open=7', ({ entries }) => {
+    const saved = globalThis.getComputedStyle;
+    globalThis.getComputedStyle = () => ({ display: 'flex' });
+    try { inventory.openDeepLinkedCategory(split); } finally { globalThis.getComputedStyle = saved; }
+    assert.deepEqual(entries(), ['/inventory?category=vehicles&open=7'], 'ersetzt, nicht gestapelt');
+  }));
+});
+
+test('W1: die Adresse einer Auswahl behaelt die Kategorie (master-detail `address`)', async () => {
+  await withInventoryState(() => withHistory('/inventory', ({ loc }) => {
+    inventory.openCategory('vehicles');
+    assert.equal(inventory.mdAddress.href('7'), '/inventory?category=vehicles&open=7');
+    assert.equal(inventory.mdAddress.href(null), '/inventory?category=vehicles');
+    assert.equal(inventory.mdAddress.read({ pathname: '/inventory', search: '?category=vehicles&open=7' }), '7');
+    assert.equal(inventory.mdAddress.read({ pathname: '/inventory', search: '?category=vehicles' }), null,
+      'eine andere Ebene ist dieselbe Seite - Zurueck/Vor zeichnet sie nicht neu');
+    assert.equal(inventory.mdAddress.read({ pathname: '/tasks', search: '' }), undefined);
+  }));
+  const src = readFileSync(new URL('../public/pages/inventory.js', import.meta.url), 'utf8');
+  const mount = src.slice(src.indexOf('_md = mountMasterDetail({'));
+  assert.match(mount.slice(0, mount.indexOf('\n    });')), /address: mdAddress/, 'der Baustein liest die Adresse ueber mdAddress');
+});
+
+test('W1: im Kategorie-Kopf steht „‹ Inventar" oben und der Kategoriename als Titel', async () => {
+  await withInventoryState(() => withHistory('/inventory', () => {
+    const title = { textContent: 'Inventar' };
+    const back = { hidden: true };
+    const page = { attrs: {}, setAttribute(k, v) { this.attrs[k] = v; } };
+    const container = { querySelector: (sel) => ({ '.inventory-toolbar .page-toolbar__title': title, '.inventory-toolbar__back': back, '.inventory-page': page }[sel] ?? null) };
+    inventory.syncInventoryHeader(container);
+    assert.equal(back.hidden, true, 'auf der Startseite kein Rueckweg');
+    assert.equal(page.attrs['data-inventory-level'], 'categories');
+    inventory.state.view = 'category';
+    inventory.state.activeCategory = 'vehicles';
+    inventory.syncInventoryHeader(container);
+    assert.equal(back.hidden, false);
+    assert.equal(title.textContent, 'Fahrzeuge');
+    assert.equal(page.attrs['data-inventory-level'], 'category');
+    inventory.state.view = 'browse';
+    inventory.state.query = 'bohr';
+    try {
+      inventory.syncInventoryHeader(container);
+      assert.equal(page.attrs['data-inventory-level'], 'search', 'Treffer sind Gegenstaende - dort steht die Spalte');
+    } finally { inventory.state.query = ''; }
+  }));
+  const src = readFileSync(new URL('../public/pages/inventory.js', import.meta.url), 'utf8');
+  assert.match(src, /class="inventory-toolbar__back" href="\/inventory" hidden/, 'der Rueckweg steht im Kopf, nicht als Textlink unter den Chips');
+  assert.doesNotMatch(src, /class="inventory-back-link"/);
+});
+
+test('W1: am Desktop fuellen die Kategorien die Flaeche - keine Spalte, die „Waehle einen Gegenstand" fordert', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/inventory.css', import.meta.url), 'utf8');
+  const split = [...eachRule(css)].filter(({ at }) => at.some((a) => /module-surface \(min-width: 65rem\)/.test(a)));
+  const detail = split.find(({ selector }) => selector.trim() === '.inventory-page[data-inventory-level="categories"] .split-view__detail');
+  assert.ok(detail && /display:\s*none/.test(detail.body), 'auf der Kategorie-Ebene keine Detailspalte');
+  const grid = split.find(({ selector }) => selector.trim() === '.inventory-page[data-inventory-level="categories"] .split-view');
+  assert.ok(grid && /grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(grid.body), 'die Liste nimmt die ganze Breite');
 });

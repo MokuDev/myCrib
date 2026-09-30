@@ -18,7 +18,7 @@ import { renderSkeletonList } from '/utils/skeleton.js';
 import { render as renderSplitExpenses, prefillSplitExpense, canAddSplitExpense, openNewSplitExpense } from '/pages/split-expenses.js';
 import { openSubscriptionModal, render as renderSubscriptions } from '/pages/subscriptions.js';
 import { renderStats } from '/pages/budget-stats.js';
-import { renderPlans } from '/pages/budget-plans.js';
+import { renderPlans, openAddPlan } from '/pages/budget-plans.js';
 import { toLocalDateKey, parseLocalDateKey, addLocalDays,
          monthPeriodKeys, defaultDateInPeriod,
         todayKey} from '/utils/date.js';
@@ -27,6 +27,7 @@ import { budgetCategoryLabel } from '/utils/category-labels.js';
 import { trendMarkup } from '/utils/metric-card.js';
 import { installPopoverMenus } from '/utils/popover-menu.js';
 import { rowActionHtml } from '/utils/row-action.js';
+import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
 import { intervalUnitLabel } from '/rrule-ui.js';
 import { appendCurrencyOptions } from '/settings/currency.js';
 import '/components/category-manager.js';
@@ -36,6 +37,7 @@ import { attachOverlay } from '/utils/overlay-history.js';
 import { renderUserMultiSelect, getSelectedUserIds, bindUserMultiSelect, renderAvatarStack } from '/components/user-multi-select.js';
 import { withChosenPeople } from '/utils/people-picker.js';
 import { isNavModuleReadOnly } from '/permissions.js';
+import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 
 // --------------------------------------------------------
 // Konstanten
@@ -239,6 +241,8 @@ let state = {
   scope:       'mine',        // Ansichts-Filter im personal-Modus: 'mine' | 'household'
   expensesOnly: false,        // Anzeige „Nur Ausgaben" (#504): Einnahmen+Saldo ausblenden
   categoriesExpanded: false,  // Kategorie-Diagramm einspaltig ganz aufgeklappt (sonst Top 3)
+  balanceExpanded: false,     // mobil: Bilanz-Karten unter der Kopfzeile aufgeklappt (balanceGlanceHtml)
+  loansExpanded: false,       // mobil: Darlehens-Karten unter der Glance-Zeile aufgeklappt (metricGlanceHtml)
   meta:        { expenseCategories: [], incomeCategories: [], subcategories: {} },
   // Zeitachse der Berichte: dieselbe Kopfleiste wie der Monat, nur mit
   // umschaltbarer Auflösung. Der Anker lebt hier statt in budget-stats.js, damit
@@ -251,7 +255,14 @@ let state = {
   // nicht mehr vergleichbar.
   reportRangeFrom: null,
   reportRangeTo:   null,
+  // Suche im Hauptbuch (C6): die Anfrage und ihre Treffer aus ALLEN Monaten.
+  // `ledgerResults` ist null, solange nicht gesucht wird.
+  ledgerQuery:     '',
+  ledgerResults:   null,
+  ledgerTruncated: false,
+  ledgerError:     null,
 };
+let _ledgerSeq = 0;    // nur die juengste Suchantwort darf die Liste setzen
 let _container = null;
 let _user = null;
 let _tablist = null;   // wireTablist-Handle: erlaubt programmatische Tab-Wechsel (sync)
@@ -501,6 +512,9 @@ async function loadMonth(month) {
     state.loadError   = null;
     state.month       = month;
     state.entries     = entriesRes.data;
+    // Nach jedem Schreiben laedt der Monat neu - die Treffer der Suche mit,
+    // sonst stuende eine geloeschte Buchung weiter in der Trefferliste.
+    if (state.ledgerQuery) await loadLedgerSearch(state.ledgerQuery);
     state.summary     = summaryRes.data;
     state.prevSummary = prevSummaryRes.data;
     state.loans       = loansRes.data;
@@ -518,6 +532,69 @@ async function loadMonth(month) {
     state.prevSummary = null;
     state.loans       = { loans: [], summary: { active_count: 0, remaining_amount: 0, remaining_installments: 0 } };
   }
+}
+
+/* DIE SUCHE IM HAUPTBUCH (Re-Critique 2026-09-27, C6). "Wann war die letzte
+ * Zahnarztrechnung?" hiess Monate blaettern. Der Server sucht ueber alle
+ * Monate (GET /budget?q=), gefaltet wie die globale Suche; Konto-Drilldown und
+ * Mein/Haushalt gelten weiter. Die Antwort setzt nur die Liste, nicht die
+ * Seite - das Feld behaelt den Fokus. */
+async function loadLedgerSearch(query) {
+  const seq = ++_ledgerSeq;
+  const accountQuery = state.accountFilterId ? `&account_id=${state.accountFilterId}` : '';
+  const scopeQuery = state.budgetMode === 'personal' ? `&scope=${state.scope}` : '';
+  try {
+    const res = await api.get(`/budget?q=${encodeURIComponent(query)}${accountQuery}${scopeQuery}`);
+    if (seq !== _ledgerSeq) return false;
+    state.ledgerResults = res.data ?? [];
+    state.ledgerTruncated = !!res.meta?.truncated;
+    state.ledgerError = null;
+  } catch (err) {
+    if (seq !== _ledgerSeq) return false;
+    console.error('[Budget] Suche im Hauptbuch:', err);
+    state.ledgerResults = [];
+    state.ledgerTruncated = false;
+    state.ledgerError = err;
+  }
+  return true;
+}
+
+async function runLedgerSearch(value) {
+  const query = String(value ?? '').trim().slice(0, 100);
+  state.ledgerQuery = query;
+  if (!query) {
+    _ledgerSeq += 1;
+    state.ledgerResults = null;
+    state.ledgerError = null;
+    paintLedger();
+    return;
+  }
+  if (await loadLedgerSearch(query)) paintLedger();
+}
+
+/** Nur die Liste und die Statuszeile neu - Kopf, Bilanz und Suchfeld bleiben stehen. */
+function paintLedger() {
+  const list = _container?.querySelector('#budget-list');
+  if (list) {
+    list.replaceChildren();
+    list.insertAdjacentHTML('beforeend', renderEntries());
+    if (window.lucide) lucide.createIcons({ el: list });
+  }
+  const status = _container?.querySelector('#budget-ledger-status');
+  if (status) status.textContent = ledgerStatusText();
+}
+
+function ledgerStatusText() {
+  if (!state.ledgerQuery || !state.ledgerResults || state.ledgerError) return '';
+  const count = state.ledgerResults.length;
+  if (!count) return '';
+  return state.ledgerTruncated
+    ? t('budget.ledgerSearchTruncated', { limit: count })
+    : t('budget.ledgerSearchCount', { count });
+}
+
+function findEntry(id) {
+  return state.entries.find((e) => e.id === id) ?? state.ledgerResults?.find((e) => e.id === id);
 }
 
 async function loadAccounts() {
@@ -809,13 +886,14 @@ function wireNav() {
   // Neu-Aktion je Tab - spiegelt TAB_CAPS.add. Tabs ohne Neu-Aktion (Berichte,
   // Aufteilung im Archiv) blenden den FAB aus, der Handler bleibt dort folgenlos.
   // Den FAB blendet CSS aus (html[data-module-readonly]); der Handler
-  // bleibt trotzdem gesperrt - ausgeblendet ist nicht unerreichbar, und der
-  // Plan-Zweig klickt einen Knopf per `.click()`.
+  // bleibt trotzdem gesperrt - ausgeblendet ist nicht unerreichbar. Der
+  // Plan-Zweig ruft openAddPlan() direkt; der Koerper des Plans traegt seit
+  // R10 (L11) keinen eigenen Anlegen-Knopf mehr.
   const addHandler = () => {
     if (readOnly()) return;
     switch (state.activeTab) {
       case 'subscriptions':  openSubscriptionModal(); return;
-      case 'plan':           _container.querySelector('#budget-plan-add')?.click(); return;
+      case 'plan':           openAddPlan(); return;
       case 'accounts':       openAccountModal(); return;
       case 'loans':          openLoanModal(); return;
       case 'split-expenses': openNewSplitExpense(); return;
@@ -842,6 +920,7 @@ function wireNav() {
         state.reportAnchor = anchorForMonth(state.month);
       }
       renderBody();
+      markTabEntering();
       if (prev === 'reports' && id !== 'reports') {
         const ym = state.reportAnchor.slice(0, 7);
         if (ym !== state.month) {
@@ -899,6 +978,18 @@ function watchAsideFit(panel) {
 // --------------------------------------------------------
 // Body
 // --------------------------------------------------------
+
+/* DER NEUE REITER BLENDET EIN (R14 P11, A5 P3). Die Untertabs wechselten per
+ * hartem Schnitt, waehrend jeder Seitenwechsel blendet. Nur der Wechsel selbst
+ * blendet - ein Neuaufbau desselben Reiters (Filter, Monat, Speichern) nicht;
+ * die Klasse faellt nach der Blende. Unter reduzierter Bewegung schneidet die
+ * globale Sperre (reset.css) die Animation ab. */
+function markTabEntering() {
+  const panel = _container?.querySelector('#budget-body > .budget-tab-panel');
+  if (!panel) return;
+  panel.classList.add('budget-tab-panel--entering');
+  panel.addEventListener('animationend', () => panel.classList.remove('budget-tab-panel--entering'), { once: true });
+}
 
 function renderBody() {
   const body = _container.querySelector('#budget-body');
@@ -1094,6 +1185,8 @@ function renderBody() {
          einspaltig dieselbe bleibt (Bilanz, Kategorien, Buchungen). -->
     <div class="budget-overview">
     ${monthEmpty ? '' : `<div class="budget-overview__aside">
+    ${balanceGlanceHtml(s, { expensesOnly, forecast, balanceTone })}
+    <div class="budget-balance-details${state.balanceExpanded ? ' is-expanded' : ''}" id="budget-balance-details">
     <!-- Kopfzeile der Bilanz: Titel links, "Nur Ausgaben" rechts - der
          Umschalter wirkt nur auf die Karten darunter und steht deshalb in
          deren Kopf statt in einer eigenen Zeile ueber der Seite. -->
@@ -1110,6 +1203,7 @@ function renderBody() {
     <!-- Zusammenfassung -->
     <div class="metric-grid${expensesOnly ? ' metric-grid--expenses-only' : ''}">
       ${expensesOnly ? expensesCard : incomeCard + expensesCard + balanceCard}
+    </div>
     </div>
     ${pendingNote}
 
@@ -1141,8 +1235,8 @@ function renderBody() {
 
     <!-- Transaktionsliste -->
     <div class="budget-list-section">
-      <div class="budget-list-header">
-        <div>
+      <div class="budget-list-header section-toolbar">
+        <div class="budget-list-header__lead">
           <h2 class="budget-list-header__title u-section-title" >${t('budget.transactions')}</h2>
           ${state.accountFilterId ? `
           <button class="budget-account-chip" id="budget-clear-account-filter" type="button"
@@ -1160,8 +1254,21 @@ function renderBody() {
             <i data-lucide="x" class="icon-sm" aria-hidden="true"></i>
           </button>` : ''}
         </div>
+        <!-- Suche im Hauptbuch (C6): das geteilte Feld im Kopf der Liste, die es
+             filtert - mobil in seiner Icon-Form (layout.css, .section-toolbar),
+             damit die erste Buchung nicht um eine Feldzeile nach unten rutscht.
+             Es sucht in allen Monaten; die Statuszeile darunter sagt, wie viele. -->
+        ${renderPageSearch({
+    id: 'budget-ledger-search',
+    label: t('budget.ledgerSearchLabel'),
+    placeholder: t('budget.ledgerSearchPlaceholder'),
+    value: state.ledgerQuery,
+    clearLabel: t('common.searchClear'),
+    className: 'budget-list-header__search',
+  })}
         <div class="budget-list-header__actions">${listToolsMenuHtml()}</div>
       </div>
+      <p class="budget-list-search__status" id="budget-ledger-status" role="status">${esc(ledgerStatusText())}</p>
       <div class="budget-list" id="budget-list">
         ${renderEntries()}
       </div>
@@ -1172,6 +1279,7 @@ function renderBody() {
 
   if (window.lucide) lucide.createIcons({ el: body });
   watchAsideFit(body.querySelector('.budget-tab-panel--budget'));
+  wirePageSearch(body, { id: 'budget-ledger-search', delay: 250, onQuery: runLedgerSearch });
   _container.querySelector('#empty-cta-budget')?.addEventListener('click', () => {
     document.querySelector('.page-fab')?.click();
   });
@@ -1182,6 +1290,8 @@ function renderBody() {
     renderBody();
   });
   _container.querySelector('#budget-chart-more')?.addEventListener('click', toggleCategoryChart);
+  _container.querySelector('#budget-categories-more')?.addEventListener('click', toggleCategoryChart);
+  _container.querySelector('#budget-balance-more')?.addEventListener('click', toggleBalanceDetails);
   _container.querySelector('#budget-manage-categories')?.addEventListener('click', openCategoryManager);
   _container.querySelector('#budget-clear-account-filter')?.addEventListener('click', async () => {
     state.accountFilterId = null;
@@ -1214,9 +1324,6 @@ function renderBody() {
     const action = e.target.closest('[data-action]');
     if (action && readOnly() && !READ_SAFE_ACTIONS.has(action.dataset.action)) return;
 
-    const delBtn = e.target.closest('[data-action="delete"]');
-    if (delBtn) { await deleteEntry(parseInt(delBtn.dataset.id, 10)); return; }
-
     const confirmBtn = e.target.closest('[data-action="confirm"]');
     if (confirmBtn) { await openConfirmBookingModal(parseInt(confirmBtn.dataset.id, 10)); return; }
 
@@ -1235,7 +1342,7 @@ function renderBody() {
     // `read` in die Leseansicht, und die ist der Leseweg dieser Zeile.
     const item = e.target.closest('.budget-entry[data-id]');
     if (item && !action) {
-      const entry = state.entries.find((e) => e.id === parseInt(item.dataset.id, 10));
+      const entry = findEntry(parseInt(item.dataset.id, 10));
       if (entry) openBudgetModal({ mode: 'edit', entry });
     }
   });
@@ -1416,16 +1523,74 @@ function chartMoreLabel(count) {
 }
 
 /* Auf- und Zuklappen ohne Neuaufbau: der Knopf behaelt Fokus und Position,
- * nur Klasse, aria-expanded und Beschriftung ziehen nach. */
+ * nur Klasse, aria-expanded und Beschriftung ziehen nach. ZWEI Knoepfe steuern
+ * denselben Zustand - der im Diagrammkopf (einspaltig ab 640px) und die Zeile
+ * der mobilen Kopfzeile (balanceGlanceHtml); je Breite ist nur einer zu sehen,
+ * beide muessen aber dasselbe sagen, wenn die Breite wechselt. Die Zeile
+ * behaelt ihren Namen („Alle Kategorien (N)"), ihr Zustand steht im Chevron
+ * und in aria-expanded - wie jede Gruppenzeile. */
 function toggleCategoryChart() {
   state.categoriesExpanded = !state.categoriesExpanded;
   const section = _container?.querySelector('.budget-chart-section');
-  const btn = _container?.querySelector('#budget-chart-more');
   section?.classList.toggle('is-expanded', state.categoriesExpanded);
-  if (!btn) return;
-  btn.setAttribute('aria-expanded', state.categoriesExpanded ? 'true' : 'false');
-  const label = btn.querySelector('.budget-chart-more__label');
-  if (label) label.textContent = chartMoreLabel(state.summary?.byCategory?.length ?? 0);
+  for (const btn of _container?.querySelectorAll('#budget-chart-more, #budget-categories-more') ?? []) {
+    btn.setAttribute('aria-expanded', state.categoriesExpanded ? 'true' : 'false');
+    const label = btn.querySelector('.budget-chart-more__label');
+    if (label) label.textContent = chartMoreLabel(state.summary?.byCategory?.length ?? 0);
+  }
+}
+
+/* MOBIL GEHOERT DER PLATZ DEM HAUPTBUCH (Re-Critique 2026-09-27, A5 P2-5).
+ * Unter 640px standen Bilanz-Titel, drei Kennzahl-Karten und das Diagramm vor
+ * den Buchungen - die erste Buchung bei y=634 von 844, knapp zwei Zeilen
+ * sichtbar. Jetzt steht dort EINE kompakte Kopfzeile in einem Zeilentraeger:
+ * Saldo mit Ein/Aus daneben, darunter die Zeile „Alle Kategorien (N)". Beide
+ * Zeilen sind Aufklapper: die Bilanz klappt die Kennzahl-Karten samt
+ * Vormonatstrend und „Nur Ausgaben" auf, die Kategorien das volle Diagramm -
+ * nichts faellt weg, es wartet nur hinter einem Tipp.
+ *
+ * Nur Markup: budget.css zeigt den Traeger erst unter 640px und blendet dort
+ * die eingeklappten Bereiche aus. Ab 640px bleibt alles wie es war (Karten,
+ * Top 3, Zweispalter ab 960px Container). Der Traeger ist `.row-carrier`,
+ * keine Kennzahl-Karte: eine Zeile, die zusammenfasst und aufklappt, wie die
+ * Gruppenzeilen in Apple Wallet und Einstellungen. */
+function balanceGlanceHtml(s, { expensesOnly, forecast, balanceTone }) {
+  const tone = forecast ? 'forecast'
+    : balanceTone === 'metric-card--balance-positive' ? 'positive'
+      : balanceTone === 'metric-card--balance-negative' ? 'negative' : 'neutral';
+  const lead = expensesOnly
+    ? { label: t('budget.expenses'), value: amountByRole(s.expenses, 'total').text, tone: 'neutral' }
+    : { label: t(forecast ? 'budget.summaryTitleForecast' : 'budget.balance'), value: amountByRole(s.balance, 'balance').text, tone };
+  const flows = expensesOnly ? '' : `
+        <span class="budget-glance__flows">
+          <span class="budget-glance__flow">${esc(t('budget.income'))} <span class="budget-glance__amount">${amountByRole(s.income, 'total').text}</span></span>
+          <span class="budget-glance__flow">${esc(t('budget.expenses'))} <span class="budget-glance__amount">${amountByRole(s.expenses, 'total').text}</span></span>
+        </span>`;
+  const count = s.byCategory?.length ?? 0;
+  return `
+    <div class="row-carrier budget-glance">
+      <button type="button" class="budget-glance__row budget-glance__balance" id="budget-balance-more"
+              aria-expanded="${state.balanceExpanded ? 'true' : 'false'}" aria-controls="budget-balance-details">
+        <span class="budget-glance__lead">
+          <span class="budget-glance__label">${esc(lead.label)}</span>
+          <span class="budget-glance__value budget-glance__value--${lead.tone}">${lead.value}</span>
+        </span>${flows}
+        <i data-lucide="chevron-down" class="icon-sm budget-glance__chevron" aria-hidden="true"></i>
+      </button>
+      ${count ? `
+      <button type="button" class="budget-glance__row budget-glance__categories" id="budget-categories-more"
+              aria-expanded="${state.categoriesExpanded ? 'true' : 'false'}" aria-controls="budget-chart">
+        <span class="budget-glance__title">${esc(t('budget.showAllCategories', { count }))}</span>
+        <i data-lucide="chevron-down" class="icon-sm budget-glance__chevron" aria-hidden="true"></i>
+      </button>` : ''}
+    </div>`;
+}
+
+/* Wie toggleCategoryChart: ohne Neuaufbau, der Knopf behaelt den Fokus. */
+function toggleBalanceDetails() {
+  state.balanceExpanded = !state.balanceExpanded;
+  _container?.querySelector('#budget-balance-details')?.classList.toggle('is-expanded', state.balanceExpanded);
+  _container?.querySelector('#budget-balance-more')?.setAttribute('aria-expanded', state.balanceExpanded ? 'true' : 'false');
 }
 
 /* EIN WERKZEUG-MENUE FUER DIE BUCHUNGSLISTE (Critique 2026-09-25, P1; Muster
@@ -1554,6 +1719,16 @@ function visibleEntries() {
 }
 
 function renderEntries() {
+  if (state.ledgerQuery && state.ledgerResults) {
+    if (state.ledgerError) {
+      return emptyStateHTML({ icon: 'cloud-off', title: t('budget.ledgerSearchError') });
+    }
+    if (!state.ledgerResults.length) {
+      return emptyStateHTML({ icon: 'search-x', title: t('budget.ledgerSearchEmpty', { query: state.ledgerQuery }) });
+    }
+    // Treffer aus vielen Monaten: die Zeile nennt das volle Datum.
+    return entryRows(state.ledgerResults, { fullDate: true });
+  }
   if (!state.entries.length) {
     // BEI `budget: read` BLEIBT NUR DER TITEL. Beschreibung und Hinweis sind
     // Anleitungen zum Anlegen („ueber den + Button"), und der CTA klickt den
@@ -1619,7 +1794,7 @@ function statementCreditLimitHtml() {
 }
 
 /** Die Buchungszeilen selbst - einmal gebaut, von Liste und Gruppen benutzt. */
-function entryRows(list) {
+function entryRows(list, { fullDate = false } = {}) {
   const ro = readOnly();
   // In einem Prognose-Monat liegt JEDE Zeile nach heute - dort sagt es der
   // Titel der Bilanz, und ein Symbol in jeder Metazeile waere Wiederholung.
@@ -1646,7 +1821,7 @@ function entryRows(list) {
      *
      * `formatEntryDate` bleibt, wie es ist: die Darlehensraten weiter unten
      * stehen in KEINER Monatsansicht, dort trägt die Zeile das volle Datum. */
-    const date      = formatDayMonth(e.date);
+    const date      = fullDate ? formatEntryDate(e.date) : formatDayMonth(e.date);
     const recurTag  = e.is_recurring
       ? ` <span class="budget-recur-mark" role="img" aria-label="${t('budget.recurringLabel')}"><i data-lucide="repeat" class="icon-sm" aria-hidden="true"></i></span>${e.recurrence_virtual ? ' ' + t('budget.virtualBudgetBadge') : ''}`
       : (e.recurrence_parent_id ? ` <span class="budget-recur-mark" role="img" aria-label="${t('budget.recurringInstanceLabel')}"><i data-lucide="corner-down-left" class="icon-sm" aria-hidden="true"></i></span>` : '');
@@ -1739,11 +1914,12 @@ function entryRows(list) {
              aria-label="${esc(t('budget.responsibleFilterTo', { name: e.responsible_users[0].display_name ?? '' }))}"
            >${renderAvatarStack(e.responsible_users, { size: 16, maxVisible: 3 })}</button>`
       : '';
+    // EINE ZEILENBEDIENUNG (R14 P8, A5 P2-6): die Zeile oeffnet die Buchung,
+    // Loeschen steht in deren Blatt (#bm-delete) - an der Zeile bleibt nur die
+    // Folgeaktion „Verbuchen". Der dauerhafte Papierkorb neben dem Betrag war
+    // eine von drei Bedienungen im Modul und kappte den Titel.
     const rowActions = (masked || ro) ? '' : `
-          ${confirmBtn}
-          <button class="row-action row-action--danger" data-action="delete" data-id="${e.id}" aria-label="${esc(t('budget.deleteLabel', { title: e.title }))}">
-            <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
-          </button>`;
+          ${confirmBtn}`;
 
     return `
       <div class="list-row budget-entry${pending ? ' budget-entry--pending' : ''}${upcoming ? ' budget-entry--upcoming' : ''}${masked ? ' budget-entry--masked' : ''}" ${rowInteraction}>
@@ -2090,16 +2266,26 @@ function renderLoansDashboard() {
   const summary = state.loans?.summary ?? {};
   const visibleLoans = filteredLoans();
 
+  const remainingLabel = t(summary.has_interest ? 'budget.loanRemainingPrincipal' : 'budget.loanRemainingAmount');
   return `
     <section class="budget-loans">
+      ${metricGlanceHtml({
+    id: 'budget-loans-more',
+    controls: 'budget-loans-details',
+    expanded: state.loansExpanded,
+    label: remainingLabel,
+    value: amountByRole(summary.remaining_principal ?? summary.remaining_amount ?? 0, 'total').text,
+    flows: [
+      { label: t('budget.loanRemainingInstallments'), amount: String(summary.remaining_installments ?? 0) },
+      { label: t('budget.loanPaidAmount'), amount: amountByRole(summary.paid_amount ?? 0, 'total').text },
+    ],
+  })}
       <div class="panel-head budget-loans__header">
         <div>
           <!-- Unsichtbar wie bei den Konten: sichtbar wiederholte der Titel nur den Tab. -->
           <h2 class="panel-head__title sr-only">${t('budget.loansTitle')}</h2>
-          <div class="budget-loans__summary">${t('budget.loansSummary', {
-            count: summary.active_count ?? 0,
-            amount: formatAmount(summary.remaining_principal ?? summary.remaining_amount ?? 0),
-          })}</div>
+          <!-- Die Summenzeile („2 aktiv · 175.444,93 € offen") ist entfallen:
+               sie wiederholte die Karte RESTSCHULD direkt darunter (R14 P1). -->
           ${state.loanFilterId ? `<div class="budget-list-header__filter">${esc(activeLoanLabel())}</div>` : ''}
         </div>
         <div class="panel-head__actions">
@@ -2123,10 +2309,11 @@ function renderLoansDashboard() {
       </div>
       <!-- Geteilte Kennzahl-Zeile statt der früheren eigenen budget-loans__stats
            (fünfte Kartenbauart des Moduls, Critique 2026-07-30, P0). Rolle
-           total: die Richtung steht im Label, nicht im Vorzeichen. -->
-      <div class="metric-grid">
+           total: die Richtung steht im Label, nicht im Vorzeichen.
+           Mobil wartet sie hinter EINER Zeile (metricGlanceHtml, R14 P1). -->
+      <div class="metric-grid budget-glance-details${state.loansExpanded ? ' is-expanded' : ''}" id="budget-loans-details">
         <div class="metric-card">
-          <div class="metric-card__label">${t(summary.has_interest ? 'budget.loanRemainingPrincipal' : 'budget.loanRemainingAmount')}</div>
+          <div class="metric-card__label">${remainingLabel}</div>
           <div class="metric-card__value">${amountByRole(summary.remaining_principal ?? summary.remaining_amount ?? 0, 'total').text}</div>
         </div>
         <div class="metric-card">
@@ -2178,7 +2365,9 @@ function renderLoanTransactions(loans) {
 
   return `<div class="budget-loan-transactions">
     <div class="budget-loan-transactions__title">${t('budget.loanTransactions')}</div>
-    <div class="budget-loan-transactions__list">
+    ${/* Traeger wie das Hauptbuch (Re-Critique 2026-09-28 P1-1): vorher lagen
+        * die Raten nackt auf der Buehne, der einzige Tab ohne Flaeche. */ ''}
+    <div class="row-carrier budget-loan-transactions__list">
       ${payments.map(({ loan, ...payment }) => renderLoanPaymentEntry(loan, payment)).join('')}
     </div>
   </div>`;
@@ -2281,7 +2470,34 @@ function renderLoansPage() {
   </div>`;
 }
 
+/**
+ * Oeffnet den Bericht eines Darlehens - ueber den Titelknopf (Tastatur,
+ * Screenreader) und ueber die Kartenflaeche (Zeiger). Bearbeiten und Loeschen
+ * stehen allein im Bericht (R14 P8); ohne den Knopf kam die Tastatur nie
+ * dorthin (Re-Critique 2026-09-28 R15 A5 P1-1, WCAG 2.1.1).
+ * @param {ParentNode} root
+ * @param {(loan: object) => void} [open]
+ */
+function wireLoanCards(root, open = openLoanReport) {
+  const openById = (id) => {
+    const loan = state.loans?.loans?.find((item) => item.id === parseInt(id, 10));
+    if (loan) open(loan);
+  };
+  root.querySelectorAll('.budget-loan-card__open[data-loan-id]').forEach((btn) => {
+    btn.addEventListener('click', () => openById(btn.dataset.loanId));
+  });
+  root.querySelectorAll('.budget-loan-card[data-loan-id]').forEach((card) => {
+    card.addEventListener('click', (event) => {
+      // Knoepfe tragen ihre eigene Handlung - der Titelknopf oeffnet schon
+      // selbst, "Rate buchen" und der Filter sollen den Bericht nicht mitoeffnen.
+      if (event.target.closest('button, a')) return;
+      openById(card.dataset.loanId);
+    });
+  });
+}
+
 function wireLoansPage() {
+  wireMetricGlance(_container, 'budget-loans-more', (on) => { state.loansExpanded = on; });
   _container.querySelector('#budget-empty-loan')?.addEventListener('click', () => openBudgetModal({ mode: 'create', initialType: 'loan' }));
   _container.querySelector('#budget-clear-loan-filter')?.addEventListener('click', () => {
     state.loanFilterId = null;
@@ -2303,27 +2519,10 @@ function wireLoansPage() {
   // die neue Kapsel von der Stelle der alten gleiten.
   const loanFilters = _container.querySelector('.budget-loans__filters');
   if (loanFilters) attachSegmentIndicator(loanFilters, { key: 'budget-loan-filter' });
-  _container.querySelectorAll('.budget-loan-card[data-loan-id]').forEach((card) => {
-    card.addEventListener('click', (event) => {
-      if (event.target.closest('button, a')) return;
-      const loan = state.loans.loans.find((item) => item.id === parseInt(card.dataset.loanId, 10));
-      if (loan) openLoanReport(loan);
-    });
-  });
+  wireLoanCards(_container);
   _container.querySelectorAll('[data-action="loan-pay"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await markLoanPayment(parseInt(btn.dataset.id, 10));
-    });
-  });
-  _container.querySelectorAll('[data-action="loan-edit"]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const loan = state.loans.loans.find((item) => item.id === parseInt(btn.dataset.id, 10));
-      if (loan) openLoanModal(loan);
-    });
-  });
-  _container.querySelectorAll('[data-action="loan-delete"]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await deleteLoan(parseInt(btn.dataset.id, 10));
     });
   });
   _container.querySelectorAll('[data-action="loan-filter"]').forEach((btn) => {
@@ -2441,10 +2640,17 @@ function openLoanReport(loan) {
         </div>
       ` : `<div class="budget-loans__empty">${t('budget.loanNoTransactions')}</div>`}
     </div>
-    <div class="modal-panel__footer modal-panel__footer--plain">
+    ${readOnly() ? `<div class="modal-panel__footer modal-panel__footer--plain">
       <div></div>
       <button class="btn btn--primary" id="loan-report-close">${t('common.close')}</button>
-    </div>`;
+    </div>` : `<div class="modal-panel__footer">
+      <button type="button" class="btn btn--danger-outline" id="loan-report-delete"
+              aria-label="${esc(t('common.deleteNamed', { name: loan.title }))}" style="margin-inline-end:auto">
+        <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i><span>${esc(t('common.delete'))}</span>
+      </button>
+      <button type="button" class="btn btn--secondary" id="loan-report-close">${t('common.close')}</button>
+      <button type="button" class="btn btn--primary" id="loan-report-edit">${esc(t('common.edit'))}</button>
+    </div>`}`;
 
   openSharedModal({
     title: t('budget.loanReportTitle'),
@@ -2452,6 +2658,18 @@ function openLoanReport(loan) {
     size: 'md',
     onSave(panel) {
       panel.querySelector('#loan-report-close')?.addEventListener('click', closeModal);
+      // EINE ZEILENBEDIENUNG (R14 P8): Bearbeiten und Loeschen wohnen hier,
+      // nicht mehr an der Karte. Bearbeiten ersetzt das Blatt; Loeschen fragt
+      // wie bisher (deleteLoan) und schliesst den Bericht vorher.
+      panel.querySelector('#loan-report-edit')?.addEventListener('click', () => {
+        closeModal({ force: true });
+        openLoanModal(loan);
+      });
+      panel.querySelector('#loan-report-delete')?.addEventListener('click', async () => {
+        closeModal({ force: true });
+        await deleteLoan(loan.id);
+        refocusAfterRender();
+      });
     },
   });
 }
@@ -2529,7 +2747,12 @@ function renderLoanCard(loan) {
     <article class="budget-loan-card" data-loan-id="${loan.id}">
       <div class="budget-loan-card__main">
         <div class="budget-loan-card__title-row">
-          <div class="budget-loan-card__title">${esc(loan.title)}</div>
+          ${/* Der Titel IST der Weg in den Bericht (Muster budget-account__main):
+              * ein echter Knopf, damit Tastatur und Screenreader ihn erreichen. */ ''}
+          <button type="button" class="budget-loan-card__open" data-loan-id="${loan.id}" aria-haspopup="dialog">
+            <span class="budget-loan-card__title">${esc(loan.title)}</span>
+            <i data-lucide="chevron-right" class="budget-loan-card__chevron icon-sm" aria-hidden="true"></i>
+          </button>
           ${rowActionHtml({
     icon: 'filter', action: 'loan-filter', className: 'budget-loan-card__filter',
     label: t('budget.filterLoanNamed', { name: loan.title }),
@@ -2562,11 +2785,10 @@ function renderLoanCard(loan) {
         ${/* Bei `budget: read` gehen alle drei: Bearbeiten, Loeschen und das
             * Buchen einer Rate schreiben. Faelligkeit, Fortschritt und der
             * Bericht hinter der Karte bleiben - sie sind die Auskunft. */ ''}
+        ${/* EINE ZEILENBEDIENUNG (R14 P8): Bearbeiten und Loeschen stehen im
+            * Bericht, den die Karte oeffnet (openLoanReport) - an der Karte
+            * bleibt nur „Rate buchen". */ ''}
         ${readOnly() ? '' : `<div class="budget-loan-card__actions">
-          <div class="row-actions">
-            ${rowActionHtml({ icon: 'pencil', action: 'loan-edit', label: t('common.editNamed', { name: loan.title }), attrs: { 'data-id': loan.id } })}
-            ${rowActionHtml({ icon: 'trash-2', tone: 'danger', action: 'loan-delete', label: t('common.deleteNamed', { name: loan.title }), attrs: { 'data-id': loan.id } })}
-          </div>
           ${/* Sekundaer, nicht primaer (Critique 2026-09-25): drei Darlehen
               * zeigten drei violette Primaerknoepfe nebeneinander, und keiner
               * war der Weg der Seite. Der steht im Kopf („+ Darlehen"). */ ''}
@@ -2945,7 +3167,14 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
             * Regel wie in utils/household.js). */ ''}
         ${responsiblePickerHtml({ members: state.members, entry, isEdit })}
 
-        <div class="form-group">
+        ${/* Ein erzeugtes Vorkommen traegt den Rhythmus seiner Serie NICHT
+            * (#1546): is_recurring ist 0, Intervall und Schalter sind
+            * Spalten-Defaults. Hier vorbelegt stuende "nicht wiederkehrend,
+            * monatlich" - und genau das ging mit "alle kuenftigen" an die Serie
+            * und beendete sie. Der Rhythmus wird an der ersten Buchung geaendert;
+            * am Vorkommen bleibt das Feld weg (im DOM, versteckt, weil der
+            * Speichern-Pfad es liest). */ ''}
+        <div class="form-group" ${isEdit && entry.recurrence_parent_id ? 'hidden' : ''}>
           <label class="toggle">
             <input type="checkbox" id="bm-recurring" ${isEdit && entry.is_recurring ? 'checked' : ''}>
             <span class="toggle__track"></span>
@@ -3329,8 +3558,20 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
             closeModal({ force: true });
             renderBody();
             window.yuvomi?.showToast(t('budget.addedToast'), 'success');
-          } else if (entry.recurrence_parent_id) {
-            // Kind-Instanz: Nutzer fragen, ob nur dieser oder alle zukünftigen
+          } else if (entry.recurrence_parent_id || (entry.is_recurring && recurring)) {
+            // Buchung einer Serie - eine Instanz ODER die erste Buchung selbst:
+            // Nutzer fragen, ob nur diese oder alle zukünftigen. Seit #1035 ist
+            // die erste Buchung eine gewöhnliche Buchung neben einer eigenen
+            // Serien-Definition; ohne die Frage wäre ihre Korrektur nur noch
+            // eine Einzeländerung, und die Serie ließe sich von hier aus nicht
+            // mehr ändern.
+            //
+            // AUSNAHME: "wiederkehrend" an der ersten Buchung abgewählt. Das ist
+            // kein Umfang, sondern das Ende der Serie, und das Ende hat seinen
+            // eigenen Weg - PUT /budget/:id mit is_recurring 0 (unten im
+            // else-Zweig). Der Serien-PUT weist es seit #1546 mit 400 ab, und
+            // durch occurrenceSeriesBody() geschickt fiele der Schalter weg: die
+            // Serie liefe mit Erfolgs-Toast still weiter.
             saveBtn.disabled = false;
             saveBtn.textContent = t('common.save');
             closeModal({ force: true });
@@ -3338,12 +3579,9 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
               title: t('budget.recurringSeriesScope'),
               thisLabel: t('budget.recurringThisOnly'),
               seriesLabel: t('budget.recurringEditSeries'),
-              // #1035: das Original der Serie ist Vorlage UND erste Buchung, und
-              // `PUT /budget/:id/series` schreibt Titel, Betrag, Kategorie und
-              // Konto auf genau diese Zeile - ohne Datumsschnitt
-              // (`WHERE id = ?`, routes/budget/entries.js). Bis die beiden
-              // Bedeutungen getrennt sind, sagt es wenigstens der Dialog, an
-              // dem die Wahl faellt.
+              // Was "alle zukünftigen" heisst, sagt der Dialog, an dem die Wahl
+              // fällt: ab heute, gebuchte Einträge bleiben, die Sichtbarkeit
+              // gilt für die ganze Serie (PUT /budget/:id/series).
               note: t('budget.recurringEditSeriesHint'),
             });
             if (scope === null) { openBudgetModal({ mode: 'edit', entry }); return; }
@@ -3361,7 +3599,13 @@ function openBudgetModal({ mode, entry = null, initialType = '' }) {
               if (seriesBody.account_id === null && entry.account_id == null) {
                 delete seriesBody.account_id;
               }
-              await api.put(`/budget/${entry.id}/series`, seriesBody);
+              // Ein VORKOMMEN schickt keinen Rhythmus (#1546): sein Formular ist
+              // mit Spalten-Defaults statt dem Rhythmus der Serie vorbelegt. Die
+              // erste Buchung trägt ihn wirklich und schickt ihn mit. Werte gehen
+              // von beiden nur mit, wenn sie hier geändert wurden (#1035).
+              await api.put(`/budget/${entry.id}/series`, entry.recurrence_parent_id
+                ? occurrenceSeriesBody(seriesBody, entry)
+                : anchorSeriesBody(seriesBody, entry));
               window.yuvomi?.showToast(t('budget.recurringSeriesSaved'), 'success');
             } else {
               const res = await api.put(`/budget/${entry.id}`, await withReceipts());
@@ -4167,23 +4411,34 @@ function listNarrowsSummary() {
 
 async function deleteEntry(id) {
   if (readOnly()) return;
-  const entry = state.entries.find((e) => e.id === id);
+  const entry = findEntry(id);
+  // Aus der Suche heraus kann die Buchung in einem anderen Monat liegen - dann
+  // aendert ihr Loeschen die Bilanz dieses Monats nicht.
+  const inMonth = state.entries.some((e) => e.id === id);
 
   if (entry && (entry.is_recurring || entry.recurrence_parent_id)) {
+    // #1544: die Serie haengt an ihrer ersten Buchung (ohne recurrence_parent_id,
+    // seit #1035 per `budget_series.anchor_id` mit ON DELETE CASCADE). Loescht
+    // "Nur dieser Eintrag" genau diese Buchung, endet die ganze Serie: die
+    // angelegten Vorkommen bleiben als Einzelbuchungen (ON DELETE SET NULL),
+    // kuenftige Monate bleiben leer. Das Verhalten bleibt, der Dialog sagt es.
+    const isSeriesStart = Boolean(entry.is_recurring) && !entry.recurrence_parent_id;
     const scope = await recurringChoiceModal({
       title: t('budget.recurringSeriesScope'),
       thisLabel: t('budget.recurringThisOnly'),
       seriesLabel: t('budget.recurringEntireSeries'),
       seriesDanger: true,
+      note: isSeriesStart ? t('budget.recurringDeleteFirstHint') : '',
     });
     if (scope === null) return;
     if (scope === 'series') { await deleteEntrySeries(id); return; }
   }
 
   state.entries = state.entries.filter((e) => e.id !== id);
+  if (state.ledgerResults) state.ledgerResults = state.ledgerResults.filter((e) => e.id !== id);
   // Auch im Konto-Drilldown genau: der Server loescht genau diese eine
   // Buchung, und sie steht in der Liste - anders als die Serie (listNarrowsSummary).
-  if (entry) state.summary = summaryWith(state.summary, [entry], -1);
+  if (entry && inMonth) state.summary = summaryWith(state.summary, [entry], -1);
   renderBody();
   vibrate([30, 50, 30]);
 
@@ -4198,11 +4453,19 @@ async function deleteEntry(id) {
     restore: (err) => {
       // Nur in den Monat zurueck, aus dem sie kam: nach dem Blaettern zeigt
       // die Liste einen anderen Monat, und die Buchung gehoert nicht hinein.
-      if (entry && String(entry.date ?? '').slice(0, 7) === state.month) {
-        state.entries = [...state.entries, entry].sort((a, b) => new Date(b.date) - new Date(a.date));
+      const byDate = (a, b) => new Date(b.date) - new Date(a.date);
+      let back = false;
+      if (entry && inMonth && String(entry.date ?? '').slice(0, 7) === state.month) {
+        state.entries = [...state.entries, entry].sort(byDate);
         state.summary = summaryWith(state.summary, [entry], 1);
-        renderBody();
+        back = true;
       }
+      // Und in die Treffer, falls die Suche noch steht.
+      if (entry && state.ledgerQuery && state.ledgerResults) {
+        state.ledgerResults = [...state.ledgerResults.filter((e) => e.id !== id), entry].sort(byDate);
+        back = true;
+      }
+      if (back) renderBody();
       if (err) window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
     },
   });
@@ -4212,14 +4475,105 @@ async function deleteEntry(id) {
 // Hilfsfunktion
 // --------------------------------------------------------
 
+/** Felder, die den Rhythmus einer Serie beschreiben - nie Werte einer Buchung. */
+const SERIES_RHYTHM_FIELDS = new Set([
+  'is_recurring', 'recurrence_interval', 'recurrence_interval_count',
+  'recurrence_virtual', 'recurrence_confirm', 'recurrence_rule',
+]);
+
+/**
+ * Der Body fuer "Alle zukuenftigen" aus einem VORKOMMEN heraus (#1546).
+ *
+ * Das Formular ist mit den Werten DIESES Vorkommens vorbelegt. Fuer die Werte
+ * ist das richtig, fuer den Rhythmus nicht: ein erzeugtes Vorkommen traegt
+ * is_recurring = 0 und die Spalten-Defaults (monatlich, alle 1, nicht virtuell,
+ * ohne Bestaetigung). Gingen die an PUT /budget/:id/series, beendete das die
+ * Serie, loeschte jedes Vorkommen ab heute und setzte eine Wochen-, Jahres-
+ * oder virtuelle Serie auf "monatlich" zurueck - gemessen, still, mit
+ * Erfolgs-Toast. Der Rhythmus faellt deshalb ganz weg; er wird an der ersten
+ * Buchung geaendert.
+ *
+ * Von den Werten geht nur mit, was der Nutzer GEAENDERT hat. Ein Vorkommen kann
+ * einen einmaligen Betrag tragen (Nachzahlung im Maerz); wer an ihm nur den
+ * Titel der Serie korrigiert, soll den Maerz-Betrag nicht in jeden kuenftigen
+ * Monat schreiben. Und bei einer virtuellen Serie ist der Betrag des Vorkommens
+ * der Monatsanteil, nicht der Periodenbetrag der Serie - unveraendert
+ * mitgeschickt wuerde er ein zweites Mal geglaettet. Datum und Belege gehoeren
+ * ohnehin der einzelnen Buchung.
+ *
+ * @param {object} body   der Body, den der Dialog gebaut hat
+ * @param {object} entry  das Vorkommen, an dem der Dialog geoeffnet wurde
+ * @returns {object}
+ */
+function occurrenceSeriesBody(body, entry) {
+  return changedSeriesBody(body, entry, { amount: Number(entry.amount), keepRhythm: false });
+}
+
+/**
+ * Der Body fuer "Alle zukuenftigen" von der ERSTEN Buchung aus (#1035).
+ *
+ * Die erste Buchung traegt den Rhythmus der Serie wirklich - er geht mit, von
+ * hier aus wird er geaendert. Ihre WERTE dagegen sind seit #1035 die einer
+ * gebuchten Buchung: nach einem "alle kuenftigen" an einem Vorkommen haelt die
+ * Definition den neuen Titel und Betrag, der Anker weiter den alten, und mit
+ * genau dem ist das Formular vorbelegt. Schickte der Dialog sie alle mit,
+ * schriebe "nur den Rhythmus aendern" die alten Werte still zurueck in die
+ * Serie und in jede Buchung ab heute. Es geht deshalb nur mit, was der Nutzer
+ * hier geaendert hat - wie an einem Vorkommen.
+ *
+ * Verglichen wird mit dem, was das Formular zeigt: bei einer virtuellen Serie
+ * ist das der Periodenbetrag, nicht der Monatsanteil in `amount`.
+ *
+ * @param {object} body   der Body, den der Dialog gebaut hat
+ * @param {object} entry  die erste Buchung der Serie
+ * @returns {object}
+ */
+function anchorSeriesBody(body, entry) {
+  const shown = entry.recurrence_virtual && entry.recurrence_full_amount != null
+    ? entry.recurrence_full_amount
+    : entry.amount;
+  return changedSeriesBody(body, entry, { amount: Number(shown), keepRhythm: true });
+}
+
+/**
+ * Nur die Werte, die im Formular von `entry` abweichen; Datum und Belege nie
+ * (sie gehoeren der einzelnen Buchung), den Rhythmus nur mit `keepRhythm`.
+ */
+function changedSeriesBody(body, entry, { amount, keepRhythm }) {
+  const before = {
+    title: entry.title ?? '',
+    amount,
+    category: entry.category ?? '',
+    subcategory: entry.subcategory ?? '',
+    account_id: entry.account_id ?? null,
+    visibility: entry.visibility,
+    responsible_user_ids: (entry.responsible_users ?? []).map((u) => u.id),
+  };
+  const same = (a, b) => (Array.isArray(a) && Array.isArray(b)
+    ? a.length === b.length && [...a].sort().every((v, i) => v === [...b].sort()[i])
+    : a === b);
+  const out = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'date' || key === 'attachment_document_ids') continue;
+    if (SERIES_RHYTHM_FIELDS.has(key)) {
+      if (keepRhythm) out[key] = value;
+      continue;
+    }
+    if (key in before && same(key === 'amount' ? Number(value) : value, before[key])) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 /**
  * Zeigt ein Modal mit zwei Wahloptionen für wiederkehrende Einträge.
  * Gibt 'this' | 'series' | null (abgebrochen) zurück.
  *
  * `note` steht ÜBER den Knöpfen, nicht darunter: der Hinweis soll gelesen
  * werden, bevor die Wahl fällt, und die gestapelten Knöpfe sind das Ende des
- * Dialogs. Optional, weil ihn nur das Bearbeiten braucht - beim Löschen sagt
- * „Gesamte Serie löschen" schon alles.
+ * Dialogs. Optional: das Bearbeiten nennt ihn immer, das Löschen nur an der
+ * ersten Buchung einer Serie (#1544) - dort beendet auch „Nur dieser Eintrag"
+ * die Serie, an einem Vorkommen sagen die Knöpfe schon alles.
  */
 function recurringChoiceModal({ title, thisLabel, seriesLabel, seriesDanger = false, note = '' }) {
   return new Promise((resolve) => {
@@ -4252,11 +4606,12 @@ function recurringChoiceModal({ title, thisLabel, seriesLabel, seriesDanger = fa
 
 async function deleteEntrySeries(id) {
   if (readOnly()) return;
-  const entry = state.entries.find((e) => e.id === id);
+  const entry = findEntry(id);
   const parentId = entry?.recurrence_parent_id ?? (entry?.is_recurring ? entry.id : id);
   const inSeries = (e) => e.id === parentId || e.recurrence_parent_id === parentId;
   const removed = state.entries.filter(inSeries);
   state.entries = state.entries.filter((e) => !inSeries(e));
+  if (state.ledgerResults) state.ledgerResults = state.ledgerResults.filter((e) => !inSeries(e));
   // Das Undo laedt den Monat neu (restore unten) - herausrechnen genuegt hier.
   // Aber nur, wenn die Liste alles zeigt, was die Bilanz zaehlt: im
   // Konto-Drilldown fehlen ihr Vorkommen, die per Einzel-Bearbeitung auf ein
@@ -4293,12 +4648,17 @@ async function deleteEntrySeries(id) {
 // statt Quelltext-Regex.
 export const __test = {
   monthNavHtml,
+  // #1546: was "alle kuenftigen" aus einem Vorkommen an die Serie schickt.
+  occurrenceSeriesBody,
+  // #1035: dasselbe von der ersten Buchung aus - mit Rhythmus, Werte nur geaendert.
+  anchorSeriesBody,
   // Critique 2026-09-25, Mobil: Top-3-Auswahl des Diagramms und das EINE
   // Werkzeug-Menue der Buchungsliste, als Programm statt als Quelltext.
   categoryBlocks,
   chartHasMore,
   chartSummary,
   renderCategoryBars,
+  balanceGlanceHtml,
   listToolsMenuHtml,
   CHART_LEAD,
   syncCurrentButton,
@@ -4308,6 +4668,8 @@ export const __test = {
   tabSearch,
   writeTabToUrl,
   summaryWith,
+  // #1544: der Loeschdialog einer Serienbuchung, als Programm gefahren.
+  deleteEntry,
   deleteEntrySeries,
   subcategoryChoice,
   currentMonth,
@@ -4338,7 +4700,10 @@ export const __test = {
   renderAccountsPage,
   renderLoansPage,
   renderLoanCard,
+  // R15 A5 P1-1: der Titelknopf oeffnet den Bericht - gemessen als Programm.
+  wireLoanCards,
   renderLoanPaymentEntry,
+  renderLoanTransactions,
   // Die Leseansichten (#1265 P7): die Zeilen als reine Funktionen, und der
   // Einstieg, dessen Aussage KEIN Markup ist - welche Optionen er
   // `openDetailView` uebergibt, sieht nur, wer sie ihm abnimmt.
@@ -4355,5 +4720,20 @@ export const __test = {
   renderBodyForTest(container) {
     _container = container;
     renderBody();
+  },
+  // Re-Critique 2026-09-27 (M4): die beiden Aufklapper der mobilen Kopfzeile
+  // gegen einen Test-Container - beide Knoepfe des Diagramms muessen denselben
+  // Zustand melden.
+  toggleCategoryChartForTest(container) {
+    _container = container;
+    toggleCategoryChart();
+  },
+  toggleBalanceDetailsForTest(container) {
+    _container = container;
+    toggleBalanceDetails();
+  },
+  markTabEnteringForTest(container) {
+    _container = container;
+    markTabEntering();
   },
 };

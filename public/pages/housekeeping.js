@@ -18,12 +18,11 @@ import { amountPlaceholder, amountStep, amountIsSavable, smallestUnitLabel } fro
 import { maxUploadBytes, maxUploadMb } from '/utils/upload-limit.js';
 import { isNavModuleReadOnly } from '/permissions.js';
 import { pathAccess, mayWritePath } from '/utils/module-access.js';
+import { todayKey } from '/utils/date.js';
+import { displayTimeZone, zonedDateKey } from '/utils/timezone.js';
+import { USER_COLOR_DEFAULT } from '/utils/color.js';
 
 
-
-function localDate(d = new Date()) {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 // "2026-07" ist ein API-Schlüssel, kein Anzeigetext: Leser bekommen den
 // lokalisierten Monatsnamen (Audit A2-23).
@@ -32,11 +31,20 @@ function formatMonthLabel(ym, opts = { month: 'long', year: 'numeric' }) {
   return new Intl.DateTimeFormat(getLocale(), opts).format(new Date(`${ym}-01T00:00:00`));
 }
 
+/**
+ * Die Zone, in der diese Seite "heute" liest: die des Haushalts, ohne
+ * Einstellung die des Browsers - dieselbe, aus der `todayKey()` den Tag nimmt.
+ * Der Server rechnet darin den Tag und seine Grenzen; ist eine Haushaltszone
+ * eingestellt, nimmt er ohnehin seine (#1556). Tag und Offset des Geraets
+ * gingen hier vorher mit und legten den Check-in auf Reisen auf den Tag des
+ * Geraets.
+ */
+function dayTimeZone() {
+  return displayTimeZone() || Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+}
+
 function localDayParams() {
-  return new URLSearchParams({
-    local_date: localDate(),
-    timezone_offset_minutes: String(new Date().getTimezoneOffset()),
-  });
+  return new URLSearchParams({ timezone: dayTimeZone() });
 }
 
 let state = {
@@ -54,7 +62,7 @@ let state = {
   workers: [],
   workerAvatar: undefined,
   selectedStaffId: null,
-  staffLogMonth: localDate().slice(0, 7),
+  staffLogMonth: todayKey().slice(0, 7),
   staffVisits: [],
   currency: 'EUR',
 };
@@ -186,7 +194,7 @@ function templateLabel(template, field) {
 }
 
 function visitTextPayload(worker, dateValue, dailyRate, extras) {
-  const visitDate = dateValue || localDate();
+  const visitDate = dateValue || todayKey();
   const total = Number(dailyRate || 0) + Number(extras || 0);
   const name = worker?.display_name || t('housekeeping.staff');
   return {
@@ -240,7 +248,7 @@ async function loadData() {
   const reportSeq = ++reportFetchSeq;
   const reportMonth = state.reportMonth;
   const [dashboard, tasks, current, report, templates, workers, prefs] = await Promise.all([
-    api.get('/housekeeping/dashboard'),
+    api.get(`/housekeeping/dashboard?${dayParams.toString()}`),
     api.get('/housekeeping/decay-tasks'),
     api.get('/housekeeping/visits'),
     // Der Berichte-Tab behaelt seinen Monat ueber jedes Neuladen (#1137). Jede
@@ -255,7 +263,7 @@ async function loadData() {
   state.dashboard = dashboard.data;
   state.tasks = tasks.data || [];
   const currentReport = current.data || { visits: [], totals: {} };
-  state.currentMonth = currentReport.month || localDate().slice(0, 7);
+  state.currentMonth = currentReport.month || todayKey().slice(0, 7);
   // Die Uebersicht zeigt die juengsten Besuche, egal welchen Monat der
   // Berichte-Tab gerade offen hat.
   state.recentVisits = currentReport.visits || [];
@@ -374,6 +382,10 @@ function renderShell(container) {
 function renderCurrentTab(container) {
   const content = container.querySelector('#housekeeping-content');
   if (!content) return;
+  // Der Reiter steht an der Seite: das Mass folgt ihm (die Uebersicht ist ab
+  // 1280px breit, die Listenreiter bleiben im Lesemass - housekeeping.css).
+  const page = container.querySelector('.housekeeping-page');
+  if (page) page.dataset.tab = state.tab;
   content.replaceChildren();
   if (state.tab === 'tasks') renderTasks(content);
   else if (state.tab === 'reports') renderReports(content);
@@ -405,9 +417,8 @@ async function toggleSession(container, workerId) {
         worker_id: worker.id,
         daily_rate: worker.rate_type === 'hourly' ? 0 : (worker.daily_rate || 0),
         extras: 0,
-        local_date: localDate(),
-        timezone_offset_minutes: new Date().getTimezoneOffset(),
-        ...visitTextPayload(worker, localDate(), worker.rate_type === 'hourly' ? 0 : (worker.daily_rate || 0), 0),
+        timezone: dayTimeZone(),
+        ...visitTextPayload(worker, todayKey(), worker.rate_type === 'hourly' ? 0 : (worker.daily_rate || 0), 0),
       });
       window.yuvomi?.showToast(t('housekeeping.checkedInToast'), 'success');
     }
@@ -519,7 +530,19 @@ function renderDashboard(content) {
   // Aussage, die Praezisierung darunter gehoert in `.metric-card__note`
   // (dieselbe Rolle wie „7 aktiv" bei den Abos).
   const hasLastVisit = Boolean(data.last_visit?.check_in);
-  const lastVisit = hasLastVisit ? formatDate(data.last_visit.check_in) : t('housekeeping.noVisits');
+  // OHNE JAHR, WENN ES DAS LAUFENDE IST (R10 L10): mobil stehen die vier
+  // Kennzahlen in EINER Zeile, und „23.09.2026" passt in eine Viertelzeile nicht
+  // (gemessen 112px Bedarf gegen 67px). Liegt der letzte Besuch in einem
+  // anderen Jahr, bleibt es stehen - dann ist es die Auskunft.
+  // BEIDE JAHRE IN DER ANZEIGEZONE: formatDate/formatDayMonth rechnen in die
+  // Haushaltszone, also muss der Vergleich es auch. Mit dem Jahr des rohen
+  // UTC-Strings und dem der Geraetezone erschien `2026-01-01T00:30Z` in New
+  // York als „31.12." - der Tag aus 2025, das Jahr trotzdem weggelassen.
+  const lastVisit = !hasLastVisit
+    ? t('housekeeping.noVisits')
+    : zonedDateKey(data.last_visit.check_in).slice(0, 4) === todayKey().slice(0, 4)
+      ? formatDayMonth(data.last_visit.check_in)
+      : formatDate(data.last_visit.check_in);
   const lastVisitTime = hasLastVisit ? formatTime(data.last_visit.check_in) : '';
   const maxPayment = Math.max(1, ...(data.monthly_payments || []).map((row) => row.total));
   const bars = (data.monthly_payments || []).map((row) => {
@@ -544,17 +567,11 @@ function renderDashboard(content) {
   }).join('');
 
   const recentVisits = (state.recentVisits || []).slice(0, 5);
-  const recentRows = recentVisits.map((visit) => `
-    <article class="list-row housekeeping-staff-log-row">
-      <div class="list-row__main">
-        <div class="list-row__name">${esc(formatDate(visit.check_in))}</div>
-        <div class="list-row__meta">${esc(visit.worker_name || t('housekeeping.staff'))} · ${esc(money(visit.total_amount))} · ${esc(visitPaymentMeta(visit))}</div>
-      </div>
-      <div class="list-row__actions">
-        ${visitEditActionHtml(visit, formatDate(visit.check_in))}
-      </div>
-    </article>
-  `).join('');
+  const recentRows = recentVisits.map((visit) => visitRowHtml(visit, {
+    dateText: formatDate(visit.check_in),
+    actionsHtml: `${visitEditActionHtml(visit, formatDate(visit.check_in))}`,
+    className: 'housekeeping-staff-log-row',
+  })).join('');
 
   content.insertAdjacentHTML('beforeend', `
     ${renderWorkerSummary()}
@@ -577,6 +594,24 @@ function renderDashboard(content) {
         <div class="metric-card__value">${esc(data.finished_tasks_this_month ?? 0)}</div>
       </article>
     </section>
+    <!-- DIE LISTE VOR DEM DIAGRAMM (R10 L10, A3 P2-10): mobil begannen die
+         letzten Besuche bei y=760 von 844, hinter Personal, Kennzahlen und dem
+         252px hohen Zahlungsdiagramm. Die Besuche sind, was man hier nachsieht;
+         der Verlauf der Zahlungen ist die Einordnung darunter. -->
+    <!-- BESUCHE | ZAHLUNGEN (Re-Critique 2026-09-28, P5): ab 1280px stehen
+         beide Karten nebeneinander, und die Uebersicht bekommt das breite Mass
+         (housekeeping.css, [data-tab="dashboard"]) - im Lesemass einer
+         Textseite blieben bei 1440 rund 470px leer. Darunter bleibt die
+         Reihenfolge Liste vor Diagramm. -->
+    <div class="housekeeping-dashboard-columns">
+    <section class="housekeeping-card">
+      <div class="housekeeping-section-heading">
+        <h2>${esc(t('housekeeping.recentVisits'))}</h2>
+      </div>
+      <div class="housekeeping-staff-log-list">
+        ${recentRows || `<p class="housekeeping-muted">${esc(t('housekeeping.noVisits'))}</p>`}
+      </div>
+    </section>
     <section class="housekeeping-card">
       <div class="housekeeping-section-heading">
         <h2>${esc(t('housekeeping.payments'))}</h2>
@@ -586,14 +621,7 @@ function renderDashboard(content) {
         ${bars || `<p class="housekeeping-muted">${esc(t('housekeeping.noPaymentData'))}</p>`}
       </div>
     </section>
-    <section class="housekeeping-card">
-      <div class="housekeeping-section-heading">
-        <h2>${esc(t('housekeeping.recentVisits'))}</h2>
-      </div>
-      <div class="housekeeping-staff-log-list">
-        ${recentRows || `<p class="housekeeping-muted">${esc(t('housekeeping.noVisits'))}</p>`}
-      </div>
-    </section>
+    </div>
   `);
   if (window.lucide) window.lucide.createIcons({ el: content });
   // `if (!readOnly())` statt `return`: die lesende Verdrahtung (Bericht
@@ -653,6 +681,15 @@ async function createTask(payload, content) {
  * „OK" STEHT NICHT IN DER ZEILE. Nur ein faelliger Zustand hat etwas zu sagen
  * (heute, ueberfaellig) - ein Wort an jeder ruhigen Zeile war Rauschen.
  *
+ * DIE ZEILE SELBST OEFFNET DAS BEARBEITEN (Re-Critique 2026-09-27, R11 H6), wie
+ * die Geburtstagszeile seit R8: mit Schreibrecht ist die Hauptspalte ein Knopf
+ * (`.list-row__main--interactive`), ein Tipp auf Name oder Meta oeffnet den
+ * Editor. Vorher tat ein Tipp auf die Zeile nichts, und mobil war der Stift
+ * das einzige Ziel. Stift und Loeschen bleiben sichtbar (ignore.md). Weil ein
+ * Knopf nur Phrasing-Inhalt traegt, ist der Name dort ein `span`; bei
+ * `housekeeping: read` verspricht die Spalte nichts und bleibt die
+ * Ueberschrift.
+ *
  * KEIN ZURUECKNEHMEN-KNOPF MEHR IN DER ZEILE. Er setzte `last_completed` auf
  * leer statt auf den Stand davor und nahm dem Titel mobil 48px. Das Erledigen
  * meldet sich jetzt mit einem Toast samt „Rueckgaengig", der den vorherigen
@@ -661,6 +698,7 @@ async function createTask(payload, content) {
 function taskRowHtml(task) {
   const ro = readOnly();
   const due = task.urgency_status === 'overdue' || task.urgency_status === 'today';
+  const meta = `${due ? `<span class="housekeeping-task__status">${esc(urgencyLabel(task.urgency_status))}</span> · ` : ''}${esc(task.area)} · ${esc(t('housekeeping.everyDays', { days: task.frequency_days }))}`;
   return `
     <article class="list-row housekeeping-task housekeeping-task--${esc(task.urgency_status)}${ro ? ' housekeeping-task--readonly' : ''}">
       ${ro ? '' : `
@@ -668,10 +706,15 @@ function taskRowHtml(task) {
               aria-label="${esc(t('housekeeping.completeTask', { name: task.name }))}">
         <i data-lucide="check" aria-hidden="true"></i>
       </button>`}
+      ${ro ? `
       <div class="list-row__main housekeeping-task__body">
         <h2 class="list-row__name">${esc(task.name)}</h2>
-        <p class="list-row__meta">${due ? `<span class="housekeeping-task__status">${esc(urgencyLabel(task.urgency_status))}</span> · ` : ''}${esc(task.area)} · ${esc(t('housekeeping.everyDays', { days: task.frequency_days }))}</p>
-      </div>
+        <p class="list-row__meta">${meta}</p>
+      </div>` : `
+      <button type="button" class="list-row__main list-row__main--interactive housekeeping-task__body" data-edit-task="${esc(task.id)}">
+        <span class="list-row__name">${esc(task.name)}</span>
+        <span class="list-row__meta">${meta}</span>
+      </button>`}
       ${ro ? '' : `
       <div class="list-row__actions housekeeping-task__actions">
         <button class="row-action" type="button" data-edit-task="${esc(task.id)}"
@@ -958,6 +1001,39 @@ async function unpayVisit(visit, onUnpaid) {
  * `readOnly()` steht ZUSAETZLICH da (#1265 P6). Der Server rechnet das
  * Modulrecht schon in die Felder ein, aber die Felder sind so alt wie die
  * letzte Antwort, und ein Rechtewechsel kommt ohne Neuladen an. */
+/**
+ * DIE EINE BESUCHSZEILE (Re-Critique 2026-09-27, A3 P2-4 / R10 L10).
+ *
+ * Derselbe Besuch stand in zwei Grammatiken: in der Uebersicht mit dem Datum
+ * als Titel, in den Berichten mit Avatar und Namen als Titel - zehnmal „Maria
+ * Silva" untereinander, das Datum klein im Meta. Ein Besuch ist ein Ereignis
+ * an einem Tag; das Datum fuehrt, die Person steht im Meta (entfaellt, wo die
+ * Liste schon einer Person gehoert: Personal-Protokoll). Uebersicht, Berichte
+ * und Protokoll bauen die Zeile hier; nur die Aktionen und die Datumsform
+ * (ohne Jahr, wo der Monat im Kopf steht) geben die Aufrufer.
+ *
+ * @param {object} visit
+ * @param {{ dateText: string, actionsHtml?: string, showWorker?: boolean,
+ *           paymentText?: string, className?: string }} opts
+ */
+function visitRowHtml(visit, { dateText, actionsHtml = '', showWorker = true, paymentText, className = '' } = {}) {
+  const meta = [
+    showWorker ? (visit.worker_name || t('housekeeping.staff')) : null,
+    money(visit.total_amount),
+    paymentText ?? visitPaymentMeta(visit),
+  ].filter(Boolean).join(' · ');
+  return `
+    <article class="list-row housekeeping-visit-row${className ? ` ${className}` : ''}">
+      <div class="list-row__main">
+        <div class="list-row__name">${esc(dateText)}</div>
+        <div class="list-row__meta">${esc(meta)}</div>
+      </div>
+      <div class="list-row__actions">
+        ${actionsHtml}
+      </div>
+    </article>`;
+}
+
 function visitEditActionHtml(visit, visitDate) {
   if (visit.can_edit && !readOnly()) {
     return `<button class="row-action" type="button" data-edit-visit="${esc(visit.id)}"
@@ -991,7 +1067,7 @@ function visitPaymentMeta(visit) {
 }
 
 function currentMonthKey() {
-  return state.currentMonth || localDate().slice(0, 7);
+  return state.currentMonth || todayKey().slice(0, 7);
 }
 
 function shiftMonth(ym, dir) {
@@ -1159,7 +1235,7 @@ function stepReportMonth(content, dir) {
  * Name + Datum, Betrag, Status | Aktionen. Vorher stand „Als bezahlt
  * markieren" als beschrifteter Knopf in der Zeile und der Bericht-Knopf
  * darunter in einer eigenen - mobil 197px pro Besuch. Bezahlen ist jetzt
- * dieselbe `.row-action` wie im Protokoll (`badge-dollar-sign`), beschriftet
+ * dieselbe `.row-action` wie im Protokoll (`banknote`), beschriftet
  * per `aria-label` mit dem Datum der Zeile. Sichtbar steht das Datum ohne
  * Jahr: den Monat samt Jahr nennt der Stepper im Kopf, und mit Jahr brach die
  * Metazeile mobil um. Das `aria-label` behaelt das volle Datum.
@@ -1173,28 +1249,22 @@ function renderReports(content) {
   const rows = visits.map((visit) => {
     const paid = !!visit.paid_at;
     const visitDate = formatDate(visit.check_in);
-    return `
-    <article class="list-row list-row--tight housekeeping-report-item housekeeping-report-item--visit">
-      <div class="housekeeping-avatar housekeeping-avatar--row" style="background:${esc(visit.worker_avatar_color) || 'var(--module-housekeeping)'}">
-        ${visit.worker_avatar_data ? `<img src="${esc(visit.worker_avatar_data)}" alt="${esc(visit.worker_name || '')}">` : esc(initials(visit.worker_name || 'HK'))}
-      </div>
-      <div class="list-row__main">
-        <div class="list-row__name">${esc(visit.worker_name || t('housekeeping.staff'))}</div>
-        <div class="list-row__meta">${esc(formatDayMonth(visit.check_in))} · ${esc(money(visit.total_amount))} · ${esc(paid ? t('housekeeping.paymentPaid') : t('housekeeping.paymentPending'))}</div>
-      </div>
-      <div class="list-row__actions">
-        ${!visit.can_mark_paid || readOnly() ? '' : `
+    // Ohne Jahr: den Monat samt Jahr nennt der Stepper im Kopf. Das
+    // `aria-label` der Aktionen behaelt das volle Datum.
+    return visitRowHtml(visit, {
+      dateText: formatDayMonth(visit.check_in),
+      paymentText: paid ? t('housekeeping.paymentPaid') : t('housekeeping.paymentPending'),
+      className: 'list-row--tight housekeeping-report-item housekeeping-report-item--visit',
+      actionsHtml: `${!visit.can_mark_paid || readOnly() ? '' : `
         <button class="row-action" type="button" data-pay-report="${visit.id}"
                 aria-label="${esc(t('housekeeping.markPaid'))}: ${esc(visitDate)}">
-          <i data-lucide="badge-dollar-sign" class="icon-md" aria-hidden="true"></i>
+          <i data-lucide="banknote" class="icon-md" aria-hidden="true"></i>
         </button>`}
         <button class="row-action" type="button" data-visit-report="${visit.id}"
                 aria-label="${esc(t('housekeeping.openVisitReport'))}: ${esc(visitDate)}">
           <i data-lucide="file-text" class="icon-md" aria-hidden="true"></i>
-        </button>
-      </div>
-    </article>
-  `;
+        </button>`,
+    });
   }).join('');
 
   content.insertAdjacentHTML('beforeend', `
@@ -1425,7 +1495,7 @@ function renderStaff(content) {
     });
   });
   content.querySelector('#housekeeping-staff-month')?.addEventListener('change', async (event) => {
-    state.staffLogMonth = event.currentTarget.value || localDate().slice(0, 7);
+    state.staffLogMonth = event.currentTarget.value || todayKey().slice(0, 7);
     try {
       await loadStaffVisits();
       renderStaff(content);
@@ -1512,7 +1582,7 @@ function staffLogPayHtml(visit, visitDate) {
   if (readOnly() || (!paid && !visit.can_mark_paid)) return '';
   return `<button class="row-action" type="button" data-pay-visit="${visit.id}" ${visit.can_mark_paid ? '' : 'disabled'}
                   aria-label="${esc(paid ? t('housekeeping.paymentPaid') : t('housekeeping.markPaid'))}: ${esc(visitDate)}">
-            <i data-lucide="badge-dollar-sign" class="icon-md" aria-hidden="true"></i>
+            <i data-lucide="banknote" class="icon-md" aria-hidden="true"></i>
           </button>`;
 }
 
@@ -1526,19 +1596,14 @@ function renderStaffVisitLog() {
      * in der Metazeile, wo er die Zeile beschreibt, statt nur als Beschriftung
      * eines Knopfs, der ausgegraut ist. */
     const visitDate = formatDate(visit.check_in);
-    return `
-      <article class="list-row housekeeping-staff-log-row">
-        <div class="list-row__main">
-          <div class="list-row__name">${esc(visitDate)}</div>
-          <div class="list-row__meta">${esc(money(visit.total_amount))} · ${esc(visitPaymentMeta(visit))}</div>
-        </div>
-        <div class="list-row__actions">
-          ${staffLogPayHtml(visit, visitDate)}
+    return visitRowHtml(visit, {
+      dateText: visitDate,
+      showWorker: false,
+      className: 'housekeeping-staff-log-row',
+      actionsHtml: `${staffLogPayHtml(visit, visitDate)}
           ${visitEditActionHtml(visit, visitDate)}
-          ${visitDeleteActionHtml(visit, visitDate)}
-        </div>
-      </article>
-    `;
+          ${visitDeleteActionHtml(visit, visitDate)}`,
+    });
   }).join('');
   return `
     <section class="housekeeping-card housekeeping-staff-log">
@@ -1666,6 +1731,11 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
     return;
   }
   const worker = state.workers.find((item) => String(item.id) === String(visit.worker_id)) || null;
+  // Der Tag des Besuchs auf der Uhr des Haushalts, nicht `check_in.slice(0, 10)`
+  // (der UTC-Tag, #1540). Er geht beim Speichern als `original_date` mit: der
+  // Server verschiebt den Besuch um den Abstand zu DIESEM Tag, weil seine Uhr
+  // ohne eingestellte Haushaltszone eine andere sein kann als die des Browsers.
+  const visitDay = zonedDateKey(visit.check_in);
   openModal({
     title: t('housekeeping.editVisit'),
     size: 'md',
@@ -1673,7 +1743,7 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
       <form id="housekeeping-visit-form" class="housekeeping-worker-form">
         <label class="housekeeping-field">
           <span>${esc(t('housekeeping.visitDate'))}</span>
-          <yuvomi-datepicker name="date" type="date" value="${esc(visit.check_in.slice(0, 10))}"></yuvomi-datepicker>
+          <yuvomi-datepicker name="date" type="date" value="${esc(visitDay)}"></yuvomi-datepicker>
         </label>
         <div class="housekeeping-form-grid">
           ${visit.rate_type === 'hourly' ? `
@@ -1770,6 +1840,7 @@ function openVisitEditModal(visit, content, { onDone } = {}) {
           }
           await api.put(`/housekeeping/visits/${visit.id}`, {
             date: dateValue,
+            original_date: visitDay,
             ...(visit.rate_type === 'hourly'
               ? { minutes_worked: minutesWorked }
               : { daily_rate: dailyRate }),
@@ -1936,7 +2007,7 @@ function openStaffModal(worker, content, options = {}) {
           </label>
           <label class="housekeeping-field housekeeping-field--color">
             <span>${esc(t('housekeeping.calendarColor'))}</span>
-            <input name="calendar_color" type="color" value="${esc(item.calendar_color || '#7C3AED')}">
+            <input name="calendar_color" type="color" value="${esc(item.calendar_color || USER_COLOR_DEFAULT)}">
           </label>
           <label class="housekeeping-field">
             <span>${esc(t('housekeeping.paymentSchedule'))}</span>
@@ -1948,7 +2019,7 @@ function openStaffModal(worker, content, options = {}) {
           </label>
           <label class="housekeeping-field housekeeping-field--color">
             <span>${esc(t('housekeeping.profileColor'))}</span>
-            <input name="avatar_color" type="color" value="${esc(item.avatar_color || '#7C3AED')}">
+            <input name="avatar_color" type="color" value="${esc(item.avatar_color || USER_COLOR_DEFAULT)}">
           </label>
         </div>
         <label class="housekeeping-field">

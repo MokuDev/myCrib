@@ -493,8 +493,12 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
 
   let io = null;
   let lead = 0;
+  // Hoehe einer Faltzeile (siehe `foldRow` in update), ohne ihre Linie.
+  let foldH = 0;
   let dockTitle = null;
   let headSeal = null;
+  // Die Kinder der Lead-Zone, die im Band-Modus angedockt ausblenden.
+  let leadMarked = [];
 
   // DAS ABSENDER-SIEGEL: genau eines, unmittelbar vor dem Seitentitel.
   //
@@ -573,16 +577,33 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
     // unvermessenen Kopf - und `update()` misst einen eingeklappten Kopf nie
     // (siehe dort). Der Kopf blieb dann ausgeklappt sichtbar, aber als
     // eingeklappt markiert, ohne Lead-Zone, bis zum Neuladen.
-    if (!toolbar.classList.contains('page-toolbar--capped')) return;
+    // Eine Faltzeile (siehe `foldRow` in update) hat keine Lead-Zone, aber
+    // eine vermessene Hoehe - sie ist ihre ganze Lead-Zone. Ihre Linie bleibt
+    // in beiden Zustaenden: sie ist die Kante des angedockten Kopfes.
+    const fold = toolbar.classList.contains('page-toolbar--fold-row') && foldH > 0;
+    if (!fold && !toolbar.classList.contains('page-toolbar--capped')) return;
+    const states = fold ? ['is-collapsed'] : ['is-collapsed', 'is-docked'];
     // Nur kollabieren, wenn der Port das Ausklappen danach auch verkraftet -
     // sonst schiebt die zurückkehrende Kopfhöhe den Scroll auf 0, der Kopf
     // klappt wieder aus und beides pendelt gegeneinander.
-    if (reserve < lead + 48) { toolbar.classList.remove('is-collapsed', 'is-docked'); return; }
+    // Die Faltzeile misst die Reserve AUSGEKLAPPT: gefaltet ist der Port um
+    // ihren negativen Rand laenger und die Reserve um genau so viel kuerzer.
+    // Gegen die gefaltete Reserve gemessen, klappte eine knappe Liste (Rezepte
+    // mit einem aufgeklappten Rezept: 166px ausgeklappt, 102px gefaltet) beim
+    // naechsten Scroll-Ereignis wieder aus - und dann wieder ein. Der
+    // berechnete Rand gilt auch mitten in der Bewegung.
+    const unfolded = fold
+      ? reserve - Math.min(0, parseFloat(getComputedStyle(toolbar).marginBlockEnd) || 0)
+      : reserve;
+    if (unfolded < (fold ? foldH : lead) + 48) {
+      toolbar.classList.remove(...states);
+      return;
+    }
     // Ab hier nur noch der Nutzer (siehe `gestureTarget` oben).
     if (!gestureTarget || !port.contains(gestureTarget)) return;
     const top = port.scrollTop;
-    if (top > 24) toolbar.classList.add('is-collapsed', 'is-docked');
-    else if (top < 8) toolbar.classList.remove('is-collapsed', 'is-docked');
+    if (top > 24) toolbar.classList.add(...states);
+    else if (top < 8) toolbar.classList.remove(...states);
   };
   const update = () => {
     // VOR der Messung: das Siegel steht in der Titelzeile und zählt zu ihr.
@@ -644,7 +665,13 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
     const firstEl = lines.length
       ? lines[0].els.reduce((a, b) => (b.getBoundingClientRect().height > a.getBoundingClientRect().height ? b : a))
       : null;
-    lead = Math.max(0, Math.round(lastTop - padTop));
+    // EINE ZEILE HAT KEINE LEAD-ZONE, auch wenn sie nicht auf dem Polster
+    // beginnt. Die Kuechen-Koepfe von Rezepten und Vorrat stehen mobil seit
+    // R9 M10 IN der Zeile der Kuechen-Leiste: 56px hoch, ohne Polster, die
+    // 48px-Lupe mittig darin - ihre Oberkante liegt 4px tief. `lastTop -
+    // padTop` machte daraus 4px Lead-Zone und ein `--stacked`, das die
+    // Trennlinie dauerhaft verbarg (Sonde 8 der Dokument-Guards).
+    lead = lines.length > 1 ? Math.max(0, Math.round(lastTop - padTop)) : 0;
     toolbar.style.setProperty('--page-toolbar-lead', `${lead}px`);
     toolbar.classList.toggle('page-toolbar--stacked', lead > 0);
     toolbar.classList.toggle('page-toolbar--capped', Boolean(capped) && lead > 0);
@@ -670,9 +697,9 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
     // sie ganz: der Titel begann dort eine SECHSTE Zeile, und mit ihr sprangen
     // Kopfhöhe und Lead-Zone beim Andocken (Belohnungen 110→145px,
     // Haushaltshilfe 122→157px). Das ist exakt die Oszillation, gegen die das
-    // negative `top` gewählt wurde - also lieber keinen Titel als einen, der
-    // den Kopf um seine eigene Schwelle pendeln lässt. Gemessen statt
-    // aufgezählt, damit die Regel auch beim sechsten Modul noch gilt.
+    // negative `top` gewählt wurde. Gemessen statt aufgezählt, damit die Regel
+    // auch beim sechsten Modul noch gilt. Was dann geschieht, steht unten bei
+    // der Faltung und beim Band.
     const lastLine = lines.length ? lines[lines.length - 1] : null;
     const tbCS = getComputedStyle(toolbar);
     const innerWidth = toolbar.clientWidth
@@ -684,10 +711,103 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
         + colGap * lastLine.els.length
       : 0;
     // Unter dieser Breite bliebe von jedem Modulnamen nur die Ellipse.
-    const roomForDockTitle = innerWidth - usedWidth >= 88;
+    const roomForDockTitle = innerWidth - usedWidth >= DOCK_TITLE_MIN_WIDTH;
 
     const heading = toolbar.querySelector(':scope > .page-toolbar__title');
-    if (lead > 0 && !capped && heading && roomForDockTitle) {
+
+    // DIE FALTZEILE (R17 K1, Re-Critique 2026-09-28 A4 P2-4 / A8 P3-2). Unter
+    // einer Gruppen-Leiste (Kueche) steht der Kopf der Seite als EINE Zeile
+    // ohne Titel - in Rezepte und Vorrat traegt sie mobil nur Werkzeuge (Lupe,
+    // "...") und kostet 65px fuer ein bis zwei Icons. Angedockt gibt sie diese
+    // Hoehe frei, an derselben Schwelle und mit derselben Klasse wie der Kopf
+    // der gedeckelten Module (`is-collapsed`, onInnerScroll); zurueck oben
+    // kommt sie wieder. Das ist Apples `hidesSearchBarWhenScrolling` fuer eine
+    // Zeile, deren Inhalt die Suche IST.
+    //
+    // NUR EINE ZEILE, DIE NICHTS BENENNT: steht im Center-Slot etwas anderes
+    // als die Suche (Wochenstepper im Essensplan, Listen-Kapseln im Einkauf),
+    // beantwortet die Zeile beim Scrollen weiter „wo bin ich" und bleibt -
+    // dieselbe Abgrenzung wie der Zeitraum im Kalender. Gezaehlt wird ueber
+    // `classList`, nicht per Selektor: die Regel ist eine Aussage ueber den
+    // Inhalt des Slots.
+    //
+    // KEINE LEAD-ZONE: die Zeile ist einzeilig, und eine Lead-Zone auf einem
+    // einzeiligen Kopf verbirgt seine Linie (Sonde 8). Die Hoehe steht deshalb
+    // in einer eigenen Variablen, gemessen OHNE die Linie - die bleibt
+    // gefaltet als Kante unter der Leiste stehen.
+    const center = [...toolbar.children].find((c) => c.classList.contains('page-toolbar__center'));
+    const foldRow = Boolean(capped) && lines.length === 1 && !heading
+      && toolbar.classList.contains('page-toolbar--in-group')
+      && (!center || center.classList.contains('page-search'));
+    toolbar.classList.toggle('page-toolbar--fold-row', foldRow);
+    foldH = foldRow ? Math.round(tb.height - (parseFloat(getComputedStyle(toolbar).borderBottomWidth) || 0)) : 0;
+    if (foldH > 0) toolbar.style.setProperty('--fold-row-h', `${foldH}px`);
+    else toolbar.style.removeProperty('--fold-row-h');
+
+    // NIE EIN KOPF OHNE ORTSANGABE (Re-Critique 2026-09-27, R9 M9). Die Regel
+    // darueber liess den Titel lieber weg, als den Kopf pendeln zu lassen - in
+    // den Aufgaben hiess das: angedockt standen Lupe, Ansicht, Filter und
+    // „..." da, und kein Wort, wo man ist (A1 P2-4). Wo die Bar-Zeile die
+    // Kontrollen eines Moduls traegt und es ein Werkzeugmenue hat, weichen
+    // angedockt die Kontrollen: sie falten ins „..." (als Eintraege mit
+    // demselben Namen, Ansichten als Einfachauswahl), die Suche bleibt, und
+    // der Titel bekommt den Platz. Die Zeile aendert dabei nur ihre Breite,
+    // nie ihre Hoehe (`--dock-fold-bar-h`) - das negative `top` bleibt gueltig.
+    //
+    // GEFALTET GEMESSEN WIRD NICHT NEU ENTSCHIEDEN: angedockt sind die
+    // Kontrollen weg, die Zeile hat Platz, und eine neue Rechnung hiesse
+    // „nicht mehr falten" - die Kontrollen kaemen zurueck, der Platz ginge,
+    // und das Ganze pendelte. Entschieden wird im ausgeklappten Zustand.
+    const actions = toolbar.querySelector(':scope > .page-toolbar__actions');
+    const docked = toolbar.classList.contains('is-docked');
+    const wasFolded = toolbar.classList.contains('page-toolbar--dock-fold');
+    let fold = false;
+    if (lead > 0 && !capped && heading && actions) {
+      if (wasFolded && docked) {
+        fold = true;
+        // Rendert das Modul seine Aktionen angedockt neu (Ansicht gewechselt,
+        // Filterzahl geaendert), kaemen die neuen Knoepfe ungefaltet dazu und
+        // braechen die Zeile um. Nur ergaenzen: die schon gefalteten sind
+        // unsichtbar und fielen aus `dockFoldables` heraus.
+        for (const el of dockFoldables(actions)) el.setAttribute('data-dock-fold', '');
+      } else if (!roomForDockTitle && lastLine?.els.includes(actions) && dockFoldMenu(actions)) {
+        const foldable = dockFoldables(actions);
+        const actionsGap = parseFloat(getComputedStyle(actions).columnGap) || 0;
+        const freed = foldable.reduce((sum, el) => sum + el.getBoundingClientRect().width + actionsGap, 0);
+        fold = foldable.length > 0 && innerWidth - (usedWidth - freed) >= DOCK_TITLE_MIN_WIDTH;
+        if (fold) {
+          for (const el of actions.children) el.toggleAttribute('data-dock-fold', foldable.includes(el));
+          toolbar.style.setProperty('--dock-fold-bar-h', `${Math.round(actions.getBoundingClientRect().height)}px`);
+        }
+      }
+    }
+    if (!fold && wasFolded) {
+      for (const el of actions?.children ?? []) el.removeAttribute('data-dock-fold');
+      toolbar.style.removeProperty('--dock-fold-bar-h');
+    }
+    toolbar.classList.toggle('page-toolbar--dock-fold', fold);
+
+    // DAS BAND: WO NICHTS FALTEN KANN, BLEIBT EIN STREIFEN DES TITELS STEHEN
+    // (Re-Critique 2026-09-27, R11 H1). Schichtplan, Haushaltshilfe und
+    // Belohnungen tragen als Bar-Zeile eine Tab-Leiste ueber die ganze Breite
+    // und kein „..." - dort half die Faltung nicht, und angedockt stand nur
+    // die Leiste da, ohne ein Wort, in welchem Modul sie liegt. Statt einer
+    // eigenen Zeile (die waere die Hoehenaenderung, gegen die das negative
+    // `top` gewaehlt ist) klebt der Kopf um genau die Hoehe des angedockten
+    // Titels TIEFER: der unterste Streifen der Lead-Zone bleibt sichtbar, der
+    // Titel steht absolut darin, und die Lead-Zone blendet angedockt aus.
+    // Die Geometrie haengt damit nicht am Andock-Zustand - der Kopf hat im
+    // Band-Modus immer dieselbe Hoehe und dieselbe Klebekante, angedockt
+    // wechselt nur, was in dem Streifen zu sehen ist. Die Schwelle der
+    // Trennlinie (unten, IntersectionObserver) rueckt um denselben Streifen.
+    const band = lead > 0 && !capped && Boolean(heading) && !roomForDockTitle && !fold;
+    toolbar.classList.toggle('page-toolbar--dock-band', band);
+    const leadEls = band ? lines.slice(0, -1).flatMap((l) => l.els) : [];
+    for (const el of leadMarked) if (!leadEls.includes(el)) el.removeAttribute('data-dock-lead');
+    for (const el of leadEls) if (!leadMarked.includes(el)) el.setAttribute('data-dock-lead', '');
+    leadMarked = leadEls;
+
+    if (lead > 0 && !capped && heading && (roomForDockTitle || fold || band)) {
       if (!dockTitle) {
         dockTitle = document.createElement('span');
         dockTitle.className = 'page-toolbar__dock-title';
@@ -705,6 +825,21 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
       }
     } else if (dockTitle?.parentElement) {
       dockTitle.remove();
+    }
+
+    // Die Hoehe des Streifens ist die des angedockten Titels, gemessen - das
+    // CSS stellt ihn im Band-Modus unsichtbar, aber gerendert hin. Dazu das
+    // obere Polster des Kopfes: mit ihm steht der Titel angedockt so weit
+    // unter der Kante wie der Large Title ausgeklappt.
+    const bandH = band && dockTitle?.parentElement === toolbar
+      ? Math.min(lead, Math.ceil(dockTitle.getBoundingClientRect().height))
+      : 0;
+    if (bandH > 0) {
+      toolbar.style.setProperty('--dock-band-h', `${bandH}px`);
+      toolbar.style.setProperty('--dock-band-pad', `${Math.round(padTop)}px`);
+    } else {
+      toolbar.style.removeProperty('--dock-band-h');
+      toolbar.style.removeProperty('--dock-band-pad');
     }
 
     // Die Trennlinie erscheint, sobald die erste Zeile aus dem Scrollport
@@ -728,12 +863,46 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
     // Belohnungen, Haushaltshilfe): der Kopf trug mobil NIE eine Trennlinie.
     // Bei drei Zeilen fiel es nicht auf - dort ist `lead` die Höhe von zwei
     // Zeilen und schiebt die erste weit über die Kante hinaus.
+    // Im Band-Modus klebt der Kopf um `bandH` tiefer, und genau so viel der
+    // ersten Zeile bleibt geklebt im Bild - der Rahmen schrumpft um dasselbe
+    // Mass, sonst dockte der Kopf nie an.
+    //
+    // UND UM DAS, WAS DIE ERSTE ZEILE UNTER DIE LEAD-ZONE REICHT. `lead` ist
+    // die Oberkante der letzten Zeile minus dem oberen Polster; die erste
+    // Zeile endet aber `row-gap` vor der letzten, und ist das Polster groesser
+    // als die Luecke, ragt sie geklebt um die Differenz ins Bild. Die
+    // Haushaltshilfe (8px Polster, 4px Luecke, R11-Band) liess ihren 41px-Titel
+    // so 31px tief stehen - 3px unter dem 28px-Rahmen, und der Kopf dockte nie
+    // an (Sonde 8). Gemessen statt aus Polster und Luecke gerechnet, damit auch
+    // ein hoeherer Nachbar in der ersten Zeile mitzaehlt - und an der Kante
+    // von JETZT: `tb` stammt von vor dem Schreiben von Lead-Zone und Streifen,
+    // und der klebende Kopf rueckt mit beiden.
+    const firstBottom = firstEl.getBoundingClientRect().bottom - toolbar.getBoundingClientRect().top;
+    const overhang = Math.max(0, Math.ceil(firstBottom - lead));
     io = new IntersectionObserver(
       ([entry]) => toolbar.classList.toggle('is-docked', !entry.isIntersecting),
-      { root: scrollport, threshold: 0, rootMargin: '-1px 0px 0px 0px' },
+      { root: scrollport, threshold: 0, rootMargin: `-${bandH + overhang + 1}px 0px 0px 0px` },
     );
     io.observe(firstEl);
   };
+
+  // Die gefalteten Kontrollen erscheinen im Werkzeugmenue, solange es offen
+  // ist - gebaut beim Oeffnen aus dem Ist-Zustand (welche Ansicht gewaehlt
+  // ist, wie viele Filter stehen), abgebaut beim Schliessen. `beforetoggle`
+  // steigt nicht auf; am Kopf kommt es nur in der Capture-Phase an.
+  const onMenuToggle = (e) => {
+    const panel = e.target;
+    if (!(panel instanceof Element) || !panel.matches('.popover-menu')) return;
+    const actions = toolbar.querySelector(':scope > .page-toolbar__actions');
+    if (!actions || dockFoldMenu(actions)?.panel !== panel) return;
+    clearDockFoldItems(panel);
+    if (e.newState === 'open'
+      && toolbar.classList.contains('page-toolbar--dock-fold')
+      && toolbar.classList.contains('is-docked')) {
+      fillDockFoldItems(panel, [...actions.querySelectorAll(':scope > [data-dock-fold]')]);
+    }
+  };
+  toolbar.addEventListener('beforetoggle', onMenuToggle, { capture: true });
 
   const ro = new ResizeObserver(update);
   ro.observe(toolbar);
@@ -755,15 +924,122 @@ export function wireCollapsingHeader(toolbar, opts = {}) {
       capped?.removeEventListener('scroll', onInnerScroll, { capture: true });
       for (const type of GESTURES) capped?.removeEventListener(type, onGesture, { capture: true });
       gestureTarget = null;
+      toolbar.removeEventListener('beforetoggle', onMenuToggle, { capture: true });
+      toolbar.querySelectorAll('[data-dock-fold]').forEach((el) => el.removeAttribute('data-dock-fold'));
+      toolbar.style.removeProperty('--dock-fold-bar-h');
+      for (const el of leadMarked) el.removeAttribute('data-dock-lead');
+      leadMarked = [];
+      toolbar.style.removeProperty('--dock-band-h');
+      toolbar.style.removeProperty('--dock-band-pad');
       dockTitle?.remove();
       dockTitle = null;
       headSeal?.remove();
       headSeal = null;
       delete toolbar.dataset.collapsingHeader;
       toolbar.style.removeProperty('--page-toolbar-lead');
-      toolbar.classList.remove('page-toolbar--stacked', 'page-toolbar--capped', 'is-collapsed', 'is-docked');
+      toolbar.style.removeProperty('--fold-row-h');
+      foldH = 0;
+      toolbar.classList.remove('page-toolbar--stacked', 'page-toolbar--capped', 'is-collapsed', 'is-docked', 'page-toolbar--dock-fold', 'page-toolbar--dock-band', 'page-toolbar--fold-row');
     },
   };
+}
+
+/** Unter dieser Breite bliebe vom angedockten Titel nur die Ellipse. */
+export const DOCK_TITLE_MIN_WIDTH = 88;
+
+/**
+ * Das Werkzeugmenue der Bar-Zeile (`pageToolsMenuHtml`, Kennklasse
+ * `page-tools-btn`) - das „..." , in das angedockt gefaltet wird. Ohne es
+ * faltet nichts: eine Kontrolle, die verschwindet, ohne irgendwo
+ * wiederzukommen, waere eine gestrichene Funktion.
+ *
+ * @param {Element} actions
+ * @returns {{trigger: Element, panel: Element}|null}
+ */
+export function dockFoldMenu(actions) {
+  const trigger = actions?.querySelector?.(':scope > .page-tools-btn[popovertarget]');
+  if (!trigger) return null;
+  const id = trigger.getAttribute('popovertarget');
+  const panel = [...actions.children].find((el) => el.id === id) ?? document.getElementById(id);
+  return panel ? { trigger, panel } : null;
+}
+
+/**
+ * Was angedockt falten darf: jedes sichtbare Kind der Aktionen, das ein Knopf
+ * ist oder Knoepfe traegt (Segment, Filter), ausser dem Menue selbst und der
+ * Suche. `data-dock-keep` nimmt eine Kontrolle heraus, die stehen bleiben muss.
+ *
+ * @param {Element} actions
+ * @returns {Element[]}
+ */
+export function dockFoldables(actions) {
+  const menu = dockFoldMenu(actions);
+  return [...(actions?.children ?? [])].filter((el) => el !== menu?.trigger
+    && el !== menu?.panel
+    && !el.matches('.popover-menu, .page-search, [data-dock-keep]')
+    && el.getClientRects().length > 0
+    && (el.matches('button') || Boolean(el.querySelector('button'))));
+}
+
+function dockFoldLabel(btn) {
+  return (btn.getAttribute('aria-label') || btn.getAttribute('title') || btn.textContent || '')
+    .replace(/\s+/g, ' ').trim();
+}
+
+function clearDockFoldItems(panel) {
+  panel.querySelectorAll(':scope > .page-toolbar__fold-item').forEach((el) => el.remove());
+}
+
+/**
+ * Baut die Stellvertreter der gefalteten Kontrollen oben ins Menue. Ein
+ * Eintrag KLICKT das Original - kein zweiter Weg zur selben Aktion, der
+ * auseinanderlaufen koennte. Ein Segment (Knoepfe mit `aria-pressed`, Radio,
+ * Tab) wird eine Einfachauswahl (`menuitemradio`), wie die Ansichtswahl im
+ * Kalender-Werkzeugmenue.
+ *
+ * @param {Element} panel
+ * @param {Element[]} controls
+ */
+function fillDockFoldItems(panel, controls) {
+  const items = [];
+  for (const control of controls) {
+    const single = control.matches('button');
+    const buttons = single ? [control] : [...control.querySelectorAll('button')];
+    const choice = !single && buttons.some((b) => b.hasAttribute('aria-pressed')
+      || ['radio', 'tab', 'menuitemradio'].includes(b.getAttribute('role')));
+    for (const btn of buttons) {
+      if (btn.disabled || !dockFoldLabel(btn)) continue;
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'popover-menu__item page-toolbar__fold-item';
+      const on = ['aria-pressed', 'aria-checked', 'aria-selected'].some((a) => btn.getAttribute(a) === 'true');
+      item.setAttribute('role', choice ? 'menuitemradio' : 'menuitem');
+      if (choice) item.setAttribute('aria-checked', String(on));
+      const glyph = btn.querySelector('svg')?.cloneNode(true);
+      if (glyph) {
+        glyph.setAttribute('class', 'icon-md');
+        glyph.setAttribute('aria-hidden', 'true');
+        item.append(glyph);
+      }
+      const label = document.createElement('span');
+      label.textContent = dockFoldLabel(btn);
+      item.append(label);
+      const check = choice && on && window.lucide?.icons?.Check
+        ? window.lucide.createElement(window.lucide.icons.Check) : null;
+      if (check) {
+        check.setAttribute('class', 'icon-md popover-menu__item-trail popover-menu__item-check');
+        check.setAttribute('aria-hidden', 'true');
+        item.append(check);
+      }
+      item.addEventListener('click', () => btn.click());
+      items.push(item);
+    }
+  }
+  if (!items.length) return;
+  const sep = document.createElement('div');
+  sep.className = 'popover-menu__separator page-toolbar__fold-item';
+  sep.setAttribute('role', 'separator');
+  panel.prepend(...items, sep);
 }
 
 /**

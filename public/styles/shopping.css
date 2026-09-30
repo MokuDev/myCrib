@@ -470,16 +470,14 @@
   width: var(--target-base);
   height: var(--target-base);
   border-radius: var(--radius-full);
-  /* DIE EINE STIMME (Critique 2026-08-13). Hier stand der Modulton, begründet
-   * mit „wie FAB und Fokus-Ringe daneben (Audit F-05)" - und beide tragen ihn
-   * seit v2.2.0 nicht mehr, weil die Eine-Stimme-Regel ihn zurückgenommen hat.
-   * Die Ausnahme blieb stehen, ihr Anlass war drei Versionen weg. Genau die
-   * Form von Drift, gegen die HIG-Session 27 den Satz aufgeschrieben hat: eine
-   * Ausnahme braucht ein Verfallsdatum an BEIDEN Enden, dem Anlass und dem
-   * Verstoß. Der Guard sah sie nicht, weil er das Chrome aus Selektorformen
-   * ableitet und dieser Knopf keine davon trägt. */
-  background-color: var(--color-accent);
-  color: var(--color-ink-on-vivid);
+  /* EIN PLUS, UND ES GEHOERT DER PILLE (Re-Critique 2026-09-28, A4 P2-4).
+   * Hier stand ein gefuellter Kreis in der Stimme mit "+" - am Zeiger direkt
+   * unter der angedockten Kopf-Pille "+ Artikel", die dasselbe tut (sie
+   * fokussiert dieses Feld). Zwei violette Plus fuer eine Absicht. Der
+   * Absender ist jetzt die ruhige Return-Glyphe wie in Erinnerungen: wer
+   * tippt, drueckt Enter; der Knopf bleibt fuer Maus und Touch da. */
+  background-color: transparent;
+  color: var(--color-text-secondary);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -490,7 +488,7 @@
   min-height: var(--target-lg);
 }
 
-.quick-add__btn:hover { background-color: var(--color-accent-hover); }
+.quick-add__btn:hover { background-color: var(--color-surface-2); color: var(--color-text-primary); }
 
 /* Autocomplete-Dropdown */
 .autocomplete-dropdown {
@@ -612,6 +610,96 @@
   gap: var(--space-1);
 }
 
+/* ZWEI SPALTEN AM DESKTOP (Re-Critique 2026-09-27, A4 P1 / R10 L4).
+ *
+ * Gemessen bei 1440x900: die Liste stand auf dem Lesemass 252-972, rechts
+ * davon 436px leere Buehne, und 23 Artikel brauchten 1576px Scrollhoehe - im
+ * Tab, den man am Desktop fuer den Wocheneinkauf offen hat. Ab einer
+ * Einkaufsflaeche von 60rem (1280er-Laptop mit Seitenleiste: 1060px; ein
+ * 1200er-Fenster: 980px) stehen die Kategorien deshalb in zwei Spalten, und
+ * die Liste endet an derselben Kante wie Essensplan und Rezepte - die
+ * Kuechen-Tabs teilen eine Fluchtlinie (252 bis 1408 bei 1440).
+ *
+ * DICHT GEPACKT OHNE NATIVES MASONRY (Re-Critique 2026-09-27, R11 H5). Bis R11
+ * war die Basis ein Grid mit zwei Spalten, Masonry nur hinter `@supports`.
+ * Chrome und Firefox kennen beides nicht: eine kurze Kategorie endete dort mit
+ * Luft unter sich, weil ihre Zeile so hoch war wie die Nachbarin (gemessen bei
+ * 1440x900: 208px unter einer kurzen Kategorie). Jetzt ist die Basis Multicol - dieselbe
+ * Rezeptur wie im Leitfaden fuer Masonry-Ersatz: `columns` auf einer Huelle
+ * ohne feste Hoehe (`.items-lanes`, shopping.js), `break-inside: avoid` je
+ * Kategorie. Natives Masonry bleibt der Fortschritt hinter `@supports`.
+ *
+ * WAS MULTICOL KOSTET, KOSTET MASONRY AUCH: klappt eine Kategorie zu, kann die
+ * naechste in die andere Spalte wandern - Masonry legt ebenso jede Gruppe in
+ * die gerade kuerzere Bahn. Die Lesefolge folgt der sichtbaren Spalte (erst
+ * links hinab, dann rechts), die Tastatur mit ihr, weil das DOM dieselbe
+ * Reihenfolge hat.
+ *
+ * DIE ABFRAGE MISST DIE SEITE, NICHT DEN VIEWPORT - dieselbe Regel wie der
+ * Liste-+-Detail-Baustein (layout.css, module-surface): neben der
+ * ausgeklappten Seitenleiste ist ein 1200er-Fenster 980px breit. */
+.shopping-page {
+  container: shopping-surface / inline-size;
+}
+
+/* Schmal traegt die Huelle nichts: die Gruppen stehen wie bisher direkt im
+ * Raster des Scrollers und erben dessen Abstand. */
+.items-lanes {
+  display: contents;
+}
+
+@container shopping-surface (min-width: 60rem) {
+  /* Die Kategorie kappt weiter ueber `--page-measure` (list-row.css) - hier
+   * ist das Mass die Spalte selbst, wie im Liste-+-Detail-Baustein. */
+  .shopping-page .items-list {
+    --page-measure: 100%;
+  }
+
+  .shopping-page .items-lanes {
+    display: block;
+    columns: 2;
+    column-gap: var(--space-5);
+  }
+
+  .shopping-page .items-lanes > .list-group {
+    break-inside: avoid;
+    margin-block-end: var(--space-3);
+  }
+
+  /* Die Eingabezeile endet mit der ersten Spalte statt mitten in der zweiten. */
+  .shopping-page .quick-add {
+    max-width: calc((100% - var(--space-5)) / 2);
+  }
+
+  @supports (grid-template-rows: masonry) {
+    .shopping-page .items-lanes {
+      display: grid;
+      columns: auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      grid-template-rows: masonry;
+      gap: var(--space-3) var(--space-5);
+      align-items: start;
+    }
+
+    .shopping-page .items-lanes > .list-group {
+      margin-block-end: 0;
+    }
+  }
+
+  @supports (display: grid-lanes) {
+    .shopping-page .items-lanes {
+      display: grid-lanes;
+      columns: auto;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: var(--space-3) var(--space-5);
+    }
+
+    .shopping-page .items-lanes > .list-group {
+      margin-block-end: 0;
+    }
+  }
+}
+
 /* --------------------------------------------------------
  * Einkaufsartikel
  * -------------------------------------------------------- */
@@ -638,22 +726,14 @@
   padding-block: 0;
 }
 
-/* Platz für den Swipe-Hinweis-Pfeil (.swipe-row::after in layout.css: 12px
- * breit, 8px von der rechten Kante, opacity 0.3).
- *
- * Er lag vorher unter dem letzten Zeilen-Button und war damit unsichtbar - bei
- * 4px Zeilenpolster reichte der Stift bis 296px, der Pfeil sitzt bei 280..292.
- * Mit dem geteilten 12px-Polster endet der Stift bei 288px und der Pfeil kam
- * darunter hervor: zwei Glyphen nebeneinander, von denen einer keine Aktion ist.
- *
- * Die Reserve steht hier statt in layout.css, weil `.swipe-row` auch von
- * Aufgaben benutzt wird und deren Zeile eine andere Bedienzone hat. Nur auf
- * Touch: auf Desktop blendet layout.css den Pfeil ohnehin aus (ab 1024px), und
- * dort löscht man aus der Zeile statt per Swipe. */
-@media (hover: none) {
-  .shopping-item {
-    padding-inline-end: calc(var(--space-2) + var(--space-3) + var(--space-2));
-  }
+/* KEIN WISCH-CHEVRON IN DER EINKAUFSLISTE (Re-Critique 2026-09-28, A4 P2-5).
+ * Die geteilte Zeile (.swipe-row::after, layout.css) malt ein ">" an den
+ * Rand - in iOS heisst das "tippe fuer Detail", hier hiess es "wische", und
+ * Tippen hakt ab. Oma Ingrid tippte auf ein Versprechen, das es nicht gibt.
+ * Die Geste lehrt der vorhandene Nudge (`swipe-row--hint`, einmal je Liste).
+ * Mit dem Pfeil geht auch die Polster-Reserve, die hier fuer ihn stand. */
+.swipe-row:has(> .shopping-item)::after {
+  content: none;
 }
 
 /* ABGEHAKT TRITT ÜBER DIE TEXTFARBEN ZURÜCK, NICHT ÜBER DIE DECKUNG DER ZEILE.

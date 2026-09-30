@@ -272,3 +272,146 @@ test('Verdrahtung: das Widget bekommt seine Groesse, und das Ziel kommt aus EINE
     assert.ok(/from '\/utils\/reward-goal\.js'/.test(text), `${name} rechnet das naechste Ziel selbst statt ueber utils/reward-goal.js`);
   }
 });
+
+// --------------------------------------------------------
+// Die Seite: Kopf und Inhalt teilen je Reiter eine Kante
+// (Re-Critique 2026-09-27, A3 P2-5 / R10 L7)
+//
+// Gemessen bei 1440x900: Punktestand bis 972, sein Kopfknopf bis 1408; das
+// Ledger 1156px breit mit dem Punktwert 1100px vom Grund; im Katalog endete
+// die Kopfpille bei 972, das Raster bei 1408. Jetzt: Zeilenlisten auf dem
+// Lesemass, das Raster breit, und die Kopfpille an der Kante ihres Inhalts.
+// --------------------------------------------------------
+
+const { __test: rewardsPage } = await import('../public/pages/rewards.js');
+
+/** Ein Inhaltsknoten, der das Markup einsammelt - mehr fassen die Renderer nicht an. */
+function markupEl() {
+  return {
+    html: '',
+    replaceChildren() { this.html = ''; },
+    insertAdjacentHTML(_pos, html) { this.html += html; },
+    querySelector() { return null; },
+    querySelectorAll() { return []; },
+  };
+}
+
+test('Belohnungen: nur der Katalog ist ein breiter Abschnitt, Uebersicht und Verlauf stehen auf dem Lesemass', () => {
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, catalog: s.catalog, ledger: s.ledger, redemptions: s.redemptions };
+  try {
+    s.user = { id: 1, role: 'admin' };
+    s.overview = { me: 1, balances: [{ id: 2, display_name: 'Emma', balance: 30 }] };
+    s.catalog = [{ id: 7, name: 'Kinoabend', cost: 100, is_active: 1 }];
+    s.ledger = [{ id: 1, type: 'earn', delta: 5, reason: 'Zimmer', user_name: 'Emma', created_at: '2026-09-20' }];
+    s.redemptions = [];
+    const wide = /class="rw-section rw-section--wide"/g;
+    for (const [name, render] of [['renderOverview', rewardsPage.renderOverview], ['renderLedger', rewardsPage.renderLedger]]) {
+      const el = markupEl();
+      render(el);
+      assert.match(el.html, /class="rw-section"/, `${name}: der Abschnitt steht da`);
+      assert.doesNotMatch(el.html, wide, `${name}: eine Zeilenliste ist kein breiter Abschnitt`);
+    }
+    const katalog = markupEl();
+    rewardsPage.renderCatalog(katalog);
+    assert.equal((katalog.html.match(wide) || []).length, 1, 'das Katalograster ist der eine breite Abschnitt');
+  } finally {
+    Object.assign(s, vorher);
+  }
+});
+
+test('Belohnungen: der Kopf gibt im Katalog der Pille die volle Kante zurueck, sonst nicht', () => {
+  assert.equal(typeof rewardsPage.syncToolbarMeasure, 'function', 'syncToolbarMeasure fehlt im __test-Export');
+  const classes = new Set(['page-toolbar', 'page-toolbar--narrow', 'rewards-toolbar']);
+  const toolbar = { classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) } };
+  const container = { querySelector: (sel) => (sel === '.rewards-toolbar' ? toolbar : null) };
+  const s = rewardsPage.state;
+  const tabVorher = s.tab;
+  try {
+    for (const [tab, breit] of [['catalog', true], ['ledger', false], ['overview', false], ['catalog', true]]) {
+      s.tab = tab;
+      rewardsPage.syncToolbarMeasure(container);
+      assert.equal(classes.has('rewards-toolbar--wide'), breit, `${tab}: --wide ${breit ? 'gesetzt' : 'weg'}`);
+      assert.ok(classes.has('page-toolbar--narrow'),
+        `${tab}: --narrow bleibt - ohne passte die gekappte Reiterleiste in die Titelzeile (52px Sprung, gemessen)`);
+    }
+  } finally {
+    s.tab = tabVorher;
+  }
+  const css = readFileSync(new URL('../public/styles/rewards.css', import.meta.url), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, '');
+  assert.match(css, /\.rewards-page \.rw-section:not\(\.rw-section--wide\)\s*\{[^}]*max-width:\s*var\(--page-measure/,
+    'jeder Abschnitt ausser dem Raster endet am Lesemass - samt Kopf');
+  assert.match(css, /\.rewards-toolbar--wide\s*\{[^}]*padding-inline-end:\s*var\(--page-inline-pad\)/);
+  assert.match(css, /\.rewards-toolbar--wide\s*\{[^}]*--page-measure:\s*100%/,
+    'der breite Kopf erklaert sein Mass als Spalte - sonst behauptet er das Lesemass der Seite, an dem er nicht endet (Sonde 19)');
+  assert.match(css, /\.rewards-toolbar--wide::after\s*\{[^}]*content:\s*none/, 'kein Rest-Slot, der die Pille zurueckschoebe');
+  assert.match(css, /\.rewards-toolbar--wide > \.rewards-tabs\s*\{[^}]*max-width:\s*none/, 'die Reiterleiste bricht weiter um');
+  const page = readFileSync(new URL('../public/pages/rewards.js', import.meta.url), 'utf8');
+  assert.match(page, /async function renderCurrentTab\(container\) \{[\s\S]{0,120}syncToolbarMeasure\(container\);/,
+    'jeder Reiterwechsel fuehrt den Kopf mit');
+});
+
+test('Belohnungen: der Einrichtungsschritt „Praemien" wechselt wirklich in den Katalog', () => {
+  // Er suchte `[data-rw-tab="catalog"]` - ein Attribut, das es nie gab; die
+  // Reiter tragen `data-tab-id` (tabButton). Der Klick lief ins Leere.
+  let gefragt = null;
+  let geklickt = false;
+  const vorher = globalThis.document;
+  globalThis.document = { querySelector: (sel) => { gefragt = sel; return /data-tab-id="catalog"/.test(sel) ? { click() { geklickt = true; } } : null; } };
+  try {
+    rewardsPage.handleSetupStep('catalog');
+  } finally {
+    globalThis.document = vorher;
+  }
+  assert.ok(geklickt, `gesucht wurde ${gefragt} - der Reiter heisst data-tab-id="catalog"`);
+});
+
+test('Belohnungen: Verlaufs-Chips sind Kanon-Filterchips mit aria-pressed (Re-Critique 2026-09-28 P2-6)', () => {
+  // `.rw-chip` war ein eigener Dialekt: 31px hoch, kein Zustand fuer den
+  // Screenreader (aria-pressed fehlte). Kanon ist `.filter-chip` (40/48px,
+  // Tonrezept) plus aria-pressed.
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, ledger: s.ledger, ledgerFilter: s.ledgerFilter };
+  try {
+    s.user = { id: 1, role: 'admin' };
+    s.overview = { me: 1, balances: [{ id: 2, display_name: 'Emma', balance: 30 }, { id: 3, display_name: 'Leo', balance: 10 }] };
+    s.ledger = [{ id: 1, type: 'earn', delta: 5, reason: 'Zimmer', user_name: 'Leo', created_at: '2026-09-20' }];
+    s.ledgerFilter = 3;
+    const el = markupEl();
+    rewardsPage.renderLedger(el);
+    const chips = [...el.html.matchAll(/<button[^>]*data-filter="([^"]*)"[^>]*>/g)];
+    assert.equal(chips.length, 3, 'Alle + zwei Personen');
+    for (const [tag, id] of chips) {
+      assert.match(tag, /class="[^"]*\bfilter-chip\b/, `Chip ${id}: .filter-chip`);
+      assert.doesNotMatch(tag, /rw-chip/, `Chip ${id}: kein eigener Dialekt`);
+      const pressed = tag.match(/aria-pressed="(true|false)"/);
+      assert.ok(pressed, `Chip ${id}: aria-pressed fehlt`);
+      assert.equal(pressed[1], String(id === '3'), `Chip ${id}: aria-pressed folgt dem Filter`);
+      assert.equal(/filter-chip--active/.test(tag), id === '3', `Chip ${id}: Aktivklasse folgt dem Filter`);
+    }
+  } finally {
+    Object.assign(s, vorher);
+  }
+  const css = readFileSync(new URL('../public/styles/rewards.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css.replace(/\/\*[\s\S]*?\*\//g, ''), /\.rw-chip\b/, 'rewards.css baut keinen eigenen Chip mehr');
+});
+
+// Re-Critique 2026-09-28 (P5, A3 P2-5): mobil fiel die Punktestandzeile auf
+// eine Spalte mit voller Einloesen-Kapsel - eine Person pro Bildschirm (Leo
+// 455-623, ca. 180px). Jetzt wie die Apple-Health-Zusammenfassung: Person und
+// Punkte links, Einloesen als kompakte Kapsel rechts, die duenne Leiste
+// darunter ueber die volle Zeile. Die offene Anfrage stapelt ihren Avatar
+// nicht mehr allein ueber dem Titel.
+test('Belohnungen mobil: Punktestand als Zeile mit Trailing-Kapsel, Anfrage mit Avatar in der Zeile', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const rules = [...eachRule(readFileSync(new URL('../public/styles/rewards.css', import.meta.url), 'utf8'))];
+  const mobil = (sel) => rules.filter((r) => r.selector.trim() === sel && r.at.some((a) => /max-width:\s*639px/.test(a)))
+    .map((r) => r.body).join(';');
+  assert.match(mobil('.rw-standing'), /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/, 'Person | Kapsel');
+  assert.match(mobil('.rw-standing'), /grid-template-areas:\s*"id actions"\s*"progress progress"/);
+  assert.doesNotMatch(mobil('.rw-standing__actions .btn'), /flex:\s*1 1 auto/, 'keine volle Kapselbreite mehr');
+  assert.match(mobil('.rw-standing__progress'), /grid-area:\s*progress/);
+  assert.match(mobil('.rw-pending'), /grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/, 'Avatar und Titel in einer Zeile');
+  assert.match(mobil('.rw-pending__actions'), /grid-column:\s*2/, 'die Knoepfe stehen unter dem Titel, nicht unter dem Avatar');
+});

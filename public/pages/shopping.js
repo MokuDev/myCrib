@@ -7,6 +7,7 @@
 import { api } from '/api.js';
 import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
+import { flipSnapshot, flipPlay } from '/utils/flip.js';
 import { t } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { promptModal, openModal, closeModal, confirmModal, reportFieldError, refocusAfterRender } from '/components/modal.js';
@@ -911,10 +912,11 @@ async function openSendListDialog(container) {
         try {
           await api.post(`/shopping/${listId}/send`, { userId });
           closeModal({ force: true });
-          // BEWUSST KEIN success-Toast. Die Erfolgsmeldungen der App sind nach
-          // 50 Bestaetigungen dauerhaft stummgeschaltet (`TOAST_SUCCESS_MAX` in
-          // router.js) - richtig fuer Handlungen, deren Ergebnis auf dem
-          // Bildschirm steht und die man taeglich wiederholt. Ein Mailversand
+          // BEWUSST KEIN success-Toast. Die Erfolgsmeldungen der App zeigen
+          // nach 50 Bestaetigungen keine Flaeche mehr (`TOAST_SUCCESS_MAX` in
+          // utils/toast-show.js; angesagt werden sie weiter) - richtig fuer
+          // Handlungen, deren Ergebnis auf dem Bildschirm steht und die man
+          // taeglich wiederholt. Ein Mailversand
           // ist das Gegenteil: er passiert selten, laesst sich nicht
           // zuruecknehmen, und sein Ergebnis liegt in einem fremden Postfach.
           // Wer hier nichts sieht, weiss nicht, ob die Liste unterwegs ist.
@@ -1084,8 +1086,10 @@ function renderListContent(container) {
         <select class="quick-add__cat" id="item-cat-select" aria-label="${t('shopping.categoryLabel')}">
           ${state.categories.map((c) => `<option value="${esc(c.name)}" ${c.name === DEFAULT_CATEGORY_NAME ? 'selected' : ''}>${esc(categoryLabel(c.name))}</option>`).join('')}
         </select>
+        <!-- Return-Glyphe statt eines zweiten "+" (Re-Critique 2026-09-28,
+             A4 P2-4): das Plus gehoert der Kopf-Pille bzw. dem FAB. -->
         <button class="quick-add__btn" type="submit" aria-label="${t('shopping.addItemLabel')}">
-          <i data-lucide="plus" class="icon-lg" aria-hidden="true"></i>
+          <i data-lucide="corner-down-left" class="icon-lg" aria-hidden="true"></i>
         </button>
       </form>
     </div>`}
@@ -1175,7 +1179,11 @@ function mountItems(listEl, container) {
   }
 
   listEl.replaceChildren();
-  listEl.insertAdjacentHTML('beforeend', renderItems());
+  // EINE HUELLE UM DIE GRUPPEN (R11 H5): sie ist die Flaeche, die am Desktop
+  // in zwei Spalten packt (shopping.css, `.items-lanes`). Der Scroller selbst
+  // kann das nicht - mit begrenzter Hoehe liefe Multicol seitlich ueber.
+  // Mobil ist sie `display: contents` und aendert nichts.
+  listEl.insertAdjacentHTML('beforeend', `<div class="items-lanes">${renderItems()}</div>`);
 }
 
 function renderItems() {
@@ -2156,7 +2164,13 @@ function openItemDetails(itemId, container) {
           <textarea class="form-input" id="item-details-notes" rows="4"
                     placeholder="${t('shopping.notesPlaceholder')}">${esc(item.notes || '')}</textarea>
         </div>
+        ${/* LOESCHEN OHNE WISCHGESTE (A4 P1-1, WCAG 2.5.1). Am Touchgeraet
+            * blendet shopping.css den Papierkorb der Zeile aus; einziger Weg
+            * war das Wischen, das VoiceOver abfaengt. Jetzt links im Fuss wie
+            * bei Mahlzeit und Rezept, und derselbe Weg wie Wisch und Knopf
+            * (`deleteItemUndoable`: sofort weg, fuenf Sekunden Rueckgaengig). */ ''}
         <div class="modal-panel__footer modal-panel__footer--plain">
+          <button type="button" class="btn btn--danger-outline" id="item-details-delete" data-delete-name="${esc(item.name)}" style="margin-inline-end:auto"><i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${esc(t('common.delete'))}</button>
           <button type="button" class="btn btn--secondary" id="item-details-cancel">${t('common.cancel')}</button>
           <button type="submit" class="btn btn--primary">${t('common.save')}</button>
         </div>
@@ -2171,6 +2185,14 @@ function openItemDetails(itemId, container) {
       const preview = panel.querySelector('#item-details-link');
 
       panel.querySelector('#item-details-cancel')?.addEventListener('click', () => closeModal());
+      panel.querySelector('#item-details-delete')?.addEventListener('click', () => {
+        // Der Dialog kann vor einem Rechtewechsel aufgegangen sein.
+        if (readOnly()) return;
+        // force: getippte, ungespeicherte Aenderungen gehen mit dem Artikel -
+        // eine Rueckfrage "Verwerfen?" vor dem Loeschen fragte das Falsche.
+        closeModal({ force: true });
+        deleteItemUndoable(item.id, container);
+      });
 
       urlEl?.addEventListener('input', () => {
         preview.replaceChildren();
@@ -2272,9 +2294,15 @@ function openItemDetails(itemId, container) {
 function updateItemsList(container) {
   const listEl = container.querySelector('#items-list');
   if (listEl) {
+    // FLIP (Re-Critique 2026-09-28, A4 P2-8): ein abgehakter Artikel sprang
+    // beim Neubau ans Gruppenende. Die Lage wird VOR dem Neubau gemessen und
+    // jede bewegte Zeile gleitet danach von dort an ihre neue Stelle
+    // (utils/flip.js; reduzierte Bewegung springt wie bisher).
+    const before = flipSnapshot(listEl, '.swipe-row[data-swipe-id]', 'data-swipe-id');
     // mountItems() verdrahtet den CTA des Leerzustands selbst; der frühere
     // nachgelagerte #empty-cta-shopping-Listener entfällt damit.
     mountItems(listEl, container);
+    flipPlay(listEl, '.swipe-row[data-swipe-id]', 'data-swipe-id', before);
     if (window.lucide) window.lucide.createIcons({ el: listEl });
     stagger(listEl.querySelectorAll('.shopping-item'), { host: listEl });
     // Regel 3 in utils/module-access.js: Wischen und Ziehen haben kein Markup,

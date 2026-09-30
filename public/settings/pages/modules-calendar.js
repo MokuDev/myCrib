@@ -2,7 +2,7 @@ import { api } from '/api.js';
 import { formatDate, formatTime, t } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { weekStartIndex, weekdayOrder } from '/utils/date.js';
-import { toggleRowHtml } from '/settings/components.js';
+import { bindInstantSwitch, toggleRowHtml } from '/settings/components.js';
 import { wireTablist } from '/utils/tablist.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { getPreferences, savePreferences } from '/settings/preferences-cache.js';
@@ -49,7 +49,8 @@ function durationOptionLabel(minutes) {
 // `calendar_default_reminders` und `calendar_default_assign_me` schreiben per
 // `cfgUserSet`, hinter diesem adminOnly-Blatt kam kein Mitglied an sie heran
 // (Critique 2026-07-27). Hier bleibt, was haushaltweit gilt.
-const PERSONAL_CALENDAR_PATH = '/settings/personal/calendar';
+// Die Termin-Vorgaben stehen seit R10 im selben Blatt, unter "Fuer mich".
+const PERSONAL_CALENDAR_PATH = '/settings/modules/calendar?section=personal-calendar';
 // #965: ein Verweis auf externe ICS-Feeds (fuer Laender ohne eigene Liste)
 // gehoert bewusst NICHT hierher - dieses Blatt haelt sich per `test-frontend-
 // audit.js` ausdruecklich von jeder Erwaehnung des per-Nutzer-Abo-Blatts frei
@@ -141,7 +142,7 @@ function renderPage(container, preferences) {
               control: 'switch',
               label: t('settings.holidayPublicLabel'),
               checked: !!preferences.holiday_show_public,
-              attrs: { id: 'holiday-show-public' },
+              attrs: { id: 'holiday-show-public', 'data-instant-save': true },
             })}
           </div>
           <div class="form-group" id="holiday-public-color-group"${preferences.holiday_show_public ? '' : ' hidden'}>
@@ -154,7 +155,7 @@ function renderPage(container, preferences) {
               control: 'switch',
               label: t('settings.holidaySchoolLabel'),
               checked: !!preferences.holiday_show_school,
-              attrs: { id: 'holiday-show-school' },
+              attrs: { id: 'holiday-show-school', 'data-instant-save': true },
             })}
           </div>
           <p class="form-hint" id="holiday-school-unavailable-hint" hidden>
@@ -494,6 +495,25 @@ function holidayPreferenceData(container, discoveryState) {
   };
 }
 
+/**
+ * Feiertage/Schulferien anzeigen: jeder Schalter speichert nur seinen eigenen
+ * Wert. Exportiert fuer test:settings-navigation (als Programm gemessen).
+ */
+export function bindHolidayLayerSwitches({
+  showPublic, showSchool, publicColorGroup, schoolColorGroup, save = savePreferences,
+}) {
+  bindInstantSwitch(showPublic, {
+    save: (on) => save({ holiday_show_public: on }),
+    savedMessage: t('settings.holidaySaved'),
+    onRevert: (on) => { publicColorGroup.hidden = !on; },
+  });
+  bindInstantSwitch(showSchool, {
+    save: (on) => save({ holiday_show_school: on }),
+    savedMessage: t('settings.holidaySaved'),
+    onRevert: (on) => { schoolColorGroup.hidden = !on; },
+  });
+}
+
 function bindWeekStart(container, preferences) {
   const toggle = container.querySelector('#week-start-toggle');
   const preview = container.querySelector('#week-start-preview');
@@ -689,6 +709,11 @@ async function bindEvents(container, preferences) {
   showSchool.addEventListener('change', () => {
     schoolColorGroup.hidden = !showSchool.checked;
   });
+  // DIE EBENEN SCHALTEN SOFORT (R15 A7 P1-1): ein Schalter verspricht
+  // sofortige Wirkung wie die Termindauer darueber; vorher warteten sie auf
+  // "Speichern" und gingen beim Blattwechsel still verloren. Land, Region,
+  // Gruppe und Farben bleiben im Formular - sie haengen aneinander.
+  bindHolidayLayerSwitches({ showPublic, showSchool, publicColorGroup, schoolColorGroup });
 
   form.addEventListener('submit', async (event) => {
     event.preventDefault();

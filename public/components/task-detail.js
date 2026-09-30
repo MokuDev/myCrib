@@ -12,7 +12,7 @@
  *   openTaskDetail({ task, reminder, users, currentUserId, isAdmin,
  *                    categories, container, onChanged, edit, pane, onClose })
  *   deleteTaskWithUndo(id, { container, onChanged })
- *   addSubtask(parentId, { onChanged })
+ *   addSubtask(parentId, title, { onChanged })
  *
  * WARUM DIESE DATEI EXISTIERT (#918). Die Ansicht lag in `pages/tasks.js` und
  * war damit nur von dort zu öffnen. Jede andere Stelle, die eine Aufgabe zeigt -
@@ -32,7 +32,7 @@
 import { api } from '/api.js';
 import { t, formatDate, formatTime } from '/i18n.js';
 import { openDetailView, closeDetailView, visibilityRow, assignedRow } from '/components/detail-view.js';
-import { closeModal, promptModal, btnLoading, refocusAfterRender } from '/components/modal.js';
+import { closeModal, btnLoading, refocusAfterRender } from '/components/modal.js';
 import { recurrenceRow } from '/rrule-ui.js';
 import { scheduleUndoableDelete } from '/utils/ux.js';
 import { rowActionEl } from '/utils/row-action.js';
@@ -43,6 +43,7 @@ import { refresh as refreshReminders } from '/reminders.js';
 import { parseRemindAtAsUtc } from '/utils/reminder-offset.js';
 import { isNavModuleReadOnly } from '/permissions.js';
 import { pathAccess } from '/utils/module-access.js';
+import { installPopoverMenus } from '/utils/popover-menu.js';
 import { zonedDateKey } from '/utils/timezone.js';
 import { historyDayLabel } from '/utils/day-label.js';
 import {
@@ -124,21 +125,23 @@ export async function deleteTaskWithUndo(id, { container = null, onChanged = () 
 }
 
 /**
- * Teilaufgabe anlegen - der eine Weg für Liste und Leseansicht.
+ * Teilaufgabe anlegen - der eine Schreibweg für die Eingabezeile der
+ * Leseansicht (`subtaskComposer`).
  *
- * Gibt die angelegte Teilaufgabe zurück (oder null bei Abbruch und Fehler):
- * die Leseansicht hängt sie sich damit selbst an, statt sich zum Nachladen
- * schließen zu müssen (#925).
+ * Gibt die angelegte Teilaufgabe zurück (oder null bei leerem Titel und
+ * Fehler): die Leseansicht hängt sie sich damit selbst an, statt sich zum
+ * Nachladen schließen zu müssen (#925). Bis zur Re-Critique 2026-09-28 fragte
+ * diese Funktion den Titel selbst per `promptModal` ab - ein Dialog je
+ * Teilschritt, fünf Punkte kosteten fünfzehn Gesten (A3 P1-1).
  */
-export async function addSubtask(parentId, { onChanged = () => {} } = {}) {
-  const title = await promptModal(t('tasks.subtaskPrompt'));
-  if (!title) return null;
+export async function addSubtask(parentId, title, { onChanged = () => {} } = {}) {
+  const clean = String(title ?? '').trim();
+  if (!clean) return null;
   try {
-    const res = await api.post('/tasks', { title, parent_task_id: parentId });
+    const res = await api.post('/tasks', { title: clean, parent_task_id: parentId });
     // Wie beim Abhaken daneben: die Umgebung trägt den Fortschrittsbalken der
     // Elternkarte, aber sie muss nichts davon zeigen.
     await onChanged();
-    refocusAfterRender();
     return res.data ?? null;
   } catch (err) {
     window.yuvomi.showToast(err.message, 'danger');
@@ -313,37 +316,116 @@ function subtaskListNode(task, ctx) {
   (task.subtasks ?? []).forEach(appendRow);
 
   if (mayAdd) {
-    const add = document.createElement('button');
-    add.type = 'button';
-    add.className = 'detail-subtask detail-subtask--add';
-    const icon = document.createElement('i');
-    icon.dataset.lucide = 'plus';
-    icon.className = 'icon-sm';
-    icon.setAttribute('aria-hidden', 'true');
-    const label = document.createElement('span');
-    label.textContent = t('tasks.subtaskAdd');
-    add.replaceChildren(icon, label);
-    if (window.lucide) window.lucide.createIcons({ el: add });
-
-    add.addEventListener('click', async () => {
-      add.disabled = true;
-      try {
-        // Derselbe Weg wie in der Liste, nicht ein zweiter: addSubtask stellt
-        // die Frage, legt an und meldet die Änderung an die Umgebung. Sie gibt
-        // die angelegte Teilaufgabe zurück - ohne die müsste diese Ansicht sich
-        // schließen, um den neuen Schritt zu zeigen.
-        const created = await addSubtask(task.id, ctx);
-        if (!created) return;
+    // Derselbe Weg wie in der Liste, nicht ein zweiter: addSubtask legt an und
+    // meldet die Änderung an die Umgebung, die Zeile hängt sich die neue
+    // Teilaufgabe selbst an - ohne das müsste diese Ansicht sich schließen, um
+    // den neuen Schritt zu zeigen.
+    const composer = subtaskComposer(task, ctx, {
+      onCreated: (created) => {
         task.subtasks = [...(task.subtasks ?? []), created];
-        wrap.insertBefore(appendRow(created), add);
-      } finally {
-        add.disabled = false;
-      }
+        wrap.insertBefore(appendRow(created), composer.add);
+      },
     });
-
-    wrap.appendChild(add);
+    wrap.append(composer.add, composer.form);
+    // Aus der Liste gekommen („Teilaufgabe hinzufügen" an der Karte): das Feld
+    // steht offen, sobald die Ansicht im Dokument haengt.
+    // Nach dem Einhaengen und NACH dem Anfangsfokus des Blatts (detail-view.js
+    // setzt ihn synchron auf "Bearbeiten"), sonst naehme der ihn wieder weg.
+    if (ctx.composeSubtask) {
+      const tryOpen = (left) => {
+        if (composer.form.isConnected) composer.open();
+        else if (left > 0) setTimeout(() => tryOpen(left - 1), 50);
+      };
+      setTimeout(() => tryOpen(10), 0);
+    }
   }
   return wrap;
+}
+
+/**
+ * Die Eingabezeile „Teilaufgabe hinzufügen" an Ort und Stelle (A3 P1-1).
+ *
+ * Wie in Erinnerungen und Things: der Knopf wird zum Feld, Enter legt an und
+ * lässt den Fokus für die nächste Zeile stehen, Escape schließt und gibt den
+ * Fokus an den Knopf zurück. Enter auf leerem Feld schließt ebenfalls, ein
+ * leeres Feld schließt auch, wenn der Fokus es verlässt. Escape bleibt hier:
+ * das Blatt, in dem das Feld steht, schließt sonst mit (modal.js hört auf
+ * `document`).
+ *
+ * `onCreated(sub)` hängt die neue Zeile an; der Anlegeweg ist `addSubtask`.
+ */
+function subtaskComposer(task, ctx, { onCreated }) {
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'detail-subtask detail-subtask--add';
+  const icon = document.createElement('i');
+  icon.dataset.lucide = 'plus';
+  icon.className = 'icon-sm';
+  icon.setAttribute('aria-hidden', 'true');
+  const label = document.createElement('span');
+  label.textContent = t('tasks.subtaskAdd');
+  add.replaceChildren(icon, label);
+  if (window.lucide) window.lucide.createIcons({ el: add });
+
+  const form = document.createElement('form');
+  form.className = 'detail-subtask-compose';
+  form.hidden = true;
+  form.noValidate = true;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'form-input detail-subtask-compose__input';
+  input.maxLength = 500;
+  input.autocomplete = 'off';
+  input.enterKeyHint = 'done';
+  input.placeholder = t('tasks.subtaskAdd');
+  input.setAttribute('aria-label', t('tasks.subtaskAddNamed', { title: task.title }));
+  form.appendChild(input);
+
+  let pending = false;
+  const open = () => {
+    add.hidden = true;
+    form.hidden = false;
+    input.focus();
+  };
+  const close = ({ refocus = true } = {}) => {
+    input.value = '';
+    form.hidden = true;
+    add.hidden = false;
+    if (refocus) add.focus();
+  };
+
+  add.addEventListener('click', open);
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (pending) return;
+    const title = input.value.trim();
+    if (!title) { close(); return; }
+    pending = true;
+    form.setAttribute('aria-busy', 'true');
+    try {
+      const created = await addSubtask(task.id, title, ctx);
+      if (!created) return;
+      onCreated(created);
+      // Nur leeren, was angelegt ist: ein Fehler laesst den Titel stehen.
+      if (input.value.trim() === title) input.value = '';
+    } finally {
+      pending = false;
+      form.removeAttribute('aria-busy');
+      if (!form.hidden) input.focus();
+    }
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  });
+  form.addEventListener('focusout', (e) => {
+    if (pending || form.contains(e.relatedTarget)) return;
+    if (!input.value.trim()) close({ refocus: false });
+  });
+
+  return { add, form, open };
 }
 
 /**
@@ -952,6 +1034,7 @@ async function toggleDescriptionCheck(task, box) {
  *   pane?: HTMLElement|null,
  *   onClose?: () => void,
  *   onStale?: () => void,
+ *   composeSubtask?: boolean,
  * }} options
  *
  * `pane` ist der Koerper der Detailspalte (Liste + Detail). Dort schliesst die
@@ -977,8 +1060,9 @@ export function openTaskDetail({
   pane = null,
   onClose = null,
   onStale = null,
+  composeSubtask = false,
 }) {
-  const ctx = { users, currentUserId, isAdmin, categories, container, onChanged, onStale, inPane: Boolean(pane) };
+  const ctx = { users, currentUserId, isAdmin, categories, container, onChanged, onStale, inPane: Boolean(pane), composeSubtask };
   const archived = isArchived(task);
   const statusActions = archived ? [] : (STATUS_ACTIONS[task.status] ?? []);
   // Gesperrte Aufgabe (#830): der Weiterschalt-Knopf bleibt, Loeschen, Ablegen
@@ -1008,6 +1092,11 @@ export function openTaskDetail({
   // Zustand, den er anzeigen koennte - was die Aufgabe IST, steht zwei Zeilen
   // darueber als "Status: offen". Ein grauer Knopf "Als erledigt markieren"
   // waere nur ein Versprechen, das der Server mit 403 einloest.
+  // Die Schliessfunktion DIESER Ansicht (Sheet oder Spalte). Die Fusszeile
+  // reicht sie nur an `onClick`; das Personenmenue daneben ist ein Popover,
+  // dessen Eintraege spaeter kommen - der Ausloeser merkt sie sich deshalb.
+  let viewClose = closeDetailView;
+  const doers = doerChoices(task, ctx, archived);
   if (!isNavModuleReadOnly('tasks')) {
     statusActions.forEach((step) => {
       actions.push({
@@ -1017,6 +1106,15 @@ export function openTaskDetail({
         icon: step.icon,
         onClick: ({ button, close }) => advanceTaskStatus(task, step.status, button, ctx, close),
       });
+      if (step.id === 'task-detail-finish' && doers.length) {
+        actions.push({
+          id: DOER_BUTTON_ID,
+          label: '',
+          variant: 'ghost',
+          icon: 'user-round-check',
+          onClick: ({ close }) => { viewClose = close; },
+        });
+      }
     });
   }
 
@@ -1030,6 +1128,14 @@ export function openTaskDetail({
       icon: archived ? 'archive-restore' : 'archive',
       onClick: ({ button, close }) => toggleTaskArchive(task, button, ctx, close),
     });
+  }
+
+  // MOBIL EINE REIHE (Re-Critique 2026-09-28, P8 / A3 P3-2): Starten und
+  // Archivieren treten auf dem Telefon in EIN Mehr-Menue (detail-view.css);
+  // am Desktop stehen sie weiter im Fuss, und dort gibt es den Knopf nicht.
+  const overflowIds = ['task-detail-start', 'task-detail-archive'];
+  if (actions.some((a) => overflowIds.includes(a.id))) {
+    actions.push({ id: MORE_BUTTON_ID, label: '', variant: 'ghost', icon: 'more-horizontal' });
   }
 
   openDetailView({
@@ -1051,6 +1157,142 @@ export function openTaskDetail({
       standalone: edit.standalone,
     } : undefined,
   });
+
+  if (doers.length) {
+    wireDetailDoerMenu(task, doers, ctx, (...args) => viewClose(...args), pane);
+  }
+  wireDetailMoreMenu(task, overflowIds, pane);
+}
+
+const MORE_BUTTON_ID = 'task-detail-more';
+
+/**
+ * Das Mehr-Menue des Detail-Fusses (mobil). Seine Eintraege LOESEN DIE ECHTEN
+ * KNOEPFE AUS, statt eigene Handler zu tragen: Starten und Archivieren bleiben
+ * (verborgen) im Fuss, damit statusActionButtons() sie weiter mitsperrt und
+ * btnLoading() seinen Knopf findet - ein Handler, eine Sperrlogik.
+ */
+function wireDetailMoreMenu(task, overflowIds, pane = null) {
+  const root = pane ?? document;
+  const button = root.querySelector?.(`#${MORE_BUTTON_ID}`);
+  if (!button) return;
+  const targets = overflowIds.map((id) => root.querySelector?.(`#${id}`)).filter(Boolean);
+  if (!targets.length) { button.remove(); return; }
+  const label = t('common.moreActionsNamed', { name: task.title });
+  const panelId = `task-detail-more-${task.id}`;
+  button.classList.add('btn--icon', 'popover-menu__trigger', 'task-detail__more');
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
+  button.setAttribute('aria-haspopup', 'menu');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('popovertarget', panelId);
+
+  const panel = document.createElement('div');
+  panel.className = 'popover-menu';
+  panel.id = panelId;
+  panel.setAttribute('popover', '');
+  panel.setAttribute('role', 'menu');
+  for (const target of targets) {
+    target.classList.add('task-detail__overflow');
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'popover-menu__item';
+    item.setAttribute('role', 'menuitem');
+    const icon = document.createElement('i');
+    icon.dataset.lucide = target.querySelector('[data-lucide]')?.dataset.lucide
+      ?? target.querySelector('svg[data-lucide]')?.getAttribute('data-lucide') ?? 'circle';
+    icon.className = 'icon-md';
+    icon.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.textContent = target.querySelector('.btn__label')?.textContent ?? target.textContent.trim();
+    item.append(icon, name);
+    item.addEventListener('click', () => {
+      panel.hidePopover?.();
+      if (!target.disabled) target.click();
+    });
+    panel.appendChild(item);
+  }
+  button.after(panel);
+  installPopoverMenus(button.parentElement);
+  if (window.lucide) window.lucide.createIcons({ el: panel });
+}
+
+/**
+ * „WER HAT ES ERLEDIGT?" IN DER DETAILANSICHT (R9 M1, #1205).
+ *
+ * Mobil hat die Frage ihren Platz in der Zeile abgegeben (tasks.css, Raster
+ * unter 640px): dort nahm sie dem Titel die Breite und stand 0px neben dem
+ * Haken. Das Detail ist der Tastatur- und Vorleseweg zu ihr, der Long-Press
+ * auf die Zeile der schnelle (tasks.js, wireDoerContextMenu).
+ *
+ * DIESELBE SCHWELLE WIE IN DER ZEILE (renderDoerPicker): offen, nicht
+ * abgelegt, und mindestens zwei Menschen zur Auswahl - ein Menue mit einem
+ * Eintrag fragt nichts.
+ */
+const DOER_BUTTON_ID = 'task-detail-done-by';
+
+function doerChoices(task, ctx, archived) {
+  if (archived || task.status === 'done') return [];
+  if (isNavModuleReadOnly('tasks')) return [];
+  const members = (ctx.users ?? []).filter((u) => u && u.id != null);
+  return members.length >= 2 ? members : [];
+}
+
+function wireDetailDoerMenu(task, doers, ctx, close, pane = null) {
+  const root = pane ?? document;
+  const button = root.querySelector?.(`#${DOER_BUTTON_ID}`);
+  if (!button) return;
+  const label = t('tasks.doneByPick', { title: task.title });
+  const panelId = `task-detail-doer-${task.id}`;
+  button.classList.add('btn--icon', 'popover-menu__trigger', 'task-detail__doer');
+  button.setAttribute('aria-label', label);
+  button.setAttribute('title', label);
+  button.setAttribute('aria-haspopup', 'menu');
+  button.setAttribute('aria-expanded', 'false');
+  button.setAttribute('popovertarget', panelId);
+
+  const panel = document.createElement('div');
+  panel.className = 'popover-menu';
+  panel.id = panelId;
+  panel.setAttribute('popover', '');
+  panel.setAttribute('role', 'menu');
+  for (const person of doers) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'popover-menu__item';
+    item.setAttribute('role', 'menuitem');
+    item.dataset.action = 'pick-doer';
+    item.dataset.id = String(person.id);
+    const icon = document.createElement('i');
+    icon.dataset.lucide = 'user-round';
+    icon.className = 'icon-md';
+    icon.setAttribute('aria-hidden', 'true');
+    const name = document.createElement('span');
+    name.textContent = person.display_name ?? '';
+    item.append(icon, name);
+    item.addEventListener('click', () => completeFor(task, person, button, ctx, close));
+    panel.appendChild(item);
+  }
+  button.after(panel);
+  installPopoverMenus(button.parentElement);
+  if (window.lucide) window.lucide.createIcons({ el: panel });
+}
+
+async function completeFor(task, person, button, ctx, close) {
+  const stop = btnLoading(button);
+  const siblings = statusActionButtons().filter((el) => el !== button);
+  siblings.forEach((el) => { el.disabled = true; });
+  try {
+    await api.patch(`/tasks/${task.id}/status`, { status: 'done', done_by_user_id: person.id });
+  } catch (err) {
+    stop();
+    siblings.forEach((el) => { el.disabled = false; });
+    window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+    return;
+  }
+  task.status = 'done';
+  window.yuvomi.showToast(t('tasks.doneByToast', { name: person.display_name ?? '' }));
+  await afterConfirmedWrite(ctx, close);
 }
 
 /**
@@ -1080,7 +1322,9 @@ export function openTaskDetail({
 const STATUS_ACTION_IDS = Object.values(STATUS_ACTIONS).flat().map((step) => step.id);
 
 function statusActionButtons() {
-  return [...new Set(STATUS_ACTION_IDS)]
+  // Die Personenwahl (R9 M1) ist ein dritter Weg nach „erledigt" und wird
+  // mitgesperrt, solange ein anderer laeuft.
+  return [...new Set([...STATUS_ACTION_IDS, DOER_BUTTON_ID])]
     .map((id) => document.getElementById(id))
     .filter(Boolean);
 }
@@ -1231,4 +1475,4 @@ function seriesHistoryNode(task) {
  * der sich die Nur-lesen-Regel (#467) an dieser Ansicht MESSEN laesst - alles
  * andere hier haengt an `openDetailView` und damit am echten DOM.
  */
-export const __test = { subtaskListNode, descriptionNode, documentListNode };
+export const __test = { subtaskListNode, descriptionNode, documentListNode, doerChoices, wireDetailDoerMenu, DOER_BUTTON_ID };

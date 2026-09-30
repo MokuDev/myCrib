@@ -11,6 +11,7 @@ import { stagger, vibrate, scheduleUndoableDelete, animationSettled, collapseOut
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { t, getLocale, formatDate, formatTime, timeSuffix, formatDateInput, parseDateInput, isDateInputValid, formatTimeInput, parseTimeInput } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { rowActionHtml } from '/utils/row-action.js';
 import { renderMarkdownToolbar, wireMarkdownToolbar } from '/utils/markdown-toolbar.js';
 import { refresh as refreshReminders } from '/reminders.js';
 import { renderUserMultiSelect, getSelectedUserIds, bindUserMultiSelect, renderAvatarStack } from '/components/user-multi-select.js';
@@ -43,7 +44,7 @@ import {
   canEditTaskDefinition as canEditTaskDefinitionFor,
 } from '/utils/task-fields.js';
 import {
-  openTaskDetail, deleteTaskWithUndo, addSubtask,
+  openTaskDetail, deleteTaskWithUndo,
   setTaskArchived, toggleSubtaskStatus,
 } from '/components/task-detail.js';
 
@@ -310,8 +311,11 @@ function renderPriorityBadge(priority) {
 function renderDueDate(dateStr, timeStr, isDone = false) {
   const d = formatDueDate(dateStr, timeStr, isDone);
   if (!d) return '';
+  // Das Label steht in einem eigenen Span, damit es mit Ellipse enden kann
+  // (R9 M1): am Flex-Chip selbst greift `text-overflow` nicht, dort wurde
+  // „Überfällig - 24.09." hart abgeschnitten.
   return `<span class="due-date ${d.cls}">
-    <i data-lucide="clock" class="icon-sm" aria-hidden="true"></i> ${d.label}
+    <i data-lucide="clock" class="icon-sm" aria-hidden="true"></i> <span class="due-date__label">${d.label}</span>
   </span>`;
 }
 
@@ -322,7 +326,7 @@ function renderStartDateBadge(startDateStr) {
   const startDay = new Date(`${startDateStr}T00:00:00`);
   if (startDay <= today) return '';
   return `<span class="due-date">
-    <i data-lucide="calendar-clock" class="icon-sm" aria-hidden="true"></i> ${t('tasks.startsOn', { date: formatDate(startDay) })}
+    <i data-lucide="calendar-clock" class="icon-sm" aria-hidden="true"></i> <span class="due-date__label">${t('tasks.startsOn', { date: formatDate(startDay) })}</span>
   </span>`;
 }
 
@@ -614,7 +618,10 @@ function renderTaskCard(task, opts = {}) {
           </div>
         </div>
 
-        ${renderAvatarStack(task.assigned_users ?? [], { size: 28 })}
+        ${/* 24px STATT 28 (R9 M1): mobil steht der Stapel in der Metazeile
+              (tasks.css, Raster unter 640px), und die ist 25px hoch - eine
+              28er-Scheibe haette jede Zeile um 3px gestreckt. */ ''}
+        ${renderAvatarStack(task.assigned_users ?? [], { size: 24 })}
 
         ${/* Bleibt auch mit vorhandenen Unteraufgaben: bis D#1017 verschwand der
               Einstieg nach der ersten, und der zweite Einstieg lag am Ende der
@@ -958,6 +965,27 @@ function wireTagBadgeFilter(container) {
   });
 }
 
+/**
+ * Was hinter „Weitere Einstellungen" des Aufgabendialogs liegt, als Hinweis
+ * unter dem Aufklapper (DESIGN.md: „Weitere Einstellungen nennt, was dahinter
+ * liegt"; A3 P1-2). Dieselbe Bauart wie eventAdvancedTopics() im Kalender.
+ */
+function taskAdvancedTopics({ privacy = true } = {}) {
+  const topics = [
+    t('tasks.startDateLabel'),
+    t('tasks.pointsLabel'),
+    t('tasks.tagsLabel'),
+    t('tasks.statusLabel'),
+    privacy ? t('common.visibility.label') : null,
+    t('tasks.documentsLabel'),
+  ].filter(Boolean);
+  try {
+    return new Intl.ListFormat(getLocale(), { style: 'long', type: 'conjunction' }).format(topics);
+  } catch {
+    return topics.join(', ');
+  }
+}
+
 function renderModalContent({ task = null, users = [], reminder = null } = {}) {
   const isEdit = !!task;
 
@@ -1013,13 +1041,9 @@ function renderModalContent({ task = null, users = [], reminder = null } = {}) {
   // Zusammenfassung noch den alten Wert nannte.
   const statusValue = STATUSES().find((s) => s.value === task?.status)?.value ?? STATUSES()[0].value;
 
+  // Prioritaet und Kategorie stehen nicht mehr in der Zusammenfassung: sie
+  // stehen offen im Hauptteil (A3 P1-2, siehe unten).
   const advancedSummary = [];
-  if (isEdit && task.priority && task.priority !== 'none') {
-    advancedSummary.push(PRIORITY_LABELS()[task.priority] ?? task.priority);
-  }
-  if (isEdit && task.category && task.category !== FALLBACK_CATEGORY) {
-    advancedSummary.push(catLabel(task.category));
-  }
   if (isEdit && task.start_date) advancedSummary.push(formatDate(task.start_date));
   const summaryPoints = isEdit ? Number(task.points) : prefillPoints;
   if (summaryPoints > 0) advancedSummary.push(t('tasks.pointsSummary', { count: summaryPoints }));
@@ -1040,24 +1064,10 @@ function renderModalContent({ task = null, users = [], reminder = null } = {}) {
   const advancedLabel = advancedSummary.length
     ? `${t('modal.moreSettings')} · ${advancedSummary.join(' · ')}`
     : undefined;
+  const advancedHint = taskAdvancedTopics({ privacy: !hidesPrivacyControls('tasks') });
 
   const advancedFieldsHtml = `
       <div class="modal-grid modal-grid--2">
-        <div class="form-group">
-          <label class="label" for="task-priority">${t('tasks.priorityLabel')}</label>
-          <select class="input" id="task-priority" name="priority">
-            ${priorityOptions}
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="label" for="task-category">${t('tasks.categoryLabel')}</label>
-          <select class="input" id="task-category" name="category">
-            ${categoryOptions}
-          </select>
-        </div>
-      </div>
-
-      <div class="modal-grid modal-grid--2" style="margin-top:var(--space-4)">
         <div class="form-group">
           <label class="label" for="task-start-date">${t('tasks.startDateLabel')}</label>
           <yuvomi-datepicker type="date" id="task-start-date" name="start_date"
@@ -1227,7 +1237,26 @@ ${syncTargetFieldHtml(task)}
         <p class="task-field-hint field-hint--warn" id="task-countdown-warning" role="status" hidden><i data-lucide="alert-triangle" aria-hidden="true"></i><span>${t('tasks.countdownNeedsDue')}</span></p>
       </div>
 
-      ${advancedSection(advancedFieldsHtml, { label: advancedLabel })}
+      ${/* PRIORITAET UND KATEGORIE IM HAUPTTEIL, als kompakte Zeile (A3 P1-2).
+          * Die Liste ist standardmaessig nach Kategorie gruppiert; wer sie
+          * hinter „Weitere Einstellungen" nicht fand, landete unter
+          * „Sonstiges", und „Wichtig" suchte man dort gar nicht erst. */ ''}
+      <div class="modal-grid modal-grid--2 task-form__prio-cat" style="margin-top:var(--space-4)">
+        <div class="form-group">
+          <label class="label" for="task-priority">${t('tasks.priorityLabel')}</label>
+          <select class="input" id="task-priority" name="priority">
+            ${priorityOptions}
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="label" for="task-category">${t('tasks.categoryLabel')}</label>
+          <select class="input" id="task-category" name="category">
+            ${categoryOptions}
+          </select>
+        </div>
+      </div>
+
+      ${advancedSection(advancedFieldsHtml, { label: advancedLabel, hint: advancedHint })}
 
       ${renderRRuleFields('task', task?.recurrence_rule, {
         allowFromCompletion: true,
@@ -1336,7 +1365,91 @@ let state = {
   bulkSelectMode:  false,
   selectedTaskIds: new Set(),
   searchQuery:     '',
+  // „Bis heute faellig" (Re-Critique 2026-09-27): ein Filter, den die ADRESSE
+  // setzt (`?due=today`, der Link „+n weitere heute" der Uebersicht) und das
+  // Filterblatt wieder nimmt. Bewusst nicht gemerkt: er gehoert zum Besuch,
+  // nicht zum Geraet - wer die Aufgaben spaeter normal oeffnet, sieht alle.
+  dueToday:        false,
+  // Hat „Bis heute faellig" den Standard-Status selbst geweitet? Nur dann nimmt
+  // das Ausschalten die Weitung zurueck - ein bewusst gewaehlter Status bleibt.
+  dueTodayWidened: false,
 };
+
+/**
+ * `?due=today` in der Adresse? Andere Werte kennt die Seite (noch) nicht und
+ * laesst sie still fallen, statt eine leere Liste zu zeigen.
+ */
+function dueTodayFromSearch(search) {
+  return new URLSearchParams(search || '').get('due') === 'today';
+}
+
+/**
+ * „Bis heute faellig" an- oder ausschalten - der EINE Weg fuer beide Einstiege,
+ * die Adresse beim Betreten und den Schalter im Blatt. Beim Einschalten weitet
+ * der Statusfilter sich vom Standard „Offen" auf „Offen" + „In Bearbeitung":
+ * die Heute-Liste der Uebersicht zeigt begonnene Aufgaben mit, und der Link
+ * verspricht genau diese Zeilen. Die zwei Chips stehen sichtbar im Blatt, die
+ * Zahl am Knopf zaehlt sie - nichts wird still umgestellt. Einen vom Nutzer
+ * gesetzten Statusfilter laesst der Filter stehen. Beim Ausschalten nimmt er
+ * nur die EIGENE Weitung zurueck, und nur, solange niemand den Status seither
+ * geaendert hat.
+ *
+ * Vorher weitete nur die Adresse; der Schalter im Blatt filterte bloss die
+ * geladene Liste. Derselbe Filter zeigte dann je Einstieg andere Zeilen, und
+ * ein Neuladen der geschriebenen Adresse vergroesserte die Liste (Review R11).
+ * Nachladen muss der Aufrufer: der Seitenaufbau laedt ohnehin gleich danach.
+ */
+function setDueToday(on) {
+  state.dueToday = !!on;
+  const status = state.filters.status;
+  if (state.dueToday) {
+    if (status.length === 1 && status[0] === 'open') {
+      state.filters.status = ['open', 'in_progress'];
+      state.dueTodayWidened = true;
+    }
+    // Sonst bleibt die Marke, wie sie ist: aus dem Aus-Zustand kommend ist sie
+    // schon false, und ein zweites Einschalten ueber einer eigenen Weitung
+    // (erneuter Besuch mit ?due=today) behaelt sie.
+    return;
+  }
+  if (state.dueTodayWidened && status.length === 2 && status[0] === 'open' && status[1] === 'in_progress') {
+    state.filters.status = ['open'];
+  }
+  state.dueTodayWidened = false;
+}
+
+/** Die Adresse beim Betreten lesen - ueber denselben Weg wie das Blatt. */
+function applyDueTodayFromAddress(search) {
+  setDueToday(dueTodayFromSearch(search));
+}
+
+/**
+ * Offen und bis heute faellig - UEBERFAELLIGES eingeschlossen, wie die
+ * Heute-Liste der Uebersicht, auf die der Link verweist, und wie „Heute" in
+ * Apples Erinnerungen. Der Tag kommt aus `todayKey()` (Haushaltszone), der
+ * Vergleich ist ein reiner Schluesselvergleich YYYY-MM-DD.
+ */
+function isDueByToday(task, today = todayKey()) {
+  return task.status !== 'done' && !!task.due_date && String(task.due_date).slice(0, 10) <= today;
+}
+
+/**
+ * Den Filter in die Adresse schreiben bzw. herausnehmen - per replaceState,
+ * wie der Budget-Reiter: ein Filter ist kein Ort, zu dem „Zurueck" einzeln
+ * fuehren soll. `path` im State, weil der Router ihn bei popstate liest.
+ */
+function writeDueTodayToUrl(on) {
+  const loc = globalThis.location;
+  const hist = globalThis.history;
+  if (!loc || typeof hist?.replaceState !== 'function') return;
+  const params = new URLSearchParams(loc.search || '');
+  if (on) params.set('due', 'today');
+  else params.delete('due');
+  const search = params.toString() ? `?${params}` : '';
+  if (search === (loc.search || '')) return;
+  const path = `${loc.pathname}${search}${loc.hash || ''}`;
+  hist.replaceState({ ...(hist.state ?? {}), path }, '', path);
+}
 
 /**
  * Aufgaben nach der Toolbar-Suche gefiltert. Rein clientseitig über Titel und
@@ -1346,8 +1459,11 @@ let state = {
  */
 function filteredTasks() {
   const q = state.searchQuery.trim().toLowerCase();
-  if (!q) return state.tasks;
-  return state.tasks.filter((task) =>
+  const base = state.dueToday
+    ? state.tasks.filter((task) => isDueByToday(task))
+    : state.tasks;
+  if (!q) return base;
+  return base.filter((task) =>
     (task.title       || '').toLowerCase().includes(q) ||
     (task.description || '').toLowerCase().includes(q) ||
     (task.tags ?? []).some((tag) => tag.toLowerCase().includes(q))
@@ -2576,13 +2692,93 @@ function renderKanban(container) {
     return;
   }
 
-  const kanbanHtml = kanbanBoardHtml(cols, grouped);
+  const kanbanHtml = kanbanPagerHtml(cols) + kanbanBoardHtml(cols, grouped);
   listEl.replaceChildren();
   listEl.insertAdjacentHTML('beforeend', kanbanHtml);
 
   if (window.lucide) window.lucide.createIcons({ el: listEl });
   wireKanbanSortable(container);
   wireKanbanClicks(container);
+  wireKanbanPager(container);
+}
+
+/**
+ * MOBIL IST DAS BRETT EIN BLAETTERN, KEINE LAENGERE LISTE (R9 M2, A3 P2-7).
+ *
+ * Gemessen 390x844 vorher: die Spalten standen untereinander, „In Bearbeitung"
+ * begann bei y=1561 - zwei Bildschirme Wischen bis zur zweiten Spalte. Unter
+ * 640px legt tasks.css die Spalten nebeneinander in einen Scroll-Snap-Traeger,
+ * eine Spalte je Seite. Die Punkte darueber sagen, wo man ist, und fuehren per
+ * Tipp dorthin - der Spaltenkopf nennt Titel und Zahl, die Punkte nur die Lage.
+ * Ab 640px sind sie ausgeblendet; dort stehen die Spalten ohnehin nebeneinander.
+ *
+ * DIE SEITE UEBERLEBT DAS NEUZEICHNEN. renderKanban() baut das Brett nach
+ * jedem Spaltenwechsel neu, und ohne den Merker spraenge es danach auf die
+ * erste Spalte zurueck - genau dann, wenn man in einer anderen arbeitet.
+ */
+let kanbanPage = null;
+let kanbanPagerObserver = null;
+
+function kanbanPagerHtml(cols) {
+  const current = cols.some((col) => col.status === kanbanPage) ? kanbanPage : cols[0]?.status;
+  return `
+    <div class="kanban-pager" role="group" aria-label="${esc(t('tasks.kanbanView'))}">
+      ${cols.map((col) => `
+      <button type="button" class="kanban-pager__dot" data-kanban-page="${col.status}"
+              aria-label="${esc(col.label)}"${col.status === current ? ' aria-current="true"' : ''}></button>`).join('')}
+    </div>`;
+}
+
+function wireKanbanPager(container) {
+  kanbanPagerObserver?.disconnect();
+  kanbanPagerObserver = null;
+  const board = container.querySelector('.kanban-board');
+  const pager = container.querySelector('.kanban-pager');
+  if (!board || !pager) return;
+
+  const columnOf = (status) => board.querySelector(`.kanban-col[data-status="${status}"]`);
+  const mark = (status) => {
+    if (!status) return;
+    kanbanPage = status;
+    pager.querySelectorAll('[data-kanban-page]').forEach((dot) => {
+      if (dot.dataset.kanbanPage === status) dot.setAttribute('aria-current', 'true');
+      else dot.removeAttribute('aria-current');
+    });
+  };
+  // Relativ zur Lage im Traeger statt ueber offsetLeft: so stimmt es auch in
+  // einer RTL-Sprache, wo die erste Spalte rechts steht.
+  const scrollToColumn = (status, behavior) => {
+    const col = columnOf(status);
+    if (!col) return;
+    const delta = col.getBoundingClientRect().left - board.getBoundingClientRect().left;
+    if (delta) board.scrollBy({ left: delta, behavior });
+  };
+
+  pager.addEventListener('click', (e) => {
+    const dot = e.target.closest?.('[data-kanban-page]');
+    if (!dot) return;
+    const reduce = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    scrollToColumn(dot.dataset.kanbanPage, reduce ? 'auto' : 'smooth');
+    mark(dot.dataset.kanbanPage);
+  });
+
+  // Nur wenn das Brett wirklich blaettert (mobil) - am Desktop stehen alle
+  // Spalten nebeneinander, und dort gibt es nichts nachzuziehen.
+  if (board.scrollWidth <= board.clientWidth) return;
+  if (kanbanPage) scrollToColumn(kanbanPage, 'auto');
+
+  // `scrollsnapchange` meldet die Spalte, auf der der Traeger zur Ruhe kommt
+  // (Chrome/Edge); Safari und Firefox kennen es nicht, dort zieht ein
+  // IntersectionObserver die Punkte nach - schon waehrend des Wischens.
+  if ('onscrollsnapchange' in window) {
+    board.addEventListener('scrollsnapchange', (e) => mark(e.snapTargetInline?.dataset?.status));
+  } else if (typeof IntersectionObserver === 'function') {
+    kanbanPagerObserver = new IntersectionObserver((entries) => {
+      const seen = entries.find((entry) => entry.isIntersecting);
+      if (seen) mark(seen.target.dataset.status);
+    }, { root: board, threshold: 0.6 });
+    board.querySelectorAll('.kanban-col').forEach((col) => kanbanPagerObserver.observe(col));
+  }
 }
 
 /**
@@ -2655,11 +2851,16 @@ function kanbanBoardHtml(cols, grouped) {
               </span>
             </button>
             <span class="kanban-col__count">${grouped[col.status].length}</span>
-            ${col.status === 'done' && grouped.done.length && !readOnly() ? `
-            <button type="button" class="btn btn--ghost btn--icon btn--icon-sm kanban-col__action" data-kanban-archive-done
-                    aria-label="${t('tasks.kanbanArchiveDone')}" title="${t('tasks.kanbanArchiveDone')}">
-              <i data-lucide="archive" class="icon-sm" aria-hidden="true"></i>
-            </button>` : ''}
+            ${/* Die Archiv-Aktion ist eine Zeilenaktion (Kanon), kein 44px-Knopf:
+                * der hob den Erledigt-Kopf 20px ueber seine Nachbarn (A3 P2-1). */ ''}
+            ${col.status === 'done' && grouped.done.length && !readOnly()
+              ? rowActionHtml({
+                icon: 'archive',
+                label: t('tasks.kanbanArchiveDone'),
+                className: 'kanban-col__action',
+                attrs: { 'data-kanban-archive-done': true, title: t('tasks.kanbanArchiveDone') },
+              })
+              : ''}
           </div>
           <div class="kanban-col__body" id="${bodyId}" data-drop-zone="${col.status}"${collapsed ? ' hidden' : ''}>
             ${grouped[col.status].length
@@ -3260,7 +3461,8 @@ function activeFilterCount() {
     + state.filters.assigned_to.length
     + state.filters.category.length
     + state.filters.tags.length
-    + (state.showFuture ? 1 : 0);
+    + (state.showFuture ? 1 : 0)
+    + (state.dueToday ? 1 : 0);
 }
 
 /**
@@ -3364,6 +3566,8 @@ function filterSheetGroups() {
   }
   showRows.push(toggleRowHtml({ label: t('tasks.showFuture'), icon: 'calendar-clock', checked: state.showFuture,
     attrs: { 'data-filter-future': 'true' } }));
+  showRows.push(toggleRowHtml({ label: t('tasks.filterDueToday'), icon: 'calendar-check', checked: state.dueToday,
+    attrs: { 'data-filter-due-today': 'true' } }));
   groups.push({ heading: t('tasks.filterGroupShow'), html: showRows.join('') });
 
   if (state.viewMode === 'list') {
@@ -3424,6 +3628,8 @@ function syncFilterSheet(panel) {
   if (mine) mine.checked = isAssignedToMe();
   const future = panel.querySelector('[data-filter-future]');
   if (future) future.checked = state.showFuture;
+  const dueToday = panel.querySelector('[data-filter-due-today]');
+  if (dueToday) dueToday.checked = state.dueToday;
 }
 
 /**
@@ -3488,6 +3694,16 @@ async function onFilterSheetChange(input, container) {
     try { localStorage.setItem(SHOW_FUTURE_KEY, state.showFuture ? '1' : '0'); } catch {}
     renderFilters(container);
     await loadTasks(container);
+    return;
+  }
+  if (input.matches('[data-filter-due-today]')) {
+    // Derselbe Weg wie die Adresse (setDueToday): die Statusweitung laeuft mit,
+    // also muss der Bestand nachgeladen werden - wie bei „Geplante anzeigen".
+    // Die Adresse zieht mit, damit ein Neuladen dasselbe zeigt.
+    setDueToday(input.checked);
+    writeDueTodayToUrl(state.dueToday);
+    renderFilters(container);
+    await loadTasks(container);
   }
 }
 
@@ -3519,6 +3735,9 @@ async function onFilterSheetClick(e, container) {
 async function resetTaskFilters(container) {
   state.filters = { status: [], priority: [], assigned_to: [], category: [], tags: [] };
   state.showFuture = false;
+  state.dueToday = false;
+  state.dueTodayWidened = false;
+  writeDueTodayToUrl(false);
   try { localStorage.setItem(SHOW_FUTURE_KEY, '0'); } catch {}
   renderFilters(container);
   await loadTasks(container);
@@ -4356,6 +4575,111 @@ async function completeTaskFor(container, taskId, userId) {
   }
 }
 
+/**
+ * DIE PERSONENWAHL AM KONTEXTMENUE DER ZEILE (R9 M1).
+ *
+ * Mobil steht der Knopf „Wer hat erledigt?" nicht mehr in der Zeile (tasks.css,
+ * Raster unter 640px): er nahm dem Titel 44px, und sein Ziel lag 0px neben dem
+ * Haken - gemessen 7 von 12 Titeln abgeschnitten, Fehlgriff Haken/Picker
+ * (Re-Critique 2026-09-27, A3 P1-1). Die Frage bleibt an drei Stellen offen:
+ * in der Detailansicht (task-detail.js), per Long-Press auf die Zeile und per
+ * Kontextmenue (Rechtsklick, Menue-Taste, Android-Long-Press). Alle drei
+ * oeffnen DASSELBE Panel, das renderDoerPicker schon rendert - kein zweites
+ * Menue mit eigener Liste, das auseinanderlaufen koennte.
+ *
+ * GEOEFFNET WIRD ERST NACH DEM LOSLASSEN, und das ist keine Geschmacksfrage:
+ * das Light-Dismiss der Popover-API schliesst beim `pointerup` jedes Popover,
+ * das nicht schon beim `pointerdown` offen war. Ein Menue, das mitten im
+ * Druck aufgeht, ginge beim Loslassen sofort wieder zu. Waehrend des Drucks
+ * quittiert deshalb nur die Vibration, dass er erkannt ist.
+ */
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+
+function doerPanelOf(card) {
+  return card?.querySelector?.(`.popover-menu[id^="${DOER_PANEL_PREFIX}"]`) ?? null;
+}
+
+function openDoerMenu(card) {
+  const panel = doerPanelOf(card);
+  if (!panel || typeof panel.showPopover !== 'function') return false;
+  if (!panel.matches(':popover-open')) panel.showPopover();
+  return true;
+}
+
+function wireDoerContextMenu(listEl) {
+  let press = null;
+  let swallowClick = false;
+  const clear = () => {
+    if (press?.timer) clearTimeout(press.timer);
+    press = null;
+  };
+  const openAfterRelease = (card, primary) => {
+    // Der Klick, der dem Loslassen folgt, gehoert zum Druck und nicht zur
+    // Zeile - sonst hakte er ab oder oeffnete das Detail. Nur fuer die
+    // Primaertaste: ein Rechtsklick erzeugt keinen `click`, und ein stehen
+    // gebliebener Riegel schluckte den naechsten echten.
+    if (primary) {
+      swallowClick = true;
+      setTimeout(() => { swallowClick = false; }, LONG_PRESS_MS);
+    }
+    setTimeout(() => openDoerMenu(card), 0);
+  };
+
+  listEl.addEventListener('pointerdown', (e) => {
+    clear();
+    if (state.bulkSelectMode) return;
+    const card = e.target.closest?.('.task-card');
+    if (!doerPanelOf(card) || e.target.closest('.popover-menu')) return;
+    const primary = e.pointerType !== 'mouse' || e.button === 0;
+    press = { card, x: e.clientX, y: e.clientY, armed: false, primary, timer: null };
+    // Die Maus hat ihr Kontextmenue (Rechtsklick) - ein Halten mit der
+    // linken Taste ist dort ein Markieren, keine Frage nach der Person.
+    if (e.pointerType !== 'mouse') {
+      press.timer = setTimeout(() => {
+        if (!press) return;
+        press.timer = null;
+        press.armed = true;
+        vibrate(15);
+      }, LONG_PRESS_MS);
+    }
+  });
+  listEl.addEventListener('pointermove', (e) => {
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > LONG_PRESS_SLOP) clear();
+  });
+  listEl.addEventListener('pointerup', () => {
+    if (press?.armed) openAfterRelease(press.card, press.primary);
+    clear();
+  });
+  // Der Browser uebernimmt die Geste (Scrollen, Systemmenue): war der Druck
+  // schon erkannt, steht die Frage trotzdem - sonst verpuffte er.
+  listEl.addEventListener('pointercancel', () => {
+    if (press?.armed) openAfterRelease(press.card, false);
+    clear();
+  });
+  listEl.addEventListener('contextmenu', (e) => {
+    if (state.bulkSelectMode) return;
+    const card = e.target.closest?.('.task-card');
+    if (!doerPanelOf(card)) return;
+    e.preventDefault();
+    // Waehrend eines Drucks (macOS-Rechtsklick, Android-Long-Press) erst nach
+    // dem Loslassen oeffnen; sonst sofort (Menue-Taste, Windows nach mouseup).
+    if (press && press.card === card) {
+      if (press.timer) clearTimeout(press.timer);
+      press.timer = null;
+      press.armed = true;
+      return;
+    }
+    openDoerMenu(card);
+  });
+  listEl.addEventListener('click', (e) => {
+    if (!swallowClick) return;
+    swallowClick = false;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  }, { capture: true });
+}
+
 function wireTaskList(container) {
   const listEl = container.querySelector('#task-list');
   if (!listEl) return;
@@ -4365,6 +4689,7 @@ function wireTaskList(container) {
   // `listEl`: `toggle`/`beforetoggle` steigen nicht auf, und die Panels sitzen
   // im Top-Layer - ein Listener an der Liste selbst sieht sie nie.
   installPopoverMenus(container);
+  wireDoerContextMenu(listEl);
 
   listEl.addEventListener('click', async (e) => {
     const target = e.target.closest('[data-action]');
@@ -4497,8 +4822,22 @@ function wireTaskList(container) {
       }
     }
 
+    // TEILAUFGABE AUS DER LISTE: die Leseansicht der Aufgabe oeffnet sich mit
+    // der Eingabezeile (A3 P1-1) - dort legt Enter an und laesst den Fokus fuer
+    // die naechste stehen. Frueher fragte hier ein modaler Prompt je Punkt.
+    // Steht die Aufgabe schon rechts in der Spalte, geht nur das Feld dort auf.
     if (action === 'add-subtask') {
-      await addSubtask(target.dataset.parent, { onChanged: () => loadTasks(container) });
+      const parentId = String(target.dataset.parent);
+      const paneComposer = taskMd?.isSplit() && String(taskMd.selectedId()) === parentId
+        ? container.querySelector('.detail-subtask--add')
+        : null;
+      if (paneComposer) {
+        paneComposer.click();
+      } else {
+        composeSubtaskFor = parentId;
+        if (taskMd) taskMd.open(parentId, target);
+        else await openTaskSheet(parentId, container);
+      }
     }
 
     if (action === 'rename-subtask') {
@@ -4523,9 +4862,17 @@ function wireTaskList(container) {
  * sie ohne Mounter oeffnet, bekommt eine ohne Bearbeiten-Knopf statt einen,
  * der ins Leere fuehrt.
  */
+// Die Aufgabe, deren Leseansicht mit offener Teilaufgaben-Zeile aufgehen soll
+// (Aktion `add-subtask` der Liste). Einmal gelesen, dann verbraucht - sonst
+// oeffnete jede spaetere Ansicht derselben Aufgabe das Feld mit.
+let composeSubtaskFor = null;
+
 function openTaskView(task, reminder, container, { pane = null } = {}) {
+  const composeSubtask = composeSubtaskFor != null && composeSubtaskFor === String(task.id);
+  composeSubtaskFor = null;
   openTaskDetail({
     task,
+    composeSubtask,
     reminder,
     users: state.users,
     currentUserId: state.currentUserId,
@@ -4997,6 +5344,8 @@ export async function render(container, { user, signal } = {}) {
 
   // showFuture aus localStorage wiederherstellen
   try { state.showFuture = localStorage.getItem(SHOW_FUTURE_KEY) === '1'; } catch {}
+  // „Bis heute faellig" kommt nur aus der Adresse (siehe state.dueToday).
+  applyDueTodayFromAddress(window.location.search);
 
   const isKanban = state.viewMode === 'kanban';
   // Was nur die Aufgabenliste betrifft, blendet `syncViewChrome` gleich nach
@@ -5173,12 +5522,18 @@ export async function render(container, { user, signal } = {}) {
 // Testfläche: nur reine Funktionen, deren Vertrag außerhalb dieser Datei zählt.
 export const __test = {
   groupBy, groupKey, formatDueDate, normalizeFilterSet, taskQuery, state,
+  // `?due=today` (Re-Critique 2026-09-27): was die Adresse setzt, was die
+  // Liste daraus zeigt, und dass das Blatt es wieder nimmt - samt Adresse.
+  dueTodayFromSearch, isDueByToday, applyDueTodayFromAddress,
   // Das Brett als Markup plus seine Spaltenliste (#1250). Beides steht hier,
   // weil die Spaltenzahl eine Zusicherung GEGEN das Stylesheet ist: das Raster
   // muss so viele Spalten legen, wie diese Liste fuehrt, und genau dort ist es
   // einmal auseinandergelaufen. `toggleKanbanCol` kommt mit, damit der
   // eingeklappte Zustand gesetzt werden kann, ohne in den Speicher zu greifen.
-  kanbanBoardHtml, KANBAN_COLS, toggleKanbanCol,
+  kanbanBoardHtml, KANBAN_COLS, toggleKanbanCol, taskAdvancedTopics,
+  // Mobil blaettert das Brett (R9 M2): die Punkte ueber den Spalten und ihr
+  // Tipp, der zur Spalte fuehrt.
+  kanbanPagerHtml, wireKanbanPager,
   // Das Einhaengen des Ziehens einzeln, weil sein Riegel KEIN Markup hat: eine
   // Ablegezone, die gar nicht erst verdrahtet wird, sieht im HTML aus wie jede
   // andere. SortableJS liest keine Sichtbarkeit - eine Instanz auf einem
@@ -5215,6 +5570,7 @@ export const __test = {
   // Die Personenauswahl beim Abhaken (#1205): WANN sie ueberhaupt erscheint,
   // ist die halbe Entscheidung - ein Solo-Haushalt bekommt sie nie zu sehen.
   renderDoerPicker,
+  wireDoerContextMenu,
   // Welche Bedienelemente eine Boardkarte und eine leere Liste ueberhaupt
   // anbieten. Die Nur-lesen-Regel (#467) ist eine Aussage ueber genau dieses
   // Markup: was verschwindet, und was als Zeichen stehen bleibt, das den

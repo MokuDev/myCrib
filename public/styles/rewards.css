@@ -35,6 +35,33 @@
   gap: var(--space-1);
 }
 
+/* DER KATALOG-KOPF ENDET AM RASTER (R10 L7, rewards.js syncToolbarMeasure).
+ * Der Kopf bleibt `--narrow` - sonst passte die gekappte Reiterleiste neben
+ * Titel und Pille in die erste Zeile -, gibt aber im Katalog der Aktionszeile
+ * die regulaere Kante zurueck: Polster wie jeder Kopf, kein Rest-Slot
+ * (`::after`, layout.css), und die Reiterleiste darf ihre volle Zeile nehmen,
+ * damit sie weiter umbricht. Gemessen 1440: Pille endet 1408 wie das Raster.
+ *
+ * DAS MASS DIESES KOPFS IST DIE SPALTE, UND DAS SAGT ER AUCH. Ohne die
+ * Angabe erbte er `--page-measure` der Seite (720px) und behauptete damit ein
+ * Lesemass, an dem er bewusst nicht endet - die Kanten-Pruefung der
+ * gedeckelten Koepfe (Sonde 19 der Dokument-Guards) las 996px statt 720px bei
+ * 1280. `100%` ist der Wert der Kompositionen ohne Mass (`full`/`split`):
+ * die Deckel-Formeln in layout.css fallen damit von selbst auf den
+ * regulaeren Abstand, den die beiden Regeln hier ausdruecklich setzen. */
+.rewards-page > .rewards-toolbar.page-toolbar--narrow.rewards-toolbar--wide {
+  --page-measure: 100%;
+  padding-inline-end: var(--page-inline-pad);
+}
+
+.rewards-page > .rewards-toolbar.page-toolbar--narrow.rewards-toolbar--wide::after {
+  content: none;
+}
+
+.rewards-page > .rewards-toolbar--wide > .rewards-tabs {
+  max-width: none;
+}
+
 .rewards-content__inner {
   display: flex;
   flex-direction: column;
@@ -50,6 +77,16 @@
    Sektionen
    -------------------------------------------------------- */
 .rw-section { display: flex; flex-direction: column; gap: var(--space-4); }
+
+/* ZEILENLISTEN AUF DEM LESEMASS, DAS RASTER DARF BREIT (Re-Critique
+ * 2026-09-27, A3 P2-5 / R10 L7). Gemessen bei 1440x900: der Punktestand endete
+ * bei 972, sein Kopfknopf „Teilnehmer verwalten" bei 1408; das Verlaufs-Ledger
+ * lief 1156px breit, und der Punktwert stand 1100px von seinem Grund entfernt.
+ * Jeder Abschnitt ausser dem Katalograster (`--wide`) endet jetzt mit dem
+ * Lesemass der Seite - samt seines Kopfs, der sonst die Kante verliesse. */
+.rewards-page .rw-section:not(.rw-section--wide) {
+  max-width: var(--page-measure, none);
+}
 
 .rw-section__head {
   display: flex;
@@ -267,10 +304,17 @@
 /* --------------------------------------------------------
    Offene Anfragen
    -------------------------------------------------------- */
+/* Der Listen-Reset steht VOR dem Panel: beide Klassen sitzen am selben `ul`
+ * und haben dieselbe Spezifitaet, also gewinnt die spaetere Regel. Stand er
+ * dahinter, nahm sein `padding: 0` dem Panel das Polster, und der Avatar klebte
+ * an der Kante der getoenten Flaeche (Re-Kritik 2026-09-28, P1). Guard:
+ * test/test-rewards-ui.js rechnet die Kaskade fuer die Klassenliste nach. */
+.rw-pending-list { list-style: none; margin: 0; padding: 0; }
 /* Randlose Karte wie jede andere: die getönte Fläche MIT getönter Kante war
  * dasselbe Muster, das Runde 1 in der Haushaltshilfe entfernt hat. Die Tönung
  * bleibt als Dringlichkeitssignal, die Kante geht - sie sagte nichts, was die
  * Fläche nicht schon sagt. */
+
 /* DIE ALTE BEGRUENDUNG MASS GEGEN DIE FALSCHE FLAECHE.
  * Hier stand "16 %, nicht 8: gemessen 1.25:1 light / 1.29:1 dark" - beide Werte
  * gegen `--color-surface`, also gegen WEISS. Nachgemessen am Dokument ist die
@@ -295,7 +339,6 @@
   background: color-mix(in srgb, var(--module-accent) var(--tint-wash), var(--color-bg));
   box-shadow: var(--shadow-sm);
 }
-.rw-pending-list { list-style: none; margin: 0; padding: 0; }
 .rw-pending {
   display: flex;
   align-items: center;
@@ -406,25 +449,9 @@
    Verlauf (Ledger)
    -------------------------------------------------------- */
 .rw-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.rw-chip {
-  padding: var(--space-1) var(--space-3);
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface);
-  color: var(--color-text-secondary);
-  font-size: var(--text-sm);
-  cursor: pointer;
-  transition: background 140ms ease, color 140ms ease, border-color 140ms ease;
-}
-.rw-chip:hover { border-color: var(--color-border-strong); }
-/* Ein Filter-Chip, kein Segment: er trägt den Ton als getönte Fläche, nicht
- * deckend gefüllt (Rezept: tokens.css, Abschnitt 6c). Deckend war er die eine
- * Stelle, an der ein Chip wie ein Segment aussah. */
-.rw-chip--active {
-  background: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-state), transparent);
-  border-color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-hint), transparent);
-  color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
-}
+/* Die Chips selbst sind `.filter-chip filter-chip--sm` (filter-chip.css) -
+ * hier stand bis zur Re-Critique 2026-09-28 ein eigener `.rw-chip` mit 31px
+ * Hoehe und ohne Zustand fuer den Screenreader. */
 
 /* Verlaufsliste: EIN Träger (Zeilenlisten-Regel, tokens.css). Der Träger endet
  * mit der Liste, deshalb trennt der +-Kombinator statt border-bottom je Zeile. */
@@ -584,17 +611,31 @@
   .rw-reward-grid { grid-template-columns: 1fr; }
   /* Schmaler Viewport ⇒ mit hoher Wahrscheinlichkeit Touch: 44-pt-Ziele. */
   .rw-setup-step__go { min-height: var(--target-base); }
-  /* Nur die Spaltenzahl: der Abstand ist seit dem Umzug auf `.list-row`
-   * derselbe Wert wie dort, und ihn hier zu wiederholen wäre ein Nachbau. */
+  /* EINE ZEILE JE PERSON (Re-Critique 2026-09-28, P5 / A3 P2-5). Hier fiel
+   * die Zeile auf eine Spalte mit voller Einloesen-Kapsel: gemessen ca. 180px
+   * je Person, die zweite endete unter dem Toast. Jetzt wie die
+   * Zusammenfassung in Apple Health: Person und Punkte links, Einloesen als
+   * kompakte Kapsel rechts, die duenne Leiste darunter ueber die volle Zeile.
+   * Der Abstand kommt weiter aus `.list-row`. */
   .rw-standing {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: "id actions" "progress progress";
+    row-gap: var(--space-2);
   }
-  .rw-standing__actions { justify-content: stretch; }
-  .rw-standing__actions .btn { flex: 1 1 auto; }
-  .rw-pending { flex-wrap: wrap; }
-  .rw-pending__actions { flex-shrink: 0; }
+  .rw-standing__id { grid-area: id; }
+  .rw-standing__actions { grid-area: actions; }
+  .rw-standing__progress { grid-area: progress; }
+  /* Die offene Anfrage: Avatar und Titel in EINER Zeile, die Knoepfe darunter
+   * auf der Textkante - `flex-wrap` stellte den Avatar allein ueber den Titel. */
+  .rw-pending {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: var(--space-3);
+    row-gap: var(--space-2);
+  }
+  .rw-pending__actions { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .rw-progress__fill, .rw-chip, .rw-standing__name { transition: none; }
+  .rw-progress__fill, .rw-standing__name { transition: none; }
 }

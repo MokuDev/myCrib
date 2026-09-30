@@ -792,10 +792,12 @@ test('Kalender-Detailansicht: Löschen, Zurücksetzen und Bearbeiten fallen weg,
     'auch das Zurücksetzen eines ICS-Termins ist ein Schreibvorgang');
   assert.match(CAL_CODE, /edit: readOnly\(\) \? undefined : \{/,
     'ohne Mounter baut die geteilte Ansicht keinen Bearbeiten-Knopf');
-  // Und die einzige nicht schreibende Aktion bleibt bedingungslos drin.
+  // Und die einzige nicht schreibende Aktion bleibt bedingungslos drin - seit
+  // R10 als Folgeaktion der Ort-Zeile (mapRowAction), nicht im Fuss.
   assert.match(CAL_CODE, /id: 'detail-open-map'/);
-  const mapBlock = CAL_CODE.slice(CAL_CODE.indexOf('const mapUrl = eventMapUrl(ev.location);'), CAL_CODE.indexOf("id: 'detail-open-map'"));
-  assert.ok(!mapBlock.includes('readOnly()'), '"In Karte öffnen" schreibt nichts und gehört auch einem Nur-lesen-Nutzer');
+  const mapBlock = CAL_CODE.slice(CAL_CODE.indexOf('function mapRowAction'), CAL_CODE.indexOf("id: 'detail-open-map'"));
+  assert.ok(mapBlock.length > 0 && !mapBlock.includes('readOnly()'), '"In Karte öffnen" schreibt nichts und gehört auch einem Nur-lesen-Nutzer');
+  assert.match(CAL_CODE, /action: mapRowAction\(ev\)/, 'die Ort-Zeile traegt die Karte fuer jeden, auch Nur-lesen');
 });
 
 // -------------------------------------------------------------------------
@@ -1539,6 +1541,53 @@ const kontakt = (over = {}) => ({
   ...over,
 });
 
+/**
+ * KONTAKT-ZEILENMENUE NACH KANON (Re-Kritik 2026-09-28, A5 P2-5 im P1 "Sam
+ * erreicht ... nicht"). Das Menue war ein Eigenbau: `role="menu"` ohne
+ * `aria-haspopup`/`aria-expanded` am Ausloeser und ohne Pfeiltasten - Sam
+ * hoerte "Menue", und nichts davon hielt. Der Kanon-Baustein
+ * (utils/popover-menu.js) bringt Semantik UND Bedienung mit; hier wird
+ * gemessen, dass die Zeile ihn nimmt, und dass die lesenden Eintraege als
+ * Aktionen weiter an ihrem Ziel ankommen.
+ */
+test('Kontaktzeile: das Mehr-Menue ist der Kanon-Baustein mit Menue-Semantik', () => {
+  withAccess({ contacts: 'write' }, () => {
+    const html = contacts.renderContactItem(kontakt());
+    assert.match(html, /popovertarget="[^"]+" aria-haspopup="menu" aria-expanded="false"/,
+      'der Ausloeser sagt, dass er ein Menue oeffnet, und ob es offen ist');
+    assert.match(html, /class="popover-menu" id="[^"]+" popover role="menu"/,
+      'das Panel ist das geteilte popover-menu (Pfeiltasten, Fokus, aria-expanded aus popover-menu.js)');
+    for (const action of ['contact-email', 'contact-maps', 'contact-export', 'delete']) {
+      assert.match(html, new RegExp(`class="popover-menu__item[^"]*"\\s+data-action="${action}" data-id="4"`),
+        `Eintrag ${action} ist ein Kanon-Eintrag`);
+    }
+    assert.doesNotMatch(html, /contact-more-menu__panel|contact-menu-item/, 'kein Eigenbau mehr daneben');
+  });
+});
+
+test('Kontaktzeile: die lesenden Menue-Eintraege kommen an ihrem Ziel an', () => {
+  const opened = [];
+  const savedOpen = globalThis.window?.open;
+  const savedLocation = globalThis.window?.location;
+  globalThis.window = globalThis.window ?? {};
+  globalThis.window.open = (...args) => { opened.push(args); return null; };
+  const loc = { href: '' };
+  globalThis.window.location = loc;
+  try {
+    const c = kontakt();
+    contacts.runContactMenuAction('contact-email', c);
+    assert.equal(loc.href, 'mailto:praxis@example.org');
+    contacts.runContactMenuAction('contact-maps', c);
+    assert.deepEqual(opened.at(-1), ['https://www.openstreetmap.org/search?query=Hauptstr.%201', '_blank', 'noopener']);
+    contacts.runContactMenuAction('contact-export', c);
+    assert.deepEqual(opened.at(-1), ['/api/v1/contacts/4/vcard', '_blank', 'noopener']);
+    assert.equal(contacts.runContactMenuAction('delete', c), false, 'Loeschen bleibt beim Schreib-Zweig der Liste');
+  } finally {
+    globalThis.window.open = savedOpen;
+    globalThis.window.location = savedLocation;
+  }
+});
+
 test('Kontaktzeile mit Schreibrecht: das Menue fuehrt auch Loeschen', () => {
   withAccess({ contacts: 'write' }, () => {
     const html = contacts.renderContactItem(kontakt());
@@ -1597,10 +1646,13 @@ test('Kontaktzeile mit `contacts: read`: Loeschen weg, jeder Leseweg bleibt', ()
     // Die vier lesenden bleiben - und das Menue ist damit nie leer, es entsteht
     // hier also kein Knopf ohne Inhalt (der Befund aus waste.js).
     assert.match(html, /href="tel:/);
-    assert.match(html, /href="mailto:/);
-    assert.match(html, /openstreetmap\.org/);
-    assert.match(html, /\/api\/v1\/contacts\/4\/vcard/);
-    assert.match(html, /contact-more-menu__panel/);
+    // Seit dem Kanon-Menue (Re-Kritik 2026-09-28) sind Mail, Karte und Export
+    // Menue-Aktionen statt Links; wohin sie fuehren, misst der Test
+    // "die lesenden Menue-Eintraege kommen an ihrem Ziel an".
+    assert.match(html, /data-action="contact-email"/);
+    assert.match(html, /data-action="contact-maps"/);
+    assert.match(html, /data-action="contact-export"/);
+    assert.match(html, /class="popover-menu"/);
     // Und die Zeile fuehrt weiter in die Detailansicht, mit ihrem Inhalt.
     assert.match(html, /data-open="4"/);
     assert.match(html, /Dr\. Meier/);
@@ -1998,7 +2050,9 @@ test('Geburtstagszeile: die Textspalte ist fuer Lesende UND Schreibende der Weg 
     const html = birthdays.birthdayItemHtml(geburtstag());
     // Bis R8 blieb die Spalte mit Schreibrecht ein `div`: ein Tipp auf die
     // Zeile tat nichts, waehrend der Wisch-Chevron Navigation versprach.
-    assert.match(html, /<button type="button" class="list-row__main list-row__main--interactive" data-open="9">/,
+    // `data-md-focus` (R10): im Split landet der Pfeiltasten-Fokus auf diesem
+    // Knopf - weitere Attribute aendern nichts an der Regel.
+    assert.match(html, /<button type="button" class="list-row__main list-row__main--interactive" data-open="9"[^>]*>/,
       'mit Schreibrecht ist die Hauptspalte ein Knopf, der den Editor oeffnet');
     assert.doesNotMatch(html, /<div class="list-row__main">/);
     assert.doesNotMatch(html, /swipe-row--static/, 'Schreibende behalten die Geste und ihren Chevron');
@@ -2009,7 +2063,7 @@ test('Geburtstagszeile: die Textspalte ist fuer Lesende UND Schreibende der Weg 
   });
   withAccess({ calendar: 'read' }, () => {
     const html = birthdays.birthdayItemHtml(geburtstag());
-    const knopf = /<button type="button" class="list-row__main list-row__main--interactive" data-open="9">([\s\S]*?)<\/button>/.exec(html);
+    const knopf = /<button type="button" class="list-row__main list-row__main--interactive" data-open="9"[^>]*>([\s\S]*?)<\/button>/.exec(html);
     assert.ok(knopf, 'ohne diesen Knopf oeffnet bei `read` gar nichts - und die Notiz ist auf dem Telefon ausgeblendet');
     assert.match(knopf[1], /Oma Erna/, 'der Knopf traegt die Zeile selbst, nicht eine leere Flaeche');
     assert.doesNotMatch(knopf[1], /<div/, 'in einem `button` steht nur Phrasing-Inhalt');
@@ -2652,7 +2706,10 @@ test('R8 H9: eine Messung oeffnet sich mit Bestand, Loeschen steht links im Dial
   const loeschen = fuss.indexOf('data-action="vital-delete"');
   assert.ok(loeschen >= 0, 'Loeschen steht im Dialogfuss');
   assert.ok(loeschen < fuss.indexOf('data-action="cancel"'), 'links vor Abbrechen und Speichern (Kanon)');
-  assert.match(fuss, /btn--danger-outline" data-action="vital-delete" style="margin-inline-end:auto"/);
+  assert.match(fuss, /btn--danger-outline" data-action="vital-delete"[^>]* style="margin-inline-end:auto"/);
+  // Mobil ist Loeschen ein Papierkorb ohne Wort (R9 M8, modal.js); sein Name
+  // kommt aus data-delete-name - ohne nahm modal.js das erste Feld ("128").
+  assert.match(fuss, /data-action="vital-delete" data-delete-name="health\.vitals\.metric\.bp"/, 'der Papierkorb nennt die Metrik');
 
   const neu = withAccess({ health: 'write' }, () => modalOptionen(() => health.openVitalModal()));
   assert.equal(neu.title, 'health.vitals.add');
@@ -3526,6 +3583,30 @@ test('Besuchszeile mit `housekeeping: read`: Bearbeiten und Loeschen weg, der Za
 // Aufgaben
 // -------------------------------------------------------------------------
 
+// Re-Critique 2026-09-27 (R11 H6): ein Tipp auf die Aufgabenzeile tat nichts,
+// mobil war der Stift das einzige Ziel. Wie die Geburtstagszeile (R8) ist die
+// Hauptspalte mit Schreibrecht jetzt der Knopf zum Bearbeiten; die Aktions-Icons
+// bleiben sichtbar. Bei `read` verspricht die Spalte kein Bearbeiten.
+test('H6: die Aufgabenzeile der Haushaltshilfe oeffnet mit Schreibrecht das Bearbeiten - lesend verspricht sie nichts', () => {
+  hkState({
+    tasks: [{ id: 3, name: 'Fenster putzen', area: 'Wohnzimmer', frequency_days: 14, urgency_status: 'today', last_completed: '2026-07-01' }],
+  });
+  const schreiben = hkContainer();
+  withAccess({ housekeeping: 'write' }, () => hk.renderTasks(schreiben));
+  const haupt = schreiben.html.match(/<button type="button" class="list-row__main list-row__main--interactive[^"]*" data-edit-task="3">([\s\S]*?)<\/button>/);
+  assert.ok(haupt, 'die Hauptspalte ist ein Knopf mit dem Bearbeiten-Ziel der Zeile');
+  assert.match(haupt[1], /Fenster putzen/, 'er traegt den Namen');
+  assert.match(haupt[1], /housekeeping\.dueToday/, 'und die Metazeile samt Dringlichkeit');
+  assert.doesNotMatch(haupt[1], /<(?:h\d|p|div)\b/, 'in einem Knopf steht nur Phrasing-Inhalt');
+  assert.match(schreiben.html, /class="row-action" type="button" data-edit-task="3"/, 'der Stift bleibt sichtbar (ignore.md)');
+  assert.ok(schreiben.gefragt.includes('[data-edit-task]'), 'beide Ziele laufen ueber dieselbe Verdrahtung');
+
+  const lesen = hkContainer();
+  withAccess({ housekeeping: 'read' }, () => hk.renderTasks(lesen));
+  assert.doesNotMatch(lesen.html, /list-row__main--interactive|data-edit-task/, 'lesend kein Bearbeiten-Versprechen');
+  assert.match(lesen.html, /<h2 class="list-row__name">Fenster putzen<\/h2>/, 'die Zeile bleibt Auskunft mit Ueberschrift');
+});
+
 test('Aufgaben-Tab mit `housekeeping: read`: kein Anlegen, kein Abhaken, keine Zeilenaktion - die Dringlichkeit bleibt', () => {
   hkState({
     templates: [{ key: 'kitchen', name: 'Kueche', area: 'Kueche', frequency_days: 7 }],
@@ -3539,7 +3620,7 @@ test('Aufgaben-Tab mit `housekeeping: read`: kein Anlegen, kein Abhaken, keine Z
   assert.doesNotMatch(lesen.html, /<button/, 'auf diesem Tab schreibt jeder Knopf');
   assert.match(lesen.html, /Fenster putzen/, 'der Renderer lief - die Aufgabe steht da');
   assert.match(lesen.html, /housekeeping\.overdue/, 'und ihre Dringlichkeit, als Wort');
-  assert.match(lesen.html, /housekeeping-task--overdue housekeeping-task--readonly/, 'und als Toenung, ohne die Spalte des Kreises');
+  assert.match(lesen.html, /housekeeping-task--overdue housekeeping-task--readonly/, 'und als Zustandsklasse (seit R10 faerbt sie nur das Wort), ohne die Spalte des Kreises');
   assert.deepEqual(lesen.gefragt, [], 'keine Verdrahtung - jede auf diesem Tab schreibt');
 
   const schreiben = hkContainer();
@@ -4303,7 +4384,7 @@ test('Kanon R5: Kontaktzeile nennt die Person an Anrufen und am Mehr-Menue', () 
     const html = contacts.renderContactItem(kontakt());
     assert.match(html, /href="tel:[^"]*"[^>]*aria-label="contacts\.callNamed\{&quot;name&quot;:&quot;Dr\. Meier&quot;\}"/,
       'zwoelf Zeilen, die alle "Anrufen" heissen, sind fuer den Screenreader eine');
-    assert.match(html, /contact-more-menu__trigger"[^>]*aria-label="common\.moreActionsNamed\{&quot;name&quot;:&quot;Dr\. Meier&quot;\}"/);
+    assert.match(html, /contact-more-menu__trigger popover-menu__trigger"[^>]*aria-label="common\.moreActionsNamed\{&quot;name&quot;:&quot;Dr\. Meier&quot;\}"/);
   });
 });
 
@@ -4516,6 +4597,10 @@ test('R8 H14: Kontakt-Auswahl ist ein Knopf mit Auswahlkreis und Objektnamen, ke
 test('R8 H14: Dokument-Auswahl ist ein Auswahlkreis mit Objektnamen, keine native Checkbox', () => {
   const st = documentsPage.state;
   const vorher = { mode: st.selectMode, sel: new Set(st.selected) };
+  // Eigenes document: die Sammelaktions-Pille sucht ihre Schicht - ohne Shell
+  // gibt es keine, und der Test darf nicht vom Rest eines frueheren leben.
+  const echtesDocument = globalThis.document;
+  globalThis.document = { getElementById: () => null };
   try {
     st.selectMode = true;
     st.selected = new Set([4]);
@@ -4540,5 +4625,6 @@ test('R8 H14: Dokument-Auswahl ist ein Auswahlkreis mit Objektnamen, keine nativ
     st.selectMode = vorher.mode;
     st.selected = vorher.sel;
     documentsPage.setContainerForTest(null);
+    globalThis.document = echtesDocument;
   }
 });

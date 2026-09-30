@@ -88,7 +88,16 @@ async function tailAtEnd(page) {
       if (!painted) continue;
       const r = el.getBoundingClientRect();
       if (!r.width || !r.height) continue;
-      if (r.bottom > last) { last = r.bottom; who = String(el.className || el.tagName).slice(0, 60); }
+      // Sichtbar ist nur, was kein innerer Scroller wegschneidet: die klebende
+      // Einstellungs-Liste (R10) scrollt fuer sich, ihre letzten Zeilen liegen
+      // rechnerisch 300px unter dem Fenster, zu sehen ist ihre Kante. Deren
+      // Unterkante misst die Sonde weiter - sie ist selbst Inhalt.
+      let seenBottom = r.bottom;
+      for (let a = el.parentElement; a && a !== ac; a = a.parentElement) {
+        if (getComputedStyle(a).overflowY !== 'visible') seenBottom = Math.min(seenBottom, a.getBoundingClientRect().bottom);
+      }
+      if (seenBottom <= r.top) continue;
+      if (seenBottom > last) { last = seenBottom; who = String(el.className || el.tagName).slice(0, 60); }
     }
     return {
       path: location.pathname,
@@ -117,9 +126,14 @@ for (const device of ['desktop', 'mobile']) {
     const seen = [];
     for (const path of PAGE_SCROLL_ROUTES) {
       await gotoRoute(page, path);
-      // Die Uebersicht bringt ihren FAB am Zeiger selbst mit; dort wird der
-      // echte Summand gemessen, nicht der gesetzte.
-      if (path !== '/' || device === 'mobile') {
+      // Die Uebersicht bringt mobil ihren FAB am Zeiger selbst mit; dort wird
+      // der echte Summand gemessen, nicht der gesetzte. Am Desktop dockt er
+      // seit R14 (Re-Critique 2026-09-28, A8 P3-2) als Pille "+ Neu" im Kopf
+      // - dann schwebt nichts, und die Uebersicht misst wie jede Route den
+      // Summanden des Install-Banners.
+      const floatingFab = await page.evaluate(() => [...document.querySelectorAll('.page-fab:not([hidden])')]
+        .some((el) => getComputedStyle(el).position === 'fixed'));
+      if (path !== '/' || device === 'mobile' || !floatingFab) {
         await page.evaluate(() => document.documentElement.style.setProperty('--install-prompt-tail', '96px'));
       }
       const m = await tailAtEnd(page);
@@ -140,6 +154,10 @@ for (const device of ['desktop', 'mobile']) {
   });
 }
 
+// Seit R14 (A8 P3-2) schwebt am Desktop kein FAB mehr ueber der Uebersicht:
+// "Neu" ist eine Pille im Kopf. Die Regel dahinter - am Seitenende liegt keine
+// schwebende Flaeche auf einem Widget - gilt weiter; gemessen wird ein
+// schwebender FAB, und steht keiner da, muss die Pille im Kopf stehen.
 test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (desktop)', async () => {
   const page = await openPage(harness, { device: 'desktop' });
   // Die rechte Spalte reicht bis ans Ende - der Anlassfall der Critique. Endet
@@ -155,8 +173,11 @@ test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (de
   await gotoRoute(page, '/');
   await tailAtEnd(page);
   const hits = await page.evaluate(() => {
-    const fab = document.querySelector('.page-fab:not([hidden])');
-    if (!fab) return null;
+    const fab = [...document.querySelectorAll('.page-fab:not([hidden])')].find((el) => getComputedStyle(el).position === 'fixed');
+    if (!fab) {
+      const pill = document.querySelector('.page-fab--docked:not([hidden])');
+      return pill ? { docked: true, reach: true, ids: [] } : null;
+    }
     const f = fab.getBoundingClientRect();
     const wrappers = [...document.querySelectorAll('.widget-wrapper')];
     const lowest = wrappers.reduce((a, w) => (w.getBoundingClientRect().bottom > (a?.getBoundingClientRect().bottom ?? -1) ? w : a), null);
@@ -171,7 +192,7 @@ test('Nachlauf: am Seitenende der Uebersicht liegt der FAB auf keinem Widget (de
     };
   });
   await page.close();
-  assert.ok(hits, 'Reichweite: auf der Uebersicht am Zeiger schwebt kein FAB');
+  assert.ok(hits, 'Reichweite: weder ein schwebender FAB noch die Pille "Neu" im Kopf');
   assert.ok(hits.reach, 'Reichweite: das Raster endet nicht unter dem Knopf');
   assert.deepEqual(hits.ids, [], `Am Seitenende liegt der FAB auf: ${hits.ids.join(', ')}`);
 });
@@ -339,6 +360,138 @@ test('Wand-Modus 1280x800: Abschnittstitel aus zwei Metern lesbar, ein ruhiger T
   }
 });
 
+/* DER AUSSTIEG LIEGT IN JEDER GROESSE IM BILD (#1559). Die Sonde darueber mass
+ * nur 1280x800, wo der Fuss passt. Auf 390x844 lag `#wall-exit` bei y=832-880,
+ * auf 375x667 ganz unter der Kante - erreichbar nur per Scrollen, und im
+ * Ruhezustand ein graues Zeichen ohne Wort. Gemessen wird die RUHENDE Wand
+ * (kein Zeiger hat sie geweckt), am Anfang des Scrollwegs, also genau das Bild,
+ * das jemand nach dem Einschalten sieht. Keine Regel nach Geraeteklasse
+ * (d697fa1e4): dieselbe Erwartung fuer Telefon und Wand. */
+const WALL_VIEWPORTS = [
+  { width: 390, height: 844, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  { width: 375, height: 667, deviceScaleFactor: 2, isMobile: true, hasTouch: true },
+  { width: 1280, height: 800, deviceScaleFactor: 1, isMobile: false, hasTouch: false },
+];
+
+for (const viewport of WALL_VIEWPORTS) {
+  test(`Wand-Modus ${viewport.width}x${viewport.height}: der Ausstieg liegt ganz im Bild und traegt sein Wort (#1559)`, async () => {
+    const page = await openPage(harness, { device: viewport.isMobile ? 'mobile' : 'desktop' });
+    await page.setViewport(viewport);
+    await page.evaluate(() => localStorage.setItem('yuvomi-wall-mode', '1'));
+    await gotoRoute(page, '/');
+    await page.waitForSelector('.wall-program__list .wall-row', { timeout: 10000 }).catch(() => {});
+    await freeze(page);
+    const m = await page.evaluate(() => {
+      const btn = document.getElementById('wall-exit');
+      if (!btn) return null;
+      const r = btn.getBoundingClientRect();
+      const label = btn.querySelector('.wall__foot-btn-label');
+      const lr = label?.getBoundingClientRect();
+      const lcs = label ? getComputedStyle(label) : null;
+      const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return {
+        awake: document.querySelector('.wall')?.hasAttribute('data-wall-awake'),
+        rect: { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right) },
+        width: r.width,
+        height: r.height,
+        vw: document.documentElement.clientWidth,
+        vh: innerHeight,
+        labelText: label?.textContent.trim() ?? '',
+        labelShown: !!lr && lr.width > 1 && lr.height > 1 && lcs.display !== 'none' && lcs.visibility !== 'hidden'
+          && parseFloat(lcs.opacity) > 0.5,
+        onTop: !!hit && btn.contains(hit),
+      };
+    });
+    await page.evaluate(() => localStorage.removeItem('yuvomi-wall-mode'));
+    await page.close();
+    assert.ok(m, 'Reichweite: kein #wall-exit auf der Wand');
+    assert.ok(!m.awake, 'Reichweite: die Wand ist geweckt, gemessen werden soll der Ruhezustand');
+    const r = m.rect;
+    assert.ok(r.top >= 0 && r.left >= 0 && r.bottom <= m.vh && r.right <= m.vw,
+      `Der Ausstieg liegt nicht ganz im Bild: ${r.left}-${r.right} x ${r.top}-${r.bottom} bei ${m.vw}x${m.vh}`);
+    assert.ok(m.onTop, 'Der Ausstieg ist verdeckt - ein Tipp auf seine Mitte trifft etwas anderes');
+    assert.ok(m.width >= 44 && m.height >= 44, `Treffflaeche ${Math.round(m.width)}x${Math.round(m.height)}px`);
+    assert.ok(m.labelShown && m.labelText.length > 0,
+      `Der ruhende Ausstieg zeigt kein Wort (Beschriftung "${m.labelText}", sichtbar: ${m.labelShown})`);
+  });
+}
+
+/* ZURUECK BEENDET DIE WAND (#1559). Es gab weder einen History-Eintrag noch
+ * einen `popstate`-Handler: in der installierten App schloss Zurueck die App,
+ * und beim naechsten Start stand die Wand wieder da. Gemessen wird, dass die
+ * Geste im SELBEN Dokument bleibt (kein Ladevorgang), auf der Uebersicht
+ * landet und den gemerkten Modus loescht. */
+async function markDocument(page) {
+  await page.evaluate(() => { window.__wallProbeDoc = true; });
+}
+
+async function afterBack(page) {
+  // Verlaesst die Geste das Dokument, reisst sie den Ausfuehrungskontext mit -
+  // das ist der gemessene Fehler, kein Messfehler: dann fehlt die Marke.
+  await page.evaluate(() => history.back()).catch(() => {});
+  await wait(900);
+  await page.waitForFunction(() => document.getElementById('main-content')?.children.length > 0, { timeout: 10000 })
+    .catch(() => {});
+  return page.evaluate(() => ({
+    sameDoc: window.__wallProbeDoc === true,
+    path: location.pathname,
+    wallAttr: document.documentElement.hasAttribute('data-wall-mode'),
+    // Auf `about:blank` (die App ist „geschlossen") ist der Speicher gesperrt.
+    stored: (() => { try { return localStorage.getItem('yuvomi-wall-mode'); } catch { return 'unlesbar'; } })(),
+    wallSurface: !!document.querySelector('.dashboard--wall'),
+    overview: !!document.querySelector('.dashboard-overview'),
+  }));
+}
+
+test('Wand-Modus: Einschalten sagt, was das ist und wie man herauskommt; Zurueck beendet ihn (#1559)', async () => {
+  const page = await openPage(harness, { device: 'mobile' });
+  await page.setViewport(WALL_VIEWPORTS[0]);
+  await page.evaluate(() => localStorage.removeItem('yuvomi-wall-mode'));
+  await gotoRoute(page, '/');
+  await markDocument(page);
+  const depthBefore = await page.evaluate(() => history.length);
+  await page.click('#dashboard-wall-enter');
+  await page.waitForFunction(() => document.documentElement.hasAttribute('data-wall-mode'), { timeout: 5000 });
+  await wait(300);
+  const hint = await page.evaluate(async () => {
+    const { t } = await import('/i18n.js');
+    const toasts = [...document.querySelectorAll('.toast')].map((el) => el.textContent.trim());
+    return { toasts, exitWord: t('dashboard.wallExit') };
+  });
+  const depthIn = await page.evaluate(() => history.length);
+  const out = await afterBack(page);
+  await page.evaluate(() => localStorage.removeItem('yuvomi-wall-mode')).catch(() => {});
+  await page.close();
+
+  assert.ok(hint.toasts.some((text) => text.includes(hint.exitWord)),
+    `Kein Hinweis beim Einschalten, der den Ausstieg nennt ("${hint.exitWord}"): ${JSON.stringify(hint.toasts)}`);
+  assert.equal(depthIn, depthBefore + 1, 'Die Wand legt genau EINEN History-Eintrag an');
+  assert.ok(out.sameDoc, 'Zurueck hat das Dokument verlassen statt die Wand zu beenden');
+  assert.equal(out.path, '/');
+  assert.ok(!out.wallAttr && !out.wallSurface, 'Nach Zurueck steht noch die Wand');
+  assert.equal(out.stored, null, 'Nach Zurueck ist der Modus noch gemerkt - beim naechsten Start stuende die Wand wieder da');
+  assert.ok(out.overview, 'Nach Zurueck steht nicht die Uebersicht');
+});
+
+test('Wand-Modus nach einem Neustart: Zurueck beendet ihn, statt die App zu verlassen (#1559)', async () => {
+  const page = await openPage(harness, { device: 'mobile' });
+  await page.setViewport(WALL_VIEWPORTS[1]);
+  // Der Neustart: der Modus ist gemerkt, die Seite laedt hart auf `/`.
+  await page.evaluate(() => localStorage.setItem('yuvomi-wall-mode', '1'));
+  await gotoRoute(page, '/');
+  await markDocument(page);
+  const before = await page.evaluate(() => document.documentElement.hasAttribute('data-wall-mode'));
+  const out = await afterBack(page);
+  await page.evaluate(() => localStorage.removeItem('yuvomi-wall-mode')).catch(() => {});
+  await page.close();
+
+  assert.ok(before, 'Reichweite: nach dem Neustart steht keine Wand');
+  assert.ok(out.sameDoc, 'Zurueck hat das Dokument verlassen statt die Wand zu beenden');
+  assert.equal(out.path, '/');
+  assert.ok(!out.wallAttr && !out.wallSurface, 'Nach Zurueck steht noch die Wand');
+  assert.equal(out.stored, null, 'Nach Zurueck ist der Modus noch gemerkt');
+});
+
 /* ────────────────────────────────────────────────────────────────────────────
  * 3. Das Raster packt dicht, auch mit eigener Reihenfolge
  * ──────────────────────────────────────────────────────────────────────────── */
@@ -407,6 +560,7 @@ async function gridCells(page) {
       flow: cs.gridAutoFlow,
       order,
       inner,
+      cells: occ,
       map: occ.map((row) => row.map((v) => (v || '.').slice(0, 8)).join(' | ')).join('\n'),
     };
   });
@@ -441,7 +595,18 @@ test('Raster: eine eigene Reihenfolge laesst keine Loecher, in Ansicht UND Bearb
   assert.deepEqual(view.order, ['calendar', 'tasks', 'notes'], 'Die gespeicherte Reihenfolge bleibt die Rangfolge im Dokument');
   assert.deepEqual(view.inner, [], `Loch in der Ansicht:\n${view.map}`);
   assert.deepEqual(edit.inner, [], `Loch im Bearbeiten-Modus:\n${edit.map}`);
-  assert.equal(edit.map, view.map, 'Beim Umschalten springen Karten');
+  // Keine Karte springt: jede Zelle, die im Bearbeiten-Modus belegt ist, traegt
+  // in der Ansicht dieselbe Kachel. Die Ansicht darf nur LEERE Zellen fuellen -
+  // seit R10 (L9) waechst die Kachel vor einer Luecke in den Rest ihrer Reihe,
+  // der Bearbeiten-Modus zeigt die gewaehlte Groesse und damit das Loch samt
+  // Hinweis. Ein Vergleich der ganzen Karte hielt dieses Wachsen fuer Springen.
+  const moved = [];
+  edit.cells.forEach((row, ri) => row.forEach((id, ci) => {
+    const shown = view.cells[ri]?.[ci] ?? null;
+    if (id && shown !== id) moved.push(`${ri}/${ci}: ${id} -> ${shown}`);
+  }));
+  assert.deepEqual(moved, [], `Beim Umschalten springen Karten:\nAnsicht\n${view.map}\nBearbeiten\n${edit.map}`);
+  assert.deepEqual(view.order, edit.order, 'Die Reihenfolge ist in beiden Modi dieselbe');
 });
 
 test('Raster: Ziehen und Ablegen ordnet im dichten Raster weiter um', async () => {
@@ -545,4 +710,86 @@ test('Raster: ohne Loch schweigt der Hinweis', async () => {
   const hint = await page.evaluate(() => !!document.querySelector('.dashboard-grid-hint'));
   await page.close();
   assert.ok(!hint, 'Ein Hinweis ohne Loch ist Laerm');
+});
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Wetter: eingerichtet, aber gescheitert, verschwindet nicht (v2.70.0)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/* Gemeldet produktiv mit Open-Meteo: die Wetterkachel fehlte im Raster, in der
+ * Anpassen-Ablage UND in der Kopfzeile. Der Client machte aus jedem Fehlschlag
+ * `{ data: null }`, der Renderer gab dafuer '' zurueck, und eine Kachel, die
+ * `visible: true` bleibt und nichts zeichnet, ist aus der Oberflaeche heraus
+ * nicht mehr erreichbar. Die Sonde antwortet an Stelle des Anbieters, damit sie
+ * nicht vom Netz abhaengt. */
+function answerWeather(page, reply) {
+  page.__yuvomiRequestInterceptor = (req) => {
+    if (!/\/api\/v1\/weather\?/.test(req.url())) return false;
+    if (reply === 'abort') req.abort('failed');
+    else req.respond({ status: 200, contentType: 'application/json', body: JSON.stringify(reply) });
+    return true;
+  };
+}
+
+async function weatherState(page) {
+  return page.evaluate(() => {
+    const tile = document.querySelector('#dashboard-widget-grid [data-widget-id="weather"]');
+    return {
+      tile: !!tile,
+      unavailable: !!tile?.querySelector('.weather-widget--unavailable'),
+      text: tile?.querySelector('.widget__empty')?.textContent.trim() ?? null,
+      refresh: !!tile?.querySelector('#weather-refresh-btn'),
+      chip: !!document.querySelector('[data-widget-show="weather"]'),
+      grid: [...document.querySelectorAll('#dashboard-widget-grid > .widget-wrapper')].map((w) => w.dataset.widgetId),
+    };
+  });
+}
+
+for (const [label, reply] of [
+  ['der Anbieter scheitert (upstream_error)', { data: null, reason: 'upstream_error' }],
+  ['die Anfrage selbst scheitert (Seed hat Wetter eingerichtet)', 'abort'],
+]) {
+  test(`Wetter: ${label} - die Kachel bleibt im Raster und sagt es`, async () => {
+    const page = await openPage(harness, { device: 'desktop' });
+    answerWeather(page, reply);
+    await saveLayout(page, [{ id: 'weather', size: '2x1' }, { id: 'notes', size: '1x1' }]);
+    await gotoRoute(page, '/');
+    const s = await weatherState(page);
+    await page.close();
+
+    assert.ok(s.grid.includes('notes'), `Reichweite: das Raster steht (${s.grid.join(', ')})`);
+    assert.ok(s.tile, `die Wetterkachel fehlt im Raster (${s.grid.join(', ')})`);
+    assert.ok(s.unavailable, 'die Kachel zeigt den Zustand "gerade nicht verfuegbar"');
+    assert.equal(s.text, 'Wetter gerade nicht verfügbar');
+    assert.ok(s.refresh, 'der Aktualisieren-Knopf bleibt als Weg zurueck');
+  });
+}
+
+test('Wetter: ausgeblendet und gescheitert - die Ablage bietet die Kachel weiter an', async () => {
+  const page = await openPage(harness, { device: 'desktop' });
+  answerWeather(page, { data: null, reason: 'upstream_error' });
+  await saveLayout(page, [{ id: 'notes', size: '1x1' }]);
+  await gotoRoute(page, '/');
+  await enterEditMode(page);
+  const s = await weatherState(page);
+  await page.close();
+  assert.ok(s.chip, 'eingerichtetes Wetter bleibt in der Anpassen-Ablage');
+});
+
+test('Wetter: nicht eingerichtet - weder im Raster noch in der Ablage, wie ein abgeschaltetes Modul', async () => {
+  const page = await openPage(harness, { device: 'desktop' });
+  answerWeather(page, { data: null, reason: 'not_configured' });
+  await saveLayout(page, [{ id: 'weather', size: '2x1' }, { id: 'notes', size: '1x1' }]);
+  await gotoRoute(page, '/');
+  const view = await weatherState(page);
+  await saveLayout(page, [{ id: 'notes', size: '1x1' }]);
+  await gotoRoute(page, '/');
+  await enterEditMode(page);
+  const edit = await weatherState(page);
+  await page.close();
+
+  assert.ok(view.grid.includes('notes'), `Reichweite: das Raster steht (${view.grid.join(', ')})`);
+  assert.ok(!view.tile, 'ohne Einrichtung gibt es keine Wetterkachel');
+  assert.ok(edit.grid.length > 0, 'Reichweite: der Bearbeiten-Modus steht');
+  assert.ok(!edit.chip, 'und auch keinen Chip, der eine leere Kachel zurueckholen wuerde');
 });

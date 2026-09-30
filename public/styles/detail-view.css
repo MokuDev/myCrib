@@ -92,6 +92,43 @@
   text-wrap: pretty;
 }
 
+/* Folgeaktion am Ende einer Zeile („In Maps oeffnen" an der Ort-Zeile,
+ * detail-view.js detailRowEl `action`). Leise und rechts, auf der Hoehe des
+ * Labels - der Wert bleibt Text, die Aktion ist ausdruecklich (#1110). */
+.detail-row__action {
+  flex-shrink: 0;
+  margin-block-start: calc(-1 * var(--space-1));
+  margin-inline-start: auto;
+}
+
+/* Benannte Gruppe von Metazeilen (`{ group, rows }`): Abschnittstitel wie in
+ * einer Kontaktkarte, darunter die Zeilen im selben Takt wie ungegliedert. */
+.detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.detail-group + .detail-group,
+.detail-row + .detail-group {
+  padding-block-start: var(--space-3);
+  border-block-start: var(--space-px) solid var(--color-border-subtle);
+}
+
+.detail-group__title {
+  margin: 0;
+  font-size: var(--type-caption);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-secondary);
+}
+
+.detail-group__rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 /* Zeilen, die statt Text eine Gruppe tragen (Chips, Badges, Anhang). */
 .detail-chips.detail-row__value {
   display: flex;
@@ -194,6 +231,14 @@
    * hinzufuegen" brach auf 60px Hoehe um (Sichtpruefung 2026-09-26). */
   width: auto;
   margin-inline: 0;
+  /* EINE BUTTONFORM: die Kapsel (tokens.css, Sonde 3 der Dokument-Guards).
+   * Er ist kein Teilschritt, also keine Zeile der Liste, sondern ein Knopf
+   * nach Inhalt breit - wie die gestrichelte Kapsel `.list-tab__new` im
+   * Einkauf. Mit dem 10px-Radius der Zeilen stand er seit der Detailspalte
+   * ab 1280px (R10) als zweite Form im Dokument. Das Polster rueckt den Text
+   * aus der Rundung. */
+  padding-inline: var(--space-3);
+  border-radius: var(--radius-full);
   color: var(--color-text-secondary);
   border: var(--space-px) dashed var(--color-border);
   transition: border-color var(--transition-fast), color var(--transition-fast);
@@ -207,6 +252,27 @@
 
 .detail-subtask--add:hover svg {
   color: var(--color-accent);
+}
+
+/* Die Eingabezeile, in die sich „Teilaufgabe hinzufuegen" verwandelt (A3
+ * P1-1, task-detail.js `subtaskComposer`): ein kanonisches Feld ueber die
+ * Breite der Liste, so hoch wie eine Teilaufgaben-Zeile. Enter legt an, der
+ * Fokus bleibt fuer die naechste. `[hidden]` braucht fuer Feld UND Knopf die
+ * eigene Regel, weil `display: flex` das Browser-`hidden` sonst sticht
+ * (gemessen: der Knopf stand ueber dem offenen Feld). */
+.detail-subtask-compose {
+  display: flex;
+}
+
+.detail-subtask-compose[hidden],
+.detail-subtask--add[hidden] {
+  display: none;
+}
+
+.detail-subtask-compose__input {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--target-base);
 }
 
 /* --------------------------------------------------------
@@ -369,8 +435,33 @@
 .detail-view--in-pane {
   display: flex;
   flex-direction: column;
+  /* Die Ansicht fuellt die Spalte, damit ihr Fuss bei kurzem Inhalt unten an
+   * der Spalte steht und bei langem unten klebt (layout.css,
+   * `.split-view__detail-footer`). */
+  flex: 1 0 auto;
 }
 
 .detail-view--in-pane > .detail-view {
   padding: var(--space-4) var(--space-5) 0;
+}
+
+/* MOBIL EINE REIHE IM AUFGABEN-FUSS (Re-Critique 2026-09-28, P8 / A3 P3-2).
+ * Der Fuss einer offenen Aufgabe brach auf dem Telefon auf zwei Reihen
+ * (gemessen 133px; "Aufgabe archivieren" allein 188px). Starten und
+ * Archivieren treten dort in EIN Mehr-Menue (task-detail.js,
+ * wireDetailDoerMenu-Muster); ihre Knoepfe bleiben verborgen im Fuss, weil
+ * das Menue sie ausloest. Am Desktop passen alle Aktionen - dort gibt es den
+ * Mehr-Knopf nicht. */
+.detail-view__footer > .task-detail__more {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .detail-view__footer:has(> .task-detail__more) > .task-detail__overflow {
+    display: none;
+  }
+
+  .detail-view__footer > .task-detail__more {
+    display: inline-flex;
+  }
 }

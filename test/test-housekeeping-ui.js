@@ -25,7 +25,7 @@
  *        laeuft noch.
  * Ausführen: node --loader ./test/test-browser-loader.mjs --test test/test-housekeeping-ui.js
  */
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import assert from 'node:assert/strict';
 
 globalThis.window = globalThis.window ?? {};
@@ -534,4 +534,226 @@ test('scheitert das Neuladen nach dem Rueckgaengig, schreibt die davor gestartet
   assert.equal(state.tasks[0].last_completed, task.last_completed,
     'die vor dem Rueckgaengig gestartete Antwort ist ueberholt, auch wenn das juengere Neuladen scheitert');
   delete globalThis.__apiStub;
+});
+
+// ---------------------------------------------------------------------------
+// R10 L10 (Re-Critique 2026-09-27, A3 P2-3, P2-4, P2-10): eine Besuchszeile,
+// eine Faelligkeits-Grammatik, mobil Kennzahlen in einer Zeile und die Liste
+// vor dem Diagramm.
+// ---------------------------------------------------------------------------
+
+const { readFileSync } = await import('node:fs');
+const { eachRule } = await import('./css-rules.js');
+const HK_STYLES = readFileSync(new URL('../public/styles/housekeeping.css', import.meta.url), 'utf8');
+
+/** Name und Meta jeder Besuchszeile im Markup. */
+function visitRows(html) {
+  return html.split('<article').slice(1).filter((row) => /housekeeping-visit-row/.test(row)).map((row) => ({
+    row,
+    name: /list-row__name">([^<]*)</.exec(row)?.[1],
+    meta: /list-row__meta">([^<]*)</.exec(row)?.[1],
+  }));
+}
+
+function dashboardHtml({ lastVisit } = {}) {
+  const state = hk.state();
+  state.tab = 'dashboard';
+  state.workers = [{ id: 7, display_name: 'Maria Silva', rate_type: 'daily', daily_rate: 45, payment_schedule: 'weekly' }];
+  state.dashboard = { visits_this_month: 3, last_visit: lastVisit ? { check_in: lastVisit } : null, pending_tasks: 1, finished_tasks_this_month: 2, monthly_payments: [{ month: '2026-09', total: 90 }], pending_payments: 45 };
+  state.recentVisits = [asAdmin({ ...openVisit, worker_name: 'Maria Silva' })];
+  const content = fakeContainer();
+  hk.renderDashboard(content);
+  return content.html;
+}
+
+test('ein Besuch, eine Zeile: das Datum fuehrt, die Person steht im Meta - in Uebersicht, Berichten und Protokoll', async () => {
+  const uebersicht = visitRows(dashboardHtml());
+  assert.equal(uebersicht.length, 1, 'die Uebersicht zeigt ihren Besuch als Besuchszeile');
+  assert.equal(uebersicht[0].name, openVisit.check_in, 'Uebersicht: das Datum ist der Name');
+  assert.match(uebersicht[0].meta, /^Maria Silva · /, 'Uebersicht: die Person steht im Meta');
+
+  installApi();
+  const content = await freshReports();
+  await hk.stepReportMonth(content, -1);
+  const berichte = visitRows(content.html);
+  assert.equal(berichte.length, 2, 'die Berichte bauen dieselbe Zeile');
+  for (const { row, name, meta } of berichte) {
+    assert.doesNotMatch(row, /housekeeping-avatar/, 'kein Avatar - zehnmal dasselbe Gesicht sagte nichts');
+    assert.doesNotMatch(name, /Ana|Maria|housekeeping\.staff/, `Berichte: der Name ist das Datum, nicht die Person (${name})`);
+    assert.match(meta, / · /, 'Berichte: Person, Betrag und Status im Meta');
+    assert.match(row, /housekeeping-report-item--visit/, 'die Berichte-Klasse bleibt (Aktionsabstand, Zaehlung)');
+  }
+
+  const protokoll = visitRows(staffLogHtml([asAdmin(openVisit)]));
+  assert.equal(protokoll.length, 1, 'das Personal-Protokoll baut dieselbe Zeile');
+  assert.equal(protokoll[0].name, openVisit.check_in);
+  assert.doesNotMatch(protokoll[0].meta, /Ana/, 'im Protokoll einer Person steht ihr Name nicht in jeder Zeile');
+});
+
+test('Uebersicht: die letzten Besuche stehen vor dem Zahlungsdiagramm', () => {
+  const html = dashboardHtml();
+  const liste = html.indexOf('housekeeping-staff-log-list');
+  const diagramm = html.indexOf('class="housekeeping-chart"');
+  assert.ok(liste > 0 && diagramm > 0, 'beide Abschnitte stehen da');
+  assert.ok(liste < diagramm, 'mobil begannen die Besuche bei y760 hinter dem 252px-Diagramm');
+});
+
+test('Uebersicht: der letzte Besuch nennt im laufenden Jahr kein Jahr, in einem anderen schon', () => {
+  const jahr = new Date().getFullYear();
+  const vorher = globalThis.__formatDayMonth;
+  globalThis.__formatDayMonth = (d) => `KURZ(${d})`;
+  try {
+    const wert = (html) => /metric-card__label">housekeeping\.lastVisit<\/div>\s*<div class="metric-card__value">([^<]*)</.exec(html)?.[1];
+    assert.equal(wert(dashboardHtml({ lastVisit: `${jahr}-01-15T08:30:00Z` })), `KURZ(${jahr}-01-15T08:30:00Z)`,
+      'im laufenden Jahr die Kurzform - sie passt in die Viertelzeile');
+    assert.equal(wert(dashboardHtml({ lastVisit: `${jahr - 1}-12-20T08:30:00Z` })), `${jahr - 1}-12-20T08:30:00Z`,
+      'aus einem anderen Jahr bleibt das volle Datum - dann ist das Jahr die Auskunft');
+  } finally {
+    globalThis.__formatDayMonth = vorher;
+  }
+});
+
+// Codex P2 zu R10 L10: die Anzeige rechnet in die Haushaltszone, der
+// Jahresvergleich nahm das Jahr des rohen UTC-Strings und das der Geraetezone.
+// `<Jahr>-01-01T00:30Z` steht in New York am 31.12. des Vorjahrs - und verlor
+// trotzdem sein Jahr; umgekehrt in Tokio.
+test('Uebersicht: ob der letzte Besuch sein Jahr nennt, entscheidet die Haushaltszone wie die Anzeige', async () => {
+  const { setDisplayTimeZone, _resetDisplayTimeZoneCache } = await import('../public/utils/timezone.js');
+  const { todayKey } = await import('../public/utils/date.js');
+  const vorher = globalThis.__formatDayMonth;
+  globalThis.__formatDayMonth = (d) => `KURZ(${d})`;
+  const wert = (html) => /metric-card__label">housekeeping\.lastVisit<\/div>\s*<div class="metric-card__value">([^<]*)</.exec(html)?.[1];
+  try {
+    setDisplayTimeZone('America/New_York');
+    let jahr = Number(todayKey().slice(0, 4));
+    const silvester = `${jahr}-01-01T00:30:00Z`;
+    assert.equal(wert(dashboardHtml({ lastVisit: silvester })), silvester,
+      'New York: der Besuch liegt am 31.12. des Vorjahrs - das Jahr bleibt stehen');
+
+    setDisplayTimeZone('Asia/Tokyo');
+    jahr = Number(todayKey().slice(0, 4));
+    const neujahr = `${jahr - 1}-12-31T20:00:00Z`;
+    assert.equal(wert(dashboardHtml({ lastVisit: neujahr })), `KURZ(${neujahr})`,
+      'Tokio: derselbe Zeitpunkt ist dort schon der 1.1. des laufenden Jahres - Kurzform');
+  } finally {
+    globalThis.__formatDayMonth = vorher;
+    setDisplayTimeZone(null);
+    _resetDisplayTimeZoneCache();
+  }
+});
+
+test('Faelligkeit spricht als Tinte am Wort, nicht als Waesche der Zeile (wie die Aufgaben)', () => {
+  const rules = [...eachRule(HK_STYLES)];
+  const waesche = rules.filter((r) => /housekeeping-task--(?:today|overdue)/.test(r.selector)
+    && /background(?:-color)?\s*:/.test(r.body));
+  assert.deepEqual(waesche.map((r) => r.selector.trim()), [], 'keine Zeilentoenung fuer heute/ueberfaellig');
+  for (const [zustand, farbe] of [['overdue', 'danger'], ['today', 'warning']]) {
+    const tinte = rules.find((r) => r.selector.trim() === `.housekeeping-task--${zustand} .housekeeping-task__status`);
+    assert.match(tinte?.body ?? '', new RegExp(`color:\\s*var\\(--color-${farbe}\\)`), `${zustand}: das Wort traegt die Farbe`);
+  }
+});
+
+test('die vier Kennzahlen stehen auf jeder Breite in einer Zeile, schmal mit Labels an Wortgrenzen', () => {
+  const rules = [...eachRule(HK_STYLES)];
+  const quad = rules.filter((r) => /metric-grid--quad/.test(r.selector));
+  const zeile = quad.find((r) => !r.at.length && r.selector.trim() === '.housekeeping-content .metric-grid--quad');
+  assert.match(zeile?.body ?? '', /grid-template-columns:\s*repeat\(4,\s*minmax\(0,\s*1fr\)\)/,
+    'vier Spalten, unbedingt - und spezifischer als die Telefonstufe in panel.css');
+  assert.deepEqual(quad.filter((r) => /--summary-cards:\s*2/.test(r.body)).map((r) => r.at.join(' ')), [],
+    'keine Zwei-mal-zwei-Stufe mehr (189px mobil)');
+  const label = rules.find((r) => r.selector.trim() === '.metric-grid--quad .metric-card__label'
+    && r.at.includes('@container housekeeping-page (max-width: 479px)'));
+  assert.match(label?.body ?? '', /text-transform:\s*none/, 'Versal brach in der Viertelzeile mitten im Wort');
+  assert.match(label?.body ?? '', /hyphens:\s*auto/);
+});
+
+// Re-Critique 2026-09-28 (P5, A3 P2-3 / A8 P2-3): die Uebersicht mit
+// Kennzahlen, Besuchen und Zahlungen stand im 720px-Lesemass einer Textseite
+// und liess bei 1440 rund 470px leer - Besuche und Zahlungen untereinander.
+test('Uebersicht am Desktop: Besuche | Zahlungen nebeneinander, sobald die Spalte reicht, ausserhalb des Lesemasses', () => {
+  const html = dashboardHtml({ lastVisit: '2026-09-20T08:30:00Z' });
+  const cols = /<div class="housekeeping-dashboard-columns">([\s\S]*)<\/div>\s*$/.exec(html.trim());
+  assert.ok(cols, 'die beiden Karten stehen in EINEM Spaltentraeger');
+  assert.match(cols[1], /housekeeping\.recentVisits[\s\S]*housekeeping\.payments/, 'Besuche links, Zahlungen rechts');
+  const rules = [...eachRule(HK_STYLES)];
+  const wide = rules.find((r) => r.selector.trim() === '.housekeeping-page[data-tab="dashboard"]' && !r.at.length);
+  assert.match(wide?.body ?? '', /--page-measure:\s*var\(--layout-wide\)/, 'die Uebersicht bekommt das breite Mass');
+  // Zwei Spalten am Container der Seite, nicht am Viewport (PAGE-005).
+  const grid = rules.find((r) => r.selector.trim() === '.housekeeping-dashboard-columns'
+    && r.at.some((a) => /@container housekeeping-page \(min-width:\s*60rem\)/.test(a)));
+  assert.match(grid?.body ?? '', /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
+  const HK_SRC = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
+  assert.match(HK_SRC, /page\.dataset\.tab = state\.tab/, 'der Reiter steht an der Seite, damit das Mass ihm folgt');
+});
+
+test('Haushaltshilfe spricht EINEN Namen: Reiter "Uebersicht", Kennzahlen mit Zeitbezug, Geldschein statt Dollar', () => {
+  const HK_SRC = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(HK_SRC, /badge-dollar-sign/, 'Dollar-Icon bei Euro-Betraegen');
+  assert.match(HK_SRC, /data-lucide="banknote"/);
+  const localeDir = new URL('../public/locales/', import.meta.url);
+  const { readdirSync } = globalThis.process.getBuiltinModule('node:fs');
+  for (const file of readdirSync(localeDir).filter((f) => f.endsWith('.json'))) {
+    const loc = JSON.parse(readFileSync(new URL(file, localeDir), 'utf8'));
+    assert.equal(loc.housekeeping.dashboard, loc.rewards.tabOverview, `${file}: der Reiter heisst wie jede Uebersicht der App`);
+  }
+  const de = JSON.parse(readFileSync(new URL('de.json', localeDir), 'utf8')).housekeeping;
+  assert.equal(de.pendingChores, 'Fällig');
+  assert.equal(de.finishedChores, 'Erledigt im Monat');
+  assert.deepEqual(Object.entries(de).filter(([, v]) => typeof v === 'string' && /Hauspflege/.test(v)).map(([k]) => k), [],
+    'kein zweiter Name neben "Haushaltshilfe"');
+});
+
+// ---------------------------------------------------------------------------
+// #1556: "heute" ist der Tag des Haushalts, nicht der des Geraets
+// ---------------------------------------------------------------------------
+// Tagesabfrage und Check-in schickten `local_date` und
+// `timezone_offset_minutes` von der Uhr des Geraets. Ein Geraet in New York
+// legte den Check-in um 00:30 in Berlin auf den Vortag. Die Seite schickt jetzt
+// die Zone, in der sie anzeigt; den Tag rechnet der Server (test-housekeeping-
+// routes.js misst die Serverseite).
+test('#1556 Tagesabfrage und Check-in lesen den Tag des Haushalts, nicht Tag und Offset des Geraets', async () => {
+  const tz = await import('/utils/timezone.js');
+  const prevTz = process.env.TZ;
+  const gets = [];
+  const posts = [];
+  globalThis.__apiStub = {
+    get: async (url) => { gets.push(url); return { data: null }; },
+    post: async (url, body) => { posts.push({ url, body }); return { data: {} }; },
+  };
+  // Geraet in New York am 30.09. um 18:30 - im Haushalt (Berlin) ist es der 1.10., 00:30.
+  process.env.TZ = 'America/New_York';
+  tz.setDisplayTimeZone('Europe/Berlin');
+  mock.timers.enable({ apis: ['Date'], now: new Date('2026-09-30T22:30:00.000Z') });
+  try {
+    await hk.loadData();
+    hk.state().workers = [{ id: 7, display_name: 'Maria', rate_type: 'daily', daily_rate: 40, current_session: null }];
+    await hk.toggleSession(fakeContainer(), 7);
+  } finally {
+    mock.timers.reset();
+    tz.setDisplayTimeZone(null);
+    if (prevTz === undefined) delete process.env.TZ;
+    else process.env.TZ = prevTz;
+    delete globalThis.__apiStub;
+  }
+  const workersUrl = gets.find((url) => url.startsWith('/housekeeping/workers?'));
+  assert.ok(workersUrl, 'die Tagesabfrage laeuft');
+  const query = new URLSearchParams(workersUrl.split('?')[1]);
+  // Die Uebersicht fragt nach demselben Tag (Review): sonst rechnete der Server
+  // ihn ohne Haushaltszone in seiner eigenen.
+  const dashboardUrl = gets.find((url) => url.startsWith('/housekeeping/dashboard'));
+  const dashboardQuery = new URLSearchParams(dashboardUrl?.split('?')[1] ?? '');
+  const checkIn = posts.find((p) => p.url === '/housekeeping/work-sessions/check-in')?.body;
+  assert.ok(checkIn, 'der Check-in laeuft');
+  const sent = [
+    ['Tagesabfrage', query.get('local_date'), query.get('timezone_offset_minutes'), query.get('timezone')],
+    ['Check-in', checkIn.local_date, checkIn.timezone_offset_minutes, checkIn.timezone],
+    ['Uebersicht', dashboardQuery.get('local_date'), dashboardQuery.get('timezone_offset_minutes'), dashboardQuery.get('timezone')],
+  ];
+  for (const [where, day, offset, zone] of sent) {
+    // Ohne `timezone` nimmt der Server Tag und Offset als Angabe eines alten Clients.
+    assert.ok(day == null || day === '2026-10-01', `${where}: kein Tag des Geraets (${day})`);
+    assert.equal(offset ?? null, null, `${where}: kein Offset des Geraets`);
+    assert.equal(zone, 'Europe/Berlin', `${where}: die Zone der Anzeige`);
+  }
+  assert.match(checkIn.payment_description, /"date":"2026-10-01"/, 'die Zahlungsaufgabe nennt den Tag des Haushalts');
 });

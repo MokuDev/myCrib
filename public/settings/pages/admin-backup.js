@@ -154,7 +154,7 @@ function buildCliContent() {
     <pre class="settings-code-block"><code>SERVICE=yuvomi
 BACKUP="$PWD/yuvomi-backup.db"
 docker compose stop "$SERVICE"
-docker compose run --rm -v "$BACKUP:/tmp/yuvomi-restore.db:ro" --entrypoint sh "$SERVICE" -c 'set -eu; node server/check-backup.js /tmp/yuvomi-restore.db; target="\${DB_PATH:-/data/yuvomi.db}"; case "$target" in */oikos.db) target="\${target%/oikos.db}/yuvomi.db";; esac; stamp=$(date -u +%Y%m%dT%H%M%SZ); if [ -f "$target" ]; then cp "$target" "$target.pre-restore-$stamp.0.partial"; sync; mv "$target.pre-restore-$stamp.0.partial" "$target.pre-restore-$stamp"; fi; staging="$target.restore-tmp-0-$stamp"; cp /tmp/yuvomi-restore.db "$staging"; chmod 600 "$staging" 2&gt;/dev/null || true; chown node:node "$staging" 2&gt;/dev/null || true; sync; if [ -f "$target-wal" ]; then if [ -s "$target" ]; then mv "$target-wal" "$target.pre-restore-$stamp-wal"; else mv "$target-wal" "$target.pre-restore-$stamp.wal-kept"; fi; fi; rm -f "$target-shm"; mv "$staging" "$target"; sync'
+docker compose run --rm -v "$BACKUP:/tmp/yuvomi-restore.db:ro" --entrypoint sh "$SERVICE" -c 'set -eu; node server/check-backup.js /tmp/yuvomi-restore.db; target="\${DB_PATH:-/data/yuvomi.db}"; case "$target" in */oikos.db) target="\${target%/oikos.db}/yuvomi.db";; esac; stamp=$(date -u +%Y%m%dT%H%M%SZ); if [ -f "$target" ]; then cp "$target" "$target.pre-restore-$stamp.0.partial"; sync; mv "$target.pre-restore-$stamp.0.partial" "$target.pre-restore-$stamp"; fi; staging="$target.restore-tmp-0-$stamp"; cp /tmp/yuvomi-restore.db "$staging"; chmod 600 "$staging" 2&gt;/dev/null || true; chown node:node "$staging" 2&gt;/dev/null || true; sync; if [ -f "$target-wal" ]; then if [ -s "$target" ]; then mv "$target-wal" "$target.pre-restore-$stamp-wal"; else mv "$target-wal" "$target.pre-restore-$stamp.wal-kept"; fi; fi; rm -f "$target-shm"; sync; mv "$staging" "$target"; sync'
 docker compose up -d "$SERVICE"</code></pre>
     <p class="form-hint">${t('settings.backupCliForeignKeyHint')}</p>
     <p class="form-hint">${t('settings.backupCliBackupHint')}</p>
@@ -392,6 +392,16 @@ async function loadWebdavConfig(container) {
   }
 }
 
+/**
+ * Fehlermeldung einer WebDAV-Anfrage: `password_required` (neuer Server oder
+ * Benutzer ohne neues Passwort) uebersetzt, sonst der Text des Servers.
+ * Exportiert fuer test/test-settings-backup-key.js.
+ */
+export function webdavErrorMessage(err) {
+  if (err?.data?.errorCode === 'password_required') return t('settings.backupWebdavPasswordRequired');
+  return err?.message ?? t('common.errorGeneric');
+}
+
 function bindWebdavBackupEvents(container) {
   const form = container.querySelector('#backup-webdav-form');
   const testBtn = container.querySelector('#webdav-test-btn');
@@ -437,7 +447,9 @@ function bindWebdavBackupEvents(container) {
       }
     } catch (err) {
       if (resultEl) {
-        resultEl.textContent = t('settings.backupWebdavTestFailed', { error: err.message });
+        resultEl.textContent = err?.data?.errorCode === 'password_required'
+          ? webdavErrorMessage(err)
+          : t('settings.backupWebdavTestFailed', { error: err.message });
         resultEl.className = 'form-hint form-hint--danger';
       }
     } finally {
@@ -465,7 +477,7 @@ function bindWebdavBackupEvents(container) {
       window.yuvomi?.showToast(t('settings.backupWebdavSaved'), 'success');
       loadWebdavConfig(container);
     } catch (err) {
-      window.yuvomi?.showToast(err.message ?? t('common.errorGeneric'), 'danger');
+      window.yuvomi?.showToast(webdavErrorMessage(err), 'danger');
     } finally {
       if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = t('settings.backupWebdavSaveBtn'); }
     }

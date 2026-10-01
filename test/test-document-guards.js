@@ -686,15 +686,55 @@ test('calendar whole-series save confirmation leaves invalid UNTIL editable', as
   }
 });
 
+/*
+ * DIESE PROBE RECHNET VOM HEUTIGEN TAG, NICHT VON FESTEN DATEN. Bis zum
+ * 01.10.2026 standen hier '2026-09-15', '2026-09-20' und '2026-10-20'. Der
+ * Kalender oeffnet auf `state.cursor = state.today` (calendar.js), und der
+ * gespeicherte Termin wird unten im Monatsraster UND in der Agenda gesucht -
+ * ein Termin aus einem vergangenen Monat steht in keinem von beiden. Solange
+ * September 2026 lief, war das unsichtbar; am 01.10.2026 lief der
+ * waitForFunction nach dem Speichern in seine 30 Sekunden, ohne dass sich an
+ * der Oberflaeche irgendetwas geaendert haette. Ein Test, der ein Datum fest
+ * verdrahtet und dann im angezeigten Monat sucht, hat ein Verfallsdatum.
+ *
+ * Die Probe faehrt deshalb einen Monat vor (`#cal-next`) und legt den Termin
+ * dort ab. Das gibt drei Dinge umsonst: der Termin liegt immer in der Zukunft,
+ * er liegt immer im angezeigten Zeitraum, und zwischen dem 15. und dem
+ * Monatsletzten bleibt auch im Februar Platz fuer das frueh gesetzte UNTIL.
+ * Die erwarteten Monatsletzten werden gerechnet statt genannt - `new Date(y,
+ * m + 1, 0)` ist der letzte Tag von Monat m, Schaltjahr eingeschlossen.
+ */
 test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen bleiben wahr', async () => {
   const page = await openPage(harness, { device: 'desktop', locale: 'de' });
   const title = 'PR2 Serienprobe 975';
+  const pad = (n) => String(n).padStart(2, '0');
+  const isoDay = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const deDay = (d) => `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`;
+  const now = new Date();
+  const dayIn = (monthsAhead, day) => new Date(now.getFullYear(), now.getMonth() + monthsAhead, day);
+  const lastDayIn = (monthsAhead) => new Date(now.getFullYear(), now.getMonth() + monthsAhead + 1, 0);
+  const dates = {
+    start: isoDay(dayIn(1, 15)),
+    until: isoDay(dayIn(1, 20)),
+    allDay: isoDay(dayIn(2, 20)),
+  };
+  const startMonthLastDay = deDay(lastDayIn(1));
+  const allDayMonthLastDay = deDay(lastDayIn(2));
   try {
     await gotoRoute(page, '/calendar');
+    // Ein Schritt vorwaerts, und zwar nachweislich: `navigate()` laedt nach,
+    // bevor es neu zeichnet. Auf die Zelle des Zieltages zu warten belegt, dass
+    // das Raster den Monat wirklich traegt - ein blosser Klick belegt es nicht.
+    await page.click('#cal-next');
+    await page.waitForFunction(
+      (startDate) => Boolean(document.querySelector(`.month-day[data-date="${startDate}"]`)),
+      {},
+      dates.start,
+    );
     await page.click('#fab-new-event');
     await page.waitForSelector('#modal-title');
 
-    const hints = await page.evaluate((eventTitle) => {
+    const hints = await page.evaluate((eventTitle, d) => {
       const change = (el) => el.dispatchEvent(new Event('change', { bubbles: true }));
       const setDate = (selector, value) => {
         const el = document.querySelector(selector);
@@ -704,7 +744,7 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
       const text = () => document.querySelector('#event-rrule-monthday-hint')?.textContent || '';
 
       document.querySelector('#modal-title').value = eventTitle;
-      setDate('#modal-start-date', '2026-09-15');
+      setDate('#modal-start-date', d.start);
       const freq = document.querySelector('#event-rrule-freq');
       freq.value = 'MONTHLY';
       change(freq);
@@ -716,7 +756,7 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
       const end = document.querySelector('#event-rrule-end');
       end.value = 'until';
       change(end);
-      setDate('#event-rrule-until', '2026-09-20');
+      setDate('#event-rrule-until', d.until);
       const ended = text();
 
       end.value = 'never';
@@ -724,21 +764,24 @@ test('PR2 #975 - das zusammengesetzte Kalenderformular und seine Seriennamen ble
       const allDay = document.querySelector('#modal-allday');
       allDay.checked = true;
       change(allDay);
-      setDate('#modal-allday-start', '2026-10-20');
-      const allDayOctober = text();
+      setDate('#modal-allday-start', d.allDay);
+      const allDayLater = text();
 
       allDay.checked = false;
       change(allDay);
-      setDate('#modal-start-date', '2026-09-15');
-      return { timed, ended, allDayOctober };
-    }, title);
+      setDate('#modal-start-date', d.start);
+      return { timed, ended, allDayLater };
+    }, title, dates);
 
-    assert.match(hints.timed, /30\.09\.2026/,
-      'das echte Zeitfeld bestimmt den ersten Monatsletzten');
-    assert.doesNotMatch(hints.ended, /30\.09\.2026/,
-      'ein live gesetztes fruehes UNTIL darf keinen unmoeglichen Termin versprechen');
-    assert.match(hints.allDayOctober, /31\.10\.2026/,
-      'nach dem Umschalten bestimmt das echte Ganztagsfeld die Vorschau');
+    assert.ok(hints.timed.includes(startMonthLastDay),
+      `das echte Zeitfeld bestimmt den ersten Monatsletzten - erwartet ${startMonthLastDay}, `
+      + `der Hinweis lautete "${hints.timed}"`);
+    assert.ok(!hints.ended.includes(startMonthLastDay),
+      'ein live gesetztes fruehes UNTIL darf keinen unmoeglichen Termin versprechen - '
+      + `der Hinweis lautete "${hints.ended}"`);
+    assert.ok(hints.allDayLater.includes(allDayMonthLastDay),
+      `nach dem Umschalten bestimmt das echte Ganztagsfeld die Vorschau - erwartet ${allDayMonthLastDay}, `
+      + `der Hinweis lautete "${hints.allDayLater}"`);
 
     await page.click('#modal-save');
     await page.waitForFunction((eventTitle) => [...document.querySelectorAll('.month-day__event span')]

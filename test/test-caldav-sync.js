@@ -1812,7 +1812,7 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
     legacyState(d, COLOR_A);
     d.prepare('INSERT INTO sync_config (key, value) VALUES (?, ?)').run(HEAL_KEY_1, daysAgo(40));
 
-    await updateAccount(1, { username: 'u9', createClient: accountClient([CAL_A, CAL_B]) });
+    await updateAccount(1, { username: 'u9', password: 'p9', createClient: accountClient([CAL_A, CAL_B]) });
     assert.strictEqual(healState(d), null, 'die alte, abgelaufene Frist ist verworfen');
     d.prepare('UPDATE caldav_calendar_selection SET enabled = 1 WHERE calendar_url = ?').run(CAL_A);
 
@@ -1822,7 +1822,7 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
 
   it('ein umgehaengtes Konto ohne Altzeilen heilt nie', () => withDb(async (d) => {
     d.prepare('INSERT INTO sync_config (key, value) VALUES (?, ?)').run(HEAL_KEY_1, daysAgo(2));
-    await updateAccount(1, { caldavUrl: 'https://dav2.example/', createClient: accountClient([CAL_A]) });
+    await updateAccount(1, { caldavUrl: 'https://dav2.example/', password: 'p2', createClient: accountClient([CAL_A]) });
     assert.strictEqual(healState(d), 'never');
   }));
 
@@ -2042,9 +2042,31 @@ describe('CalDAV: die eingebrannte Kalenderfarbe loest sich (#1270)', () => {
     assert.strictEqual(row(d).color, COLOR_A, 'kein Objekt');
   }));
 
+  it('nach Ablauf der Frist faellt der Schnappschuss, der Fristbeginn bleibt (#1442)', () => withDb(async (d) => {
+    await sync({ createClient: clientWith({ inCal: CAL_A }) });
+    legacyState(d, COLOR_A);
+    const since = daysAgo(31);
+    startWindow(d, since, { [rowId(d)]: COLOR_A });
+
+    await sync({ createClient: clientWith({ inCal: CAL_A }) });
+    assert.strictEqual(row(d).color, COLOR_A, 'Vorbedingung: nichts geheilt');
+    assert.strictEqual(healState(d, SNAPSHOT_KEY_1), null, 'Schnappschuss weg');
+    assert.strictEqual(healState(d, HEAL_KEY_1), since, 'sonst begaenne die Frist neu');
+  }));
+
+  it('eine laufende Frist behaelt ihren Schnappschuss (#1442)', () => withDb(async (d) => {
+    // Gegenprobe zum Test oben: geraeumt wird nur eine abgelaufene Frist.
+    await sync({ createClient: clientWith({ inCal: CAL_A }) });
+    legacyState(d, COLOR_A);
+    startWindow(d, daysAgo(29), { 999: COLOR_A });
+
+    await sync({ createClient: clientWith({ inCal: CAL_A }) });
+    assert.deepStrictEqual(JSON.parse(healState(d, SNAPSHOT_KEY_1)), { 999: COLOR_A });
+  }));
+
   it('updateAccount mit neuem Benutzer raeumt den Schnappschuss mit', () => withDb(async (d) => {
     startWindow(d, daysAgo(40), { 999: COLOR_A });
-    await updateAccount(1, { username: 'u9', createClient: accountClient([CAL_A]) });
+    await updateAccount(1, { username: 'u9', password: 'p9', createClient: accountClient([CAL_A]) });
     assert.strictEqual(healState(d, SNAPSHOT_KEY_1), null);
   }));
 

@@ -9,7 +9,8 @@ import { renderRRuleFields, bindRRuleEvents, getRRuleValues, recurrenceRow } fro
 import { openModal as openSharedModal, closeModal, confirmModal, confirmOverModal, askOverModal, advancedSection, wireBlurValidation, reportFieldError, refocusAfterRender, renderKeepingFocus } from '/components/modal.js';
 import { attachOverlay } from '/utils/overlay-history.js';
 import { openDetailView, visibilityRow, assignedRow } from '/components/detail-view.js';
-import { stagger, wireScrollFade, scheduleUndoableDelete } from '/utils/ux.js';
+import { mountMasterDetail, splitViewDetailHtml } from '/utils/master-detail.js';
+import { stagger, wireScrollFade, scheduleUndoableDelete, vibrate } from '/utils/ux.js';
 import { t, getLocale, formatDate as formatPreferredDate, formatDayMonth, formatTime, timeSuffix, formatDateInput, parseDateInput, isDateInputValid, formatTimeInput, parseTimeInput } from '/i18n.js';
 import { esc, fmtLocation } from '/utils/html.js';
 import { shiftEndDateKey, isEndBeforeStart, weekStartIndex, weekdayOrder,
@@ -38,6 +39,8 @@ import { renderUserMultiSelect, getSelectedUserIds, bindUserMultiSelect, renderA
 import { withChosenPeople } from '/utils/people-picker.js';
 import { othersCanRead } from '/utils/household.js';
 import { wireTablist } from '/utils/tablist.js';
+import { installPopoverMenus } from '/utils/popover-menu.js';
+import { filterButtonHtml } from '/utils/filter-sheet.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { wirePeriodSwipe } from '/utils/period-swipe.js';
 import { isNavModuleReadOnly } from '/permissions.js';
@@ -53,7 +56,7 @@ import { googleTargetValue, caldavTargetValue, outlookTargetValue, assigneeSyncT
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { findPageFab } from '/utils/fab.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
-import { nowFields, todayKey, zonedDateKey, zonedTimeKey } from '/utils/timezone.js';
+import { nowFields, todayKey, wallTimeToInstantMs, zonedDateKey, zonedTimeKey } from '/utils/timezone.js';
 import { maxUploadBytes, maxUploadMb } from '/utils/upload-limit.js';
 import { emptyStateHTML, emptyHintHTML, mountLoadError } from '/utils/empty-state.js';
 import { moduleAccess } from '/permissions.js';
@@ -697,6 +700,10 @@ let state = {
   hiddenSources: new Map(), // Quellschluessel -> { name, color }, siehe calendarSources()
 };
 let _container = null;
+// Liste + Detail der Agenda (R10 L5): am Desktop steht rechts der gewaehlte
+// Termin. Nur die Agenda traegt den Baustein - Monat, Woche und Tag sind
+// Flaechen. Je Neuaufbau der Agenda ein neuer Aufbau (renderAgendaView).
+let _agendaMd = null;
 const calendarLoads = createCalendarLoadCoordinator();
 // Eigener Koordinator statt calendarLoads: ein Waste-Fetchfehler darf den
 // Ladezustand von Terminen/Aufgaben/Feiertagen/Schichtplan nicht anfassen,
@@ -781,6 +788,23 @@ function validDateParam(value) {
  * Ansicht nur in der Tablist (siehe switchToDayView).
  * @returns {string} der Tag oder '' (kein Tag-Link, ungueltig oder mit `open`)
  */
+/**
+ * Der Termin-Link aus `?open=`: `{ id, date }` oder null.
+ *
+ * Zwei Formen: der Zahl-Link der globalen Suche (`?open=12`, Tag optional aus
+ * `&date=`) und die Auswahl der Agenda-Detailspalte (`?open=12.2026-10-14`,
+ * siehe agendaMdId). Die zweite schreibt die Spalte selbst in die Adresse; las
+ * der Aufbau nur die erste, setzte ein Neuladen oder ein geteilter Link den
+ * Cursor auf heute zurueck, der Tag lag ausserhalb der geladenen Agenda, und
+ * die Auswahl fiel weg. Der Tag der Auswahl gewinnt vor `&date=` - er ist
+ * Teil derselben Adresse, die die Spalte geschrieben hat.
+ */
+function openDeepLink(params) {
+  const m = /^(\d+)(?:\.(\d{4}-\d{2}-\d{2}))?$/.exec(String(params.get('open') ?? ''));
+  if (!m) return null;
+  return { id: m[1], date: validDateParam(m[2]) || validDateParam(params.get('date')) };
+}
+
 function dayDeepLinkDate(params) {
   if (params.get('open')) return '';
   return validDateParam(params.get('date'));
@@ -2024,7 +2048,11 @@ export async function render(container, { user }) {
             schwebend (gemessen 2026-09-27: x=1360, unten rechts). Den vollen
             Kopf baut renderToolbar() nach dem Laden und haengt den
             angedockten FAB dabei um. */ ''}
-      <div class="page-toolbar page-toolbar--wrap page-toolbar--period cal-toolbar" id="cal-toolbar">
+      ${/* `page-toolbar--period-title`: die benannte Variante „Zeitraum-Kopf"
+            (DESIGN.md, Kopfregel mobil) - der Titel ist ein navigierbarer
+            Zeitraum, und nur ein so markierter Kopf darf seine Werkzeuge mobil
+            in Zeile 1 neben den Titel stellen (calendar.css, test:mobile-chrome). */ ''}
+      <div class="page-toolbar page-toolbar--wrap page-toolbar--period page-toolbar--period-title cal-toolbar" id="cal-toolbar">
         <h1 class="page-toolbar__title">${t('calendar.title')}</h1>
         <div class="page-toolbar__actions"></div>
       </div>
@@ -2051,15 +2079,16 @@ export async function render(container, { user }) {
   bodyEl.insertAdjacentHTML('beforeend', renderSkeletonList({ rows: 6, lines: 2 }));
 
   const params    = new URLSearchParams(window.location.search);
-  const openId    = params.get('open');
-  const dateParam = validDateParam(params.get('date'));
+  const openLink  = openDeepLink(params);
+  const openId    = openLink?.id ?? null;
+  const dateParam = openLink ? openLink.date : validDateParam(params.get('date'));
   let initialEvent = null;
   const dayLink = dayDeepLinkDate(params);
   if (dayLink) {
     state.cursor = dayLink;
     state.view = 'day';
   }
-  if (openId && /^\d+$/.test(openId)) {
+  if (openId) {
     try {
       const eventRes = await api.get(`/calendar/${openId}`);
       if (eventRes?.data) {
@@ -2130,11 +2159,23 @@ export async function render(container, { user }) {
 
     const chip =
       container.querySelector(`[data-date="${CSS.escape(targetDate)}"] [data-id="${CSS.escape(openId)}"]`)
+      // Die Agenda-Zeile traegt Termin und Tag an EINEM Knoten; ohne diese
+      // Form fand der Rueckfall die erste Zeile einer Serie, nicht den Tag.
+      ?? container.querySelector(`[data-id="${CSS.escape(openId)}"][data-date="${CSS.escape(targetDate)}"]`)
       ?? container.querySelector(`[data-id="${CSS.escape(openId)}"]`);
 
     if (chip) {
       chip.scrollIntoView({ block: 'center', behavior: 'instant' });
-      openEventDetail(occurrence, chip);
+      // In der Agenda mit Detailspalte: der Link WAEHLT den Termin aus, statt
+      // ein Popover neben die Spalte zu setzen - und die Adresse nimmt die
+      // Form der Auswahl an (`<id>.<Tag>`), ohne neuen History-Eintrag.
+      // Nannte die Adresse die Auswahl schon (`<id>.<Tag>`), hat der Baustein
+      // sie beim Aufbau eingeloest; die steht, auch wenn der Rueckfall unten
+      // eine andere Zeile derselben Serie gefunden hat.
+      if (_agendaMd?.isSplit() && chip.dataset.mdId) {
+        if (_agendaMd.selectedId() == null) _agendaMd.select(chip.dataset.mdId, { history: 'replace' });
+      }
+      else openEventDetail(occurrence, chip);
     } else {
       // Kein sichtbarer Chip (Termin außerhalb der aktuellen Ansicht): Der
       // Deep-Link landet trotzdem in der Leseansicht, nur ohne Verankerung.
@@ -2241,26 +2282,82 @@ function toolbarHtml({ filterCount = 0, scheduleWarningHtml = '' } = {}) {
         `).join('')}
       </div>
       <div class="cal-toolbar__tools">
-        <button class="btn btn--icon cal-toolbar__filter-btn ${filterCount ? 'cal-toolbar__filter-btn--active' : ''}"
-                id="cal-filters" aria-label="${filterCount ? esc(t('calendar.filtersActive', { count: filterCount })) : t('calendar.filtersOpen')}"
-                title="${t('calendar.filters')}" aria-haspopup="dialog">
-          <i data-lucide="sliders-horizontal" aria-hidden="true"></i>
-          ${filterCount ? `<span class="cal-toolbar__filter-count" aria-hidden="true">${filterCount}</span>` : ''}
-        </button>
+        ${/* DER GETEILTE FILTERKNOPF (R17 Z1, A1 P2-3): Zahl als Badge wie in
+              jedem Modul (utils/filter-sheet.js), der Name nennt sie. Hier stand
+              eine Kopie mit eigener Badge-Klasse - das Vorbild, von dem der
+              Baustein abgeschrieben war, lief seitdem neben ihm her. */ ''}
+        ${filterButtonHtml({
+          id: 'cal-filters',
+          count: filterCount,
+          labels: {
+            title: t('calendar.filters'),
+            open: t('calendar.filtersOpen'),
+            active: (count) => t('calendar.filtersActive', { count }),
+          },
+          className: 'cal-toolbar__filter-btn',
+        })}
         <!-- KEIN aria-controls im geschlossenen Zustand: die Suchleiste entsteht
              erst beim Öffnen (openCalendarSearch), und ein Verweis auf eine ID, die
              es noch nicht gibt, kündigt einem Screenreader ein Ziel an, das nicht
              existiert. Gesetzt wird es dort, wo die Leiste entsteht, und beim
              Schließen wieder entfernt - dieselbe Regel wie in utils/sub-tabs.js:
              ohne aufgelöstes Ziel bleibt das Attribut weg. -->
-        <button class="btn btn--icon cal-toolbar__search-btn" id="cal-search"
+        <button type="button" class="btn btn--secondary btn--icon cal-toolbar__search-btn" id="cal-search"
                 aria-label="${t('calendar.searchOpen')}" title="${t('calendar.searchOpen')}"
                 aria-expanded="false">
-          <i data-lucide="search" aria-hidden="true"></i>
+          <i data-lucide="search" class="icon-md" aria-hidden="true"></i>
         </button>
+        ${viewMenuHtml()}
       </div>
     </div>
   `;
+}
+
+/**
+ * MOBIL STEHT DIE ANSICHTSWAHL IM WERKZEUGMENUE (R9 M5, A8 P2-3).
+ *
+ * Gemessen 390x844 vorher: der Kopf hatte drei Zeilen und 166px - Titel,
+ * Zeitraum, Ansichts-Segment mit Filter und Suche. Wie in Apples Kalender
+ * waehlt man die Ansicht unter 640px aus einem Menue (calendar.css blendet
+ * dort das Segment aus und dieses Menue ein); darueber bleibt das Segment,
+ * und das Menue ist unsichtbar. Beide steuern dieselbe Tablist
+ * (`viewTabs.setActive`), der Speicher und die Kuerzel m/w/d/a laufen
+ * unveraendert ueber deren `onChange`.
+ *
+ * `menuitemradio`, weil genau eine Ansicht gilt - die geteilte
+ * Popover-Mechanik setzt den Fokus beim Oeffnen auf den gewaehlten Eintrag
+ * (utils/popover-menu.js: Einfachauswahl). Der Haken hinten ist dieselbe
+ * Marke wie in jedem Werkzeugmenue.
+ */
+const VIEW_ICONS = { month: 'calendar-days', week: 'calendar-range', day: 'calendar-1', agenda: 'list' };
+
+function viewMenuHtml(current = state.view) {
+  const label = t('calendar.viewSwitcher');
+  return `
+        <button type="button" class="btn btn--secondary btn--icon cal-toolbar__tools-btn popover-menu__trigger" id="cal-views-menu"
+                popovertarget="cal-views-menu-panel" aria-haspopup="menu" aria-expanded="false"
+                aria-label="${esc(label)}" title="${esc(label)}">
+          <i data-lucide="ellipsis" class="icon-md" aria-hidden="true"></i>
+        </button>
+        <div class="popover-menu" id="cal-views-menu-panel" popover role="menu">
+          ${VIEWS.map((v) => `
+          <button type="button" role="menuitemradio" aria-checked="${v === current}"
+                  class="popover-menu__item" data-cal-view="${v}"
+                  aria-keyshortcuts="${CAL_SHORTCUT_KEYS.views[v]}">
+            <i data-lucide="${VIEW_ICONS[v]}" class="icon-md" aria-hidden="true"></i>
+            <span>${esc(VIEW_LABELS()[v])}</span>
+            <i data-lucide="check" class="icon-md popover-menu__item-trail popover-menu__item-check${v === current ? '' : ' popover-menu__item-check--hidden'}" aria-hidden="true"></i>
+          </button>`).join('')}
+        </div>`;
+}
+
+/** Den Haken im Ansichtsmenue der aktuellen Ansicht nachziehen. */
+function syncViewMenu(root = _container) {
+  for (const item of root?.querySelectorAll?.('[data-cal-view]') ?? []) {
+    const on = item.dataset.calView === state.view;
+    item.setAttribute('aria-checked', String(on));
+    item.querySelector('.popover-menu__item-check')?.classList.toggle('popover-menu__item-check--hidden', !on);
+  }
 }
 
 function renderToolbar() {
@@ -2308,6 +2405,15 @@ function renderToolbar() {
   bar.querySelector('#cal-today').addEventListener('click', goToday);
   bar.querySelector('#cal-search').addEventListener('click', openCalendarSearch);
   bar.querySelector('#cal-filters').addEventListener('click', openCalendarFilters);
+  installPopoverMenus(bar);
+  bar.querySelector('#cal-views-menu-panel')?.addEventListener('click', (e) => {
+    const item = e.target.closest?.('[data-cal-view]');
+    if (!item) return;
+    // Die Mechanik schliesst das Menue selbst; der Fokus geht an den
+    // Ausloeser zurueck, nicht in einen versteckten Eintrag.
+    bar.querySelector('#cal-views-menu')?.focus();
+    if (item.dataset.calView !== state.view) viewTabs?.setActive(item.dataset.calView);
+  });
 
   // EIN wireScrollFade auf diesem Element, nicht zwei.
   //
@@ -2329,6 +2435,7 @@ function renderToolbar() {
       await reloadForView();
       updateLabel();
       renderView();
+      playViewSwap(_container.querySelector('#cal-body'));
     },
   });
   // Die Ansichtswahl gleitet wie jede Segment-Leiste (D8). Der Kopf wird bei
@@ -2370,6 +2477,7 @@ function updateLabel() {
   syncPeriodArrows();
   syncTodayButton();
   syncViewPanel();
+  syncViewMenu();
 }
 
 /**
@@ -2767,6 +2875,25 @@ function scheduleMonthFit(grid) {
   });
 }
 
+/**
+ * Der Wechsel Monat/Woche/Tag/Agenda blendet die neue Ansicht kurz ein
+ * (Re-Critique 2026-09-28, A2 P3): vorher ein harter Schnitt nach dem Fetch.
+ * Ohne Versatz - anders als der Periodenwechsel (period-swipe.js) antwortet
+ * er auf einen Tipp, nicht auf eine Wischrichtung. Die Blende setzt bei 0,4
+ * Deckkraft an, nie bei 0: ein leerer Frame dazwischen saehe aus wie ein
+ * Neuladen. Unter reduzierter Bewegung bleibt es beim Schnitt (die CSS-Regel
+ * in calendar.css ist das Netz dafuer).
+ */
+function playViewSwap(body) {
+  if (!body) return;
+  if (typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  body.classList.remove('cal-view-swap-in');
+  // Reflow, damit ein zweiter Wechsel waehrend der Blende sie neu startet.
+  void body.offsetWidth;
+  body.classList.add('cal-view-swap-in');
+  body.addEventListener('animationend', () => body.classList.remove('cal-view-swap-in'), { once: true });
+}
+
 function renderView() {
   const body = _container.querySelector('#cal-body');
   if (!body) return;
@@ -2785,8 +2912,13 @@ function renderView() {
    * breitesten Koerpers; die Agenda-LISTE behaelt ihre Lesebahn. Der
    * Kanten-Guard kennt diese Bauart (test-frontend-audit: Lesemass-Toggle
    * am Koerper ohne Kopf-Toggle). */
-  _container.querySelector('#calendar-page')
-    ?.classList.toggle('is-reading-measure', state.view === 'agenda');
+  const page = _container.querySelector('#calendar-page');
+  page?.classList.toggle('is-reading-measure', state.view === 'agenda');
+  // DIE AGENDA IST LISTE + DETAIL (R10 L5, A2): am Desktop liess sie rechts
+  // 436px leer. Der Container der Schwelle (`module-surface`) steht nur in der
+  // Agenda an der Seitenwurzel; die drei Raster bleiben Flaeche.
+  page?.classList.toggle('app-page--list-detail', state.view === 'agenda');
+  if (state.view !== 'agenda') dropAgendaSelection();
   // Monats-Resize-Observer lösen, bevor das alte #month-grid detached wird;
   // nur die Monatsansicht setzt ihn danach wieder auf.
   _monthGridResizeObserver?.disconnect();
@@ -4022,11 +4154,13 @@ function renderWeekView(container) {
     if (header) switchToDayView(header.dataset.date);
   });
 
-  container.querySelector('#week-cols').addEventListener('click', (e) => {
+  const weekCols = container.querySelector('#week-cols');
+  weekCols.addEventListener('click', (e) => {
     // S-17: ein Klick GENAU auf den sichtbaren Text eines Schichtblocks
     // (pointer-events:auto, siehe calendar.css) oeffnet die Detailansicht;
-    // der Rest der Spalte (pointer-events:none auf dem Block selbst) bleibt
-    // unveraendert klickbar fuer "neuen Termin anlegen".
+    // der Rest der Spalte (pointer-events:none auf dem Block selbst) gehoert
+    // der leeren Zeit - und die legt per Doppelklick oder langem Druck an
+    // (wireTimeGridCreate), nicht per Einzelklick.
     const blockEl = e.target.closest('.schedule-time-block');
     if (blockEl) {
       const entry = findScheduleEntryByKey(blockEl.dataset.scheduleKey);
@@ -4037,13 +4171,15 @@ function renderWeekView(container) {
     if (evEl) {
       const ev = state.events.find((ev) => ev.id === parseInt(evEl.dataset.id, 10));
       if (ev) openEventDetail(ev, evEl);
-      return;
     }
-    const col = e.target.closest('[data-date]');
-    if (col) {
-      const time = clickedTime(e, col);
-      openEventModal({ mode: 'create', date: col.dataset.date, time });
-    }
+  });
+  wireTimeGridCreate(weekCols, {
+    scroller: container.querySelector('#week-scroll'),
+    slotAt: (e) => {
+      if (e.target?.closest?.('.schedule-time-block, .week-event')) return null;
+      const col = e.target?.closest?.('[data-date]');
+      return col ? { date: col.dataset.date, time: clickedTime(e, col), col } : null;
+    },
   });
 
   container.querySelector('.allday-row').addEventListener('click', (e) => {
@@ -4119,6 +4255,140 @@ function handleGridKeydown(e) {
     const ev = state.events.find((x) => x.id === parseInt(target.dataset.id, 10));
     if (ev) openEventDetail(ev, target);
   }
+}
+
+/**
+ * Der Hinweis im leeren Tag nennt die Geste, die hier anlegt (Z2): am
+ * primaeren Grobzeiger das lange Druecken, sonst den Doppelklick. Hier stand
+ * „Tippe auf eine Uhrzeit" - das Versprechen des Einzeltipps, der seit R17
+ * nichts mehr anlegt.
+ */
+function dayEmptyHintText() {
+  const coarse = typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    && window.matchMedia('(pointer: coarse)').matches;
+  return t(coarse ? 'calendar.dayEmptyHintTouch' : 'calendar.dayEmptyHintPointer');
+}
+
+const GRID_PRESS_MS = 500;
+const GRID_PRESS_SLOP = 10;
+
+/**
+ * ANLEGEN IM ZEITRASTER NACH APPLE-MUSTER (R17 Z2, Re-Critique 2026-09-28,
+ * A2 P1-1 und die Frage dahinter).
+ *
+ * Bis hier legte JEDER Klick auf leere Zeit einen Termin an. Gemessen oeffnete
+ * damit der natuerlichste Weg, eine Leseansicht zu schliessen - daneben
+ * klicken -, das Formular „Neuer Termin" (R16 fing das nur fuer den offenen
+ * Popover ab, detail-view.js). Apples Kalender trennt Lesen und Anlegen: am
+ * Mac legt ein DOPPELKLICK auf leere Zeit an, am iPhone ein LANGES DRUECKEN.
+ * Ein Einzelklick oder Tipp tut nichts, ausser Offenes zu schliessen. Der
+ * sichtbare Weg bleibt „+ Termin" (FAB bzw. angedockte Pille) und das Kuerzel n.
+ *
+ * WELCHE GESTE, ENTSCHEIDET DER ZEIGER DES KONTAKTS, nicht eine Media Query:
+ * ein Touch-Laptop hat beide, und wer mit der Maus doppelklickt, meint etwas
+ * anderes als wer mit dem Finger doppeltippt. Maus -> `dblclick`; Finger und
+ * Stift -> 500ms Halten (dieselbe Schwelle und derselbe 10px-Spielraum wie der
+ * Long-Press der Aufgabenzeilen, tasks.js). Der Doppeltipp legt nicht an: er
+ * ist auf dem Telefon Zoom oder Versehen, und zwei Gesten fuer eine Absicht
+ * lernt niemand.
+ *
+ * ABBRUCH, WENN DIE FLAECHE ETWAS ANDERES WILL: mehr als 10px Bewegung (das
+ * waagerechte Wischen zwischen Zeitraeumen, utils/period-swipe.js), ein
+ * Scroll des Rasters oder `pointercancel` (der Browser hat die Geste als
+ * Scrollen uebernommen) beenden den Druck. Waehrend des Drucks unterdrueckt
+ * die Flaeche das Kontextmenue; Textauswahl und iOS-Callout nimmt ihr
+ * calendar.css.
+ *
+ * ANGELEGT WIRD BEIM LOSLASSEN, und das `touchend` wird verworfen: das
+ * Formular geht sonst unter dem Finger auf, und der Klick, den der Browser dem
+ * Loslassen nachschickt, landete auf dem Hintergrund des neuen Blatts - der
+ * schliesst es (components/modal.js).
+ *
+ * WAEHREND DES DRUCKS STEHT EIN PLATZHALTER DER KOMMENDEN STARTZEIT in der
+ * Spalte (`.cal-press-ghost`, calendar.css): er blendet ueber die Haltezeit
+ * ein, wird an der Schwelle scharf (`is-armed`) und verschwindet mit jedem
+ * Abbruch und beim Anlegen. Die Vibration allein war kein Signal - iOS
+ * vibriert fuer Webseiten nicht, dort sah man bis zum Loslassen nichts.
+ *
+ * @param {HTMLElement} surface  Spalten-Traeger (Woche) bzw. Tagesspalte
+ * @param {object} opts
+ * @param {(e: Event) => ({date: string, time: string, col?: HTMLElement}|null)} opts.slotAt
+ *   leere Zeit unter dem Ereignis, `null` auf einem Termin oder Block; `col`
+ *   ist die Spalte, in die der Platzhalter des Drucks gehoert
+ * @param {HTMLElement|null} [opts.scroller]  der Scrollport des Rasters
+ * @param {(slot: {date: string, time: string}) => void} [opts.onCreate]
+ */
+
+function wireTimeGridCreate(surface, {
+  slotAt,
+  scroller = null,
+  onCreate = (slot) => openEventModal({ mode: 'create', date: slot.date, time: slot.time }),
+} = {}) {
+  if (!surface) return;
+  let press = null;
+  let lastPointer = 'mouse';
+  let released = false;
+  const clear = () => {
+    if (press?.timer) clearTimeout(press.timer);
+    press?.ghost?.remove();
+    press = null;
+  };
+  const ghostFor = (slot) => {
+    const col = slot.col || surface;
+    if (typeof document === 'undefined' || typeof col?.append !== 'function') return null;
+    const [hour, minute] = slot.time.split(':').map(Number);
+    const ghost = document.createElement('div');
+    ghost.className = 'cal-press-ghost';
+    ghost.setAttribute('aria-hidden', 'true');
+    ghost.style.top = hourOffset(hour * 60 + minute);
+    ghost.style.height = hourOffset(60);
+    ghost.style.setProperty('--cal-press-ms', `${GRID_PRESS_MS}ms`);
+    ghost.textContent = formatTime(slot.time);
+    col.append(ghost);
+    return ghost;
+  };
+
+  surface.addEventListener('pointerdown', (e) => {
+    clear();
+    released = false;
+    lastPointer = e.pointerType || 'mouse';
+    if (lastPointer === 'mouse' || e.isPrimary === false) return;
+    const slot = slotAt(e);
+    if (!slot) return;
+    press = { slot, x: e.clientX, y: e.clientY, armed: false, timer: null, ghost: ghostFor(slot) };
+    press.timer = setTimeout(() => {
+      if (!press) return;
+      press.timer = null;
+      press.armed = true;
+      press.ghost?.classList.add('is-armed');
+      vibrate(15);
+    }, GRID_PRESS_MS);
+  });
+  surface.addEventListener('pointermove', (e) => {
+    if (press && Math.hypot(e.clientX - press.x, e.clientY - press.y) > GRID_PRESS_SLOP) clear();
+  });
+  surface.addEventListener('pointerup', () => {
+    const slot = press?.armed ? press.slot : null;
+    clear();
+    if (!slot) return;
+    released = true;
+    onCreate(slot);
+  });
+  surface.addEventListener('touchend', (e) => {
+    if (!released) return;
+    released = false;
+    if (e.cancelable !== false) e.preventDefault();
+  }, { passive: false });
+  surface.addEventListener('pointercancel', clear);
+  scroller?.addEventListener('scroll', clear, { passive: true });
+  surface.addEventListener('contextmenu', (e) => {
+    if (press) e.preventDefault();
+  });
+  surface.addEventListener('dblclick', (e) => {
+    if (lastPointer !== 'mouse') return;
+    const slot = slotAt(e);
+    if (slot) onCreate(slot);
+  });
 }
 
 /**
@@ -4270,7 +4540,7 @@ function renderAllDayEvent(ev, dayStr) {
   // title-Attribut und im gesprochenen Namen bleibt.
   return `
     <div class="${segment ? bandClasses('allday-event', segment) : 'allday-event'}" data-id="${ev.id}"
-         style="${eventSurfaceStyle(ev)}"${eventBlockAttrs(ev, spoken || t('calendar.allDay'))}
+         style="${eventSurfaceStyle(ev)}"${eventBlockAttrs(ev, spoken || t('calendar.allDay'), dayStr)}
          title="${allDayChipTitle(ev, allDayChipTimeText(ev, dayStr, { suffix: true }))}">${segment?.continuesBefore ? bandContinuationHtml('before') : ''}${eventGlyphsHtml(ev)}<span class="allday-event__line"><span class="allday-event__label"><span>${esc(ev.title)}</span>${allDayChipTimeHtml(timeText)}</span>${chipAssigneeStack(ev, { size: 14, maxVisible: 2 })}</span>${segment?.continuesAfter ? bandContinuationHtml('after') : ''}</div>`;
 }
 
@@ -4323,7 +4593,7 @@ function renderWeekEvent(ev, layout = null, dayStr = null) {
   return `
     <div class="week-event" data-id="${ev.id}"
          style="top:${top};height:${height};left:${left};width:${width};${eventSurfaceStyle(ev)}"
-         title="${esc(ev.title)}${chipAssigneeTitleSuffix(ev)}"${eventBlockAttrs(ev, eventTimeText(ev, dayStr))}>
+         title="${esc(ev.title)}${chipAssigneeTitleSuffix(ev)}"${eventBlockAttrs(ev, eventTimeText(ev, dayStr), dayStr)}>
       <div class="week-event__title">${eventGlyphsHtml(ev)}<span>${esc(ev.title)}</span></div>
       <div class="week-event__time"><span class="week-event__when">${gridTimeText(ev, dayStr)}</span>${chipAssigneeStack(ev, { size: 14, maxVisible: 2 })}</div>
     </div>
@@ -4540,7 +4810,7 @@ function renderDayView(container) {
               ...scheduleBlocks.map((entry) => ({ range: scheduleBlockTimeRange(entry), html: () => renderScheduleTimeBlock(entry, 'day-event', scheduleLayout.get(entry)) })),
               ...timed.map((ev) => ({ range: timeRangeForEvent(ev, state.cursor), html: () => renderDayEvent(ev, layout.get(ev), state.cursor) })),
             ])}
-            ${dayEvs.length === 0 && schedule.length === 0 ? `<div class="day-view__empty-hint" style="top:calc(${hourOffset(state.cursor === state.today ? nowMinutes() : 9 * 60)} + 16px)">${t('calendar.dayEmptyHint')}</div>` : ''}
+            ${dayEvs.length === 0 && schedule.length === 0 ? `<div class="day-view__empty-hint" style="top:calc(${hourOffset(state.cursor === state.today ? nowMinutes() : 9 * 60)} + 16px)">${dayEmptyHintText()}</div>` : ''}
           </div>
           ${state.cursor === state.today ? `
             <div class="day-view__now-line" aria-hidden="true" style="top:${hourOffset(nowMinutes())};"></div>
@@ -4577,7 +4847,8 @@ function renderDayView(container) {
     }
   });
 
-  container.querySelector('#day-col').addEventListener('click', (e) => {
+  const dayCol = container.querySelector('#day-col');
+  dayCol.addEventListener('click', (e) => {
     // S-17: ein Klick GENAU auf den sichtbaren Text eines Schichtblocks
     // oeffnet die Detailansicht - siehe der gleiche Kommentar in renderWeekView().
     const blockEl = e.target.closest('.schedule-time-block');
@@ -4590,10 +4861,15 @@ function renderDayView(container) {
     if (evEl) {
       const ev = state.events.find((ev) => ev.id === parseInt(evEl.dataset.id, 10));
       if (ev) openEventDetail(ev, evEl);
-      return;
     }
-    const time = clickedTime(e, e.currentTarget);
-    openEventModal({ mode: 'create', date: state.cursor, time });
+  });
+  const day = state.cursor;
+  wireTimeGridCreate(dayCol, {
+    scroller: container.querySelector('#day-scroll'),
+    slotAt: (e) => {
+      if (e.target?.closest?.('.schedule-time-block, .day-event')) return null;
+      return { date: day, time: clickedTime(e, dayCol), col: dayCol };
+    },
   });
 
   container.querySelector('.day-view').addEventListener('keydown', handleGridKeydown);
@@ -4641,7 +4917,7 @@ function renderDayEvent(ev, layout = null, dayStr = null) {
   return `
     <div class="day-event${roomy ? '' : ' day-event--tight'}" data-id="${ev.id}"
          style="top:${top};height:${height};left:${left};width:${width};${eventSurfaceStyle(ev)}"
-         title="${esc(ev.title)}${ev.location ? ' · ' + esc(fmtLocation(ev.location)) : ''}${chipAssigneeTitleSuffix(ev)}"${eventBlockAttrs(ev, eventTimeText(ev, dayStr))}>
+         title="${esc(ev.title)}${ev.location ? ' · ' + esc(fmtLocation(ev.location)) : ''}${chipAssigneeTitleSuffix(ev)}"${eventBlockAttrs(ev, eventTimeText(ev, dayStr), dayStr)}>
       <span class="day-event__text">
         <span class="day-event__title">${eventGlyphsHtml(ev)}<span class="day-event__name">${esc(ev.title)}</span></span>
         <span class="day-event__meta">${timeText}${place}</span>
@@ -4710,8 +4986,78 @@ function handleDayRowActivation(e, { keyboard = false } = {}) {
   const evEl = e.target.closest('.agenda-event');
   if (!evEl) return;
   if (keyboard) e.preventDefault();
+  // In der Agenda entscheidet der Baustein: ab der Schwelle waehlt die Zeile
+  // aus (Detailspalte), darunter oeffnet sie wie bisher (openNarrow).
+  if (_agendaMd && evEl.dataset.mdId) { _agendaMd.open(evEl.dataset.mdId, evEl); return; }
   const ev = state.events.find((x) => x.id === parseInt(evEl.dataset.id, 10));
   if (ev) openEventDetail(ev, evEl);
+}
+
+/**
+ * Die Auswahl-ID einer Agenda-Zeile: Termin UND Tag (`<id>.<YYYY-MM-DD>`).
+ * Ein Serientermin und ein mehrtaegiger Termin stehen mit derselben id an
+ * mehreren Tagen; mit der id allein fuehrten die Pfeiltasten von der zweiten
+ * Zeile einer Serie zurueck zur ersten (der Baustein findet die ERSTE Zeile
+ * zu einer ID). Ein Punkt statt eines Doppelpunkts: die Adresse traegt ihn
+ * unkodiert, und die id ist eine Zahl. Haushaltshilfe-Besuche bekommen keine
+ * - sie oeffnen ihr eigenes Modul, eine Vorwahl darf dorthin nicht fuehren.
+ */
+function agendaMdId(ev, day) {
+  if (ev?.housekeeping_visit_id) return null;
+  return `${ev.id}.${day}`;
+}
+
+function agendaMdIdAttr(ev, day) {
+  const id = agendaMdId(ev, day);
+  return id ? ` data-md-id="${esc(id)}"` : '';
+}
+
+/** Der Termin zu einer Auswahl-ID, bevorzugt das Vorkommen an diesem Tag. */
+function eventForAgendaMdId(mdId) {
+  const m = /^(\d+)(?:\.(\d{4}-\d{2}-\d{2}))?$/.exec(String(mdId ?? ''));
+  if (!m) return null;
+  const id = Number(m[1]);
+  const matches = state.events.filter((x) => x.id === id);
+  return matches.find((x) => m[2] && localDate(x.start_datetime) === m[2]) ?? matches[0] ?? null;
+}
+
+/** Die Agenda wird verlassen (andere Ansicht): die Auswahl geht mit, ohne Geschichte. */
+function dropAgendaSelection() {
+  if (!_agendaMd) return;
+  const md = _agendaMd;
+  _agendaMd = null;
+  if (md.selectedId() != null) md.clear({ history: 'replace' });
+  md.destroy();
+}
+
+/**
+ * Haengt Liste + Detail an die gerade gebaute Agenda. Ein reiner Zahl-Link
+ * (`?open=12`, globale Suche) loest der Kalender wie bisher selbst ein
+ * (render(): Vorkommen am Zieltag) - der Baustein beansprucht nur seine
+ * eigene Form `<id>.<Tag>`.
+ */
+function mountAgendaDetail(container) {
+  const root = container.querySelector('.calendar-agenda-split');
+  _agendaMd?.destroy();
+  _agendaMd = null;
+  if (!root) return;
+  const open = new URLSearchParams(location.search).get('open');
+  _agendaMd = mountMasterDetail({
+    root,
+    claimInitial: !(open && /^\d+$/.test(open)),
+    renderDetail: (id, body) => {
+      const ev = eventForAgendaMdId(id);
+      if (!ev || ev.housekeeping_visit_id) return false;
+      // Nicht abwarten: die Erinnerungen kommen nach (openEventDetail), die
+      // Spalte gehoert sofort dem Termin.
+      openEventDetail(ev, null, { pane: body });
+      return undefined;
+    },
+    openNarrow: (id, trigger) => {
+      const ev = eventForAgendaMdId(id);
+      if (ev) openEventDetail(ev, trigger ?? null);
+    },
+  });
 }
 
 function renderAgendaView(container) {
@@ -4739,7 +5085,8 @@ function renderAgendaView(container) {
 
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
-    <div class="agenda-view page-scrollport" id="agenda-view">
+    <div class="split-view calendar-agenda-split">
+    <div class="agenda-view page-scrollport split-view__list" id="agenda-view">
       ${groups.length === 0
         ? emptyStateHTML({
           icon: 'calendar-plus',
@@ -4760,6 +5107,12 @@ function renderAgendaView(container) {
         `).join('')
       }
     </div>
+    ${splitViewDetailHtml({
+      id: 'calendar',
+      label: t('calendar.detailPaneLabel'),
+      empty: { icon: 'calendar', title: t('calendar.pickOne'), hint: t('calendar.pickOneHint') },
+    })}
+    </div>
   `);
 
   stagger(container.querySelectorAll('.agenda-event'), { host: container });
@@ -4776,8 +5129,13 @@ function renderAgendaView(container) {
   // Tastaturaktivierung der als role="button" ausgezeichneten Zeilen (Enter/Space).
   agenda.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
+    // Enter auf der schon gewaehlten Zeile gehoert dem Baustein (fokussiert
+    // das Detail); ein zweites Oeffnen hier waere dieselbe Geste doppelt.
+    if (e.defaultPrevented) return;
     handleDayRowActivation(e, { keyboard: true });
   });
+
+  mountAgendaDetail(container);
 }
 
 // --------------------------------------------------------
@@ -5007,9 +5365,25 @@ function openCalendarFilters() {
   // nichts, was ein „Aenderungen verwerfen?" beim Schliessen verwerfen koennte.
   // Der Standard-Waechter fragte trotzdem, sobald man eine Ebene ein- oder
   // ausblendete, und sein „Verwerfen" nahm die Ebene dann nicht zurueck.
-  openSharedModal({ title: t('calendar.filters'), content, size: 'sm', initialFocus: 'none', dirtyGuard: false });
-
-  const panel = document.querySelector('#shared-modal-overlay .modal-panel');
+  // AM DESKTOP EIN POPOVER AM KNOPF (Re-Critique 2026-09-28, A2 P2-7): das
+  // zentrierte Blatt mit Blur-Backdrop verdeckte genau den Kalender, dessen
+  // Aenderung ein Haken live ausloest. Ab 1024px haengen die Filter ohne
+  // Abdunkeln am Filterknopf (Apple Kalender); schmaler bleibt das Blatt.
+  const asPopover = filtersAsPopover();
+  // Ein Klick auf den Knopf bei offenem Popover schliesst es zuerst per
+  // Light-Dismiss (pointerdown) - derselbe Klick oeffnete es sonst sofort
+  // wieder. So wirkt der Knopf wie ein Umschalter.
+  if (asPopover && Date.now() - filtersPopoverClosedAt < 300) return;
+  let panel;
+  let closeFilters;
+  if (asPopover) {
+    panel = openFiltersPopover(content);
+    closeFilters = () => panel.hidePopover?.();
+  } else {
+    openSharedModal({ title: t('calendar.filters'), content, size: 'sm', initialFocus: 'none', dirtyGuard: false });
+    panel = document.querySelector('#shared-modal-overlay .modal-panel');
+    closeFilters = () => closeModal({ force: true });
+  }
   if (!panel) return;
 
   const LAYER_STATE = {
@@ -5088,6 +5462,7 @@ function openCalendarFilters() {
     }
 
     renderToolbar();
+    if (asPopover) _container?.querySelector('#cal-filters')?.setAttribute('aria-expanded', 'true');
     renderView();
   });
 
@@ -5114,10 +5489,74 @@ function openCalendarFilters() {
       localStorage.setItem(ASSIGNED_TO_ME_KEY, '0');
     } catch {}
     persistPeopleFilter();
-    closeModal({ force: true });
+    closeFilters();
     renderToolbar();
     renderView();
   });
+}
+
+const FILTERS_POPOVER_QUERY = '(min-width: 1024px)';
+let filtersPopoverClosedAt = 0;
+
+function filtersAsPopover() {
+  if (typeof HTMLElement === 'undefined' || !('popover' in HTMLElement.prototype)) return false;
+  return window.matchMedia?.(FILTERS_POPOVER_QUERY)?.matches === true;
+}
+
+/**
+ * Die Filter als natives Popover (Top-Layer, Light-Dismiss und Esc vom
+ * Browser) am Filterknopf. Die Position rechnet JS - dieselbe Rechnung wie
+ * utils/popover-menu.js (rechtsbuendig unter dem Ausloeser, im Fenster
+ * gehalten); CSS-Anchor-Positioning fehlt noch in zu vielen Browsern. Der
+ * Knopf wird bei jedem Haken NEU gebaut (renderToolbar()), deshalb sucht jede
+ * Stelle ihn frisch statt eine alte Referenz zu halten.
+ */
+function openFiltersPopover(content) {
+  document.getElementById('cal-filters-popover')?.remove();
+  const trigger = () => _container?.querySelector('#cal-filters') ?? null;
+  const pop = document.createElement('div');
+  pop.id = 'cal-filters-popover';
+  pop.className = 'cal-filters-popover';
+  pop.setAttribute('popover', 'auto');
+  pop.setAttribute('role', 'dialog');
+  pop.setAttribute('aria-labelledby', 'cal-filters-popover-title');
+  pop.insertAdjacentHTML('beforeend', `<h2 class="cal-filters-popover__title" id="cal-filters-popover-title">${esc(t('calendar.filters'))}</h2>${content}`);
+  document.body.appendChild(pop);
+  window.lucide?.createIcons({ el: pop });
+  // DER FOKUS GEHT AN DEN KNOPF ZURUECK, und zwar VOR dem Schliessen: nach
+  // Esc fiel er sonst aus dem verschwindenden Popover auf den Scrollport
+  // (gemessen: #main-content), bevor `toggle` ueberhaupt lief. Ein Klick
+  // daneben auf ein anderes Bedienelement setzt seinen Fokus danach trotzdem
+  // selbst - der Light-Dismiss laeuft auf pointerdown, der Fokus erst mit
+  // mousedown.
+  pop.addEventListener('beforetoggle', (event) => {
+    if (event.newState === 'closed' && pop.contains(document.activeElement)) trigger()?.focus();
+  });
+  pop.addEventListener('toggle', (event) => {
+    const open = event.newState === 'open';
+    trigger()?.setAttribute('aria-expanded', String(open));
+    if (open) return;
+    filtersPopoverClosedAt = Date.now();
+    pop.remove();
+  });
+  pop.showPopover();
+  positionFiltersPopover(pop, trigger());
+  trigger()?.setAttribute('aria-expanded', 'true');
+  pop.querySelector('input, button')?.focus();
+  return pop;
+}
+
+function positionFiltersPopover(pop, anchor) {
+  if (!anchor) return;
+  const rect = anchor.getBoundingClientRect();
+  const gap = 4;
+  const margin = 8;
+  const width = pop.offsetWidth || 360;
+  const left = Math.min(Math.max(margin, rect.right - width), window.innerWidth - width - margin);
+  const top = rect.bottom + gap;
+  pop.style.left = `${Math.round(left)}px`;
+  pop.style.top = `${Math.round(top)}px`;
+  pop.style.maxHeight = `${Math.round(window.innerHeight - top - margin)}px`;
 }
 
 /**
@@ -5417,6 +5856,10 @@ async function openFoundEvent(ev) {
 }
 
 export const __test = {
+  playViewSwap,
+  eventBlockAttrs,
+  // R10 L5: Liste + Detail der Agenda - Auswahl-ID und ihr Termin.
+  agendaMdId, eventForAgendaMdId,
   // Die Nur-lesen-Weiche (#467) und der Anlegeweg, den sie als erstes schliesst.
   readOnly, openEventModal,
   periodStepOf, periodArrowLabels, openCalendarFilters,
@@ -5452,6 +5895,7 @@ export const __test = {
   agendaSegmentKind,
   deepLinkTargetDate,
   dayDeepLinkDate,
+  openDeepLink,
   findDeepLinkedOccurrence,
   validDateParam,
   hasAttachment,
@@ -5562,7 +6006,7 @@ function renderAgendaEvent(ev, dayStr) {
   // `renderKeepingFocus()` nach dem Neuaufbau mehrere Kandidaten und weicht auf
   // die Seitenwurzel aus, statt auf der Zeile zu bleiben (#1083).
   return `
-    <div class="list-row agenda-event" data-id="${ev.id}" data-date="${esc(day)}" role="button" tabindex="0"
+    <div class="list-row agenda-event" data-id="${ev.id}" data-date="${esc(day)}"${agendaMdIdAttr(ev, day)} role="button" tabindex="0"
          style="${eventSurfaceStyle(ev)}" aria-label="${esc(agendaEventAriaLabel(ev, [timeStr, position].filter(Boolean).join(', ')))}">
       <div class="agenda-event__body">
         <div class="agenda-event__title">${eventGlyphsHtml(ev, { compact: false })}<span>${esc(ev.title)}</span></div>
@@ -5578,11 +6022,12 @@ function renderAgendaEvent(ev, dayStr) {
   `;
 }
 
-function agendaEventAriaLabel(ev, timeStr) {
+function agendaEventAriaLabel(ev, timeStr, dayText = '') {
   return [
     (ev.recurrence_rule || ev.is_recurring_instance) ? t('calendar.recurringEvent') : '',
     ev.title,
     timeStr,
+    dayText,
     ev.location ? fmtLocation(ev.location) : '',
     ev.cal_name,
     chipAssigneeLabel(ev),
@@ -5597,8 +6042,16 @@ function agendaEventAriaLabel(ev, timeStr) {
  * Zeit, Ort, Kalender, Personen), damit ein Termin in jeder Ansicht gleich
  * klingt. Enter/Leertaste: handleGridKeydown.
  */
-function eventBlockAttrs(ev, timeText) {
-  return ` role="button" tabindex="0" aria-label="${esc(agendaEventAriaLabel(ev, timeText))}"`;
+//
+// Im Wochen- und Tagesraster nennt der Name auch den TAG (A2 P2-2): in der
+// Agenda traegt die Tagesueberschrift ihn, im Raster tragen die Spalten kein
+// Label - wer die Woche per Tab abfuhr, hoerte "Fussball, 14:00 - 15:00" ohne
+// zu erfahren, an welchem der sieben Tage. `dayStr` ist die Spalte, in der
+// der Block steht, gesprochen wie die Monatszelle ("Montag, 28.09.2026") -
+// HINTER der Uhrzeit, damit "Titel, Zeit" in jeder Ansicht gleich beginnt.
+function eventBlockAttrs(ev, timeText, dayStr = null) {
+  const dayText = dayStr ? formatDate(dayStr, { long: true, weekday: true }) : '';
+  return ` role="button" tabindex="0" aria-label="${esc(agendaEventAriaLabel(ev, timeText, dayText))}"`;
 }
 
 // Sichtbarkeits-Indikator (#474): nur bei eingeschränkten Terminen ein dezentes
@@ -5741,6 +6194,28 @@ function eventMapUrl(location) {
 }
 
 /**
+ * Ort in einer Karte öffnen (#1110) - als ausdrückliche Aktion, nicht als Link
+ * auf dem Ortstext: `location` ist Freitext, und "Zoom" oder "Raum 3B" sind
+ * keine Adresse. Die Aktion behauptet das nie, der Link wird erst beim Antippen
+ * benutzt. Dieselbe Suche wie die Adresse in Kontakte.
+ *
+ * ALS FOLGEAKTION DER ORT-ZEILE (R10 L6, A2 P3), nicht mehr in der Fusszeile:
+ * dort stand sie neben Loeschen und Bearbeiten und brach den Fuss auf drei
+ * Reihen (mobil 133px). Sie schreibt nichts und gehoert deshalb auch einem
+ * Nur-lesen-Nutzer - kein `readOnly()` hier.
+ */
+function mapRowAction(ev) {
+  const mapUrl = eventMapUrl(ev.location);
+  if (!mapUrl) return null;
+  return {
+    id: 'detail-open-map',
+    label: t('calendar.openInMap'),
+    icon: 'map-pin',
+    onClick: () => window.open(mapUrl, '_blank', 'noopener'),
+  };
+}
+
+/**
  * Die Leseinformationen eines Termins.
  *
  * Wiederholung, Erinnerungen und Sichtbarkeit standen bisher nur im
@@ -5752,7 +6227,7 @@ function renderEventDetail(ev, reminders = []) {
     { icon: 'calendar', label: t('calendar.detailCalendar'), node: calendarChipNode(ev) },
     { icon: 'clock', label: t('calendar.detailWhen'), value: eventWhenText(ev) },
     recurrenceRow(ev.recurrence_rule),
-    { icon: 'map-pin', label: t('calendar.locationLabel'), value: ev.location ? fmtLocation(ev.location) : '' },
+    { icon: 'map-pin', label: t('calendar.locationLabel'), value: ev.location ? fmtLocation(ev.location) : '', action: mapRowAction(ev) },
     assignedRow(ev.assigned_users, t('calendar.assignedLabel'), ev.assigned_name || ''),
     {
       icon: 'bell',
@@ -5778,9 +6253,10 @@ function renderEventDetail(ev, reminders = []) {
  * Der einzige Einstieg in einen bestehenden Termin. Ohne Anker (Deep-Link,
  * Suchtreffer) wird daraus ein Sheet, mit Anker am Desktop ein Popover.
  */
-async function openEventDetail(ev, anchor = null) {
+async function openEventDetail(ev, anchor = null, { pane = null } = {}) {
   // Haushaltshilfe-Besuche werden in ihrem eigenen Modul bearbeitet; der Umweg
-  // über eine Detailansicht führte sonst ins Leere.
+  // über eine Detailansicht führte sonst ins Leere. (In der Detailspalte der
+  // Agenda stehen sie gar nicht erst zur Wahl - agendaMdId().)
   if (ev?.housekeeping_visit_id) {
     window.yuvomi.navigate(`/housekeeping?editVisit=${ev.housekeeping_visit_id}`);
     return;
@@ -5819,21 +6295,6 @@ async function openEventDetail(ev, anchor = null) {
     },
   }];
 
-  // Ort in einer Karte öffnen (#1110) - als ausdrückliche Aktion, nicht als Link
-  // auf dem Ortstext: `location` ist Freitext, und "Zoom" oder "Raum 3B" sind
-  // keine Adresse. Die Aktion behauptet das nie, der Link wird erst beim Antippen
-  // benutzt. Dieselbe Suche wie die Adresse in Kontakte.
-  const mapUrl = eventMapUrl(ev.location);
-  if (mapUrl) {
-    actions.push({
-      id: 'detail-open-map',
-      label: t('calendar.openInMap'),
-      variant: 'ghost',
-      icon: 'map-pin',
-      onClick: () => window.open(mapUrl, '_blank', 'noopener'),
-    });
-  }
-
   // ICS-Abos: Ein lokal geänderter Termin lässt sich auf das Original
   // zurücksetzen. Die Aktion gehört zum Objekt, also in die Fußzeile.
   if (ev.external_source === 'ics' && ev.user_modified === 1 && !readOnly()) {
@@ -5864,6 +6325,10 @@ async function openEventDetail(ev, anchor = null) {
     title: ev.title,
     accentColor: resolveEventBackground(ev),
     anchor,
+    // Die Detailspalte der Agenda (Liste + Detail): dieselbe Ansicht, rechts
+    // neben der Liste statt als Popover. Bearbeiten steht dort im Kopf und
+    // fuehrt ins Formular-Modal (`edit.standalone`).
+    pane: pane ?? undefined,
     sections: renderEventDetail(ev, reminders),
     actions,
     // Ohne `edit` baut die geteilte Ansicht keinen Bearbeiten-Knopf
@@ -5955,9 +6420,18 @@ function reminderAnchorStart(event) {
   return event?.reminder_anchor_start ?? event?.start_datetime;
 }
 
-/** Ein Termin-Start als Millisekunden; ein reines Datum gilt als 09:00. */
+/**
+ * Ein Termin-Start als Zeitpunkt in Millisekunden; ein reines Datum gilt als
+ * 09:00.
+ *
+ * Der Beginn ist Wanduhrzeit der HAUSHALTSZONE, `remind_at` ein Zeitpunkt.
+ * `new Date(start)` las die Ziffern in der Zone des Geraets, und auf einem
+ * Geraet ausserhalb des Haushalts lag jede Erinnerung um den Zonenabstand
+ * daneben (#1522). Dieselbe Lesart wie `reminderAnchorInstantMs()` auf dem
+ * Server, damit Dialog und Server denselben Anker haben.
+ */
 function reminderStartMs(startDatetime) {
-  return new Date(reminderStartValue(startDatetime)).getTime();
+  return wallTimeToInstantMs(reminderStartValue(startDatetime)) ?? NaN;
 }
 
 /** Vorlauf in ganzen Minuten - positiv heisst „vor dem Beginn". */
@@ -6588,8 +7062,9 @@ function wireVisibilityWarning(panel, selectSel, msName, warnSel) {
 
 function openEventModal({ mode, event = null, date = null, reminder = null, time = null }) {
   // DER LETZTE RIEGEL VOR DEM FORMULAR. Es gibt sieben Wege hierher - Kopfknopf,
-  // FAB, Klick in eine leere Stunde der Wochen- und der Tagesansicht, zwei
-  // Leerzustands-CTAs und der Bearbeiten-Weg der Detailansicht. Sie alle
+  // FAB, Doppelklick oder langer Druck in eine leere Stunde der Wochen- und der
+  // Tagesansicht (wireTimeGridCreate), zwei Leerzustands-CTAs und der
+  // Bearbeiten-Weg der Detailansicht. Sie alle
   // einzeln zu sperren waere sechs Chancen, eine zu vergessen; der siebte Weg,
   // der morgen dazukommt, findet den Riegel hier ohnehin.
   if (readOnly()) return;

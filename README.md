@@ -36,7 +36,7 @@
     <img src="docs/screenshots/dashboard-light-web.webp" alt="The myCrib dashboard: today's tasks, calendar events, meals and the shopping list on one screen" width="820">
   </picture>
 
-  <sub><b>20</b> modules&nbsp;&nbsp;·&nbsp; <b>24</b> languages&nbsp;&nbsp;·&nbsp; <b>0</b> trackers&nbsp;&nbsp;·&nbsp; optional&nbsp;<b>AES&#8209;256</b>&nbsp;database&nbsp;encryption&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
+  <sub><b>20</b> modules&nbsp;&nbsp;·&nbsp; <b>25</b> languages&nbsp;&nbsp;·&nbsp; <b>0</b> trackers&nbsp;&nbsp;·&nbsp; optional&nbsp;<b>AES&#8209;256</b>&nbsp;database&nbsp;encryption&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
 </div>
 
 Most households glue their life together from a dozen paid apps, each with its own account, its
@@ -165,7 +165,7 @@ usually names the reason, and the
 
 ### Guided setup
 
-A setup wizard in your browser, in 24 languages. It detects Docker or Podman, configures HTTPS,
+A setup wizard in your browser, in 25 languages. It detects Docker or Podman, configures HTTPS,
 single sign-on and scheduled backups, then starts the container and creates your admin account.
 
 ```bash
@@ -216,7 +216,7 @@ Yuvomi was renamed from **Oikos** to avoid a trademark conflict with an unrelate
 - **Apple HIG in the Liquid Glass language** - the system font stack and Apple's type scale, capsule controls, inset-grouped lists and spring motion, verified for WCAG AA in light and dark.
 - **Privacy first** - fully self-hosted, optional SQLCipher AES-256 database encryption, zero telemetry.
 - **Sign-in that scales to a household** - optional two-factor authentication (TOTP with recovery codes, enforceable household-wide), invite links instead of handed-over passwords, and optional self-service password reset by email. Optional single sign-on works with any OIDC provider. One switch decides whether an unknown identity gets an account, so a provider shared beyond your household opens no door, and another makes SSO the only way in.
-- **24 languages** with automatic detection. A separate household setting decides the language of entries myCrib creates itself, so an exported calendar speaks your household's language instead of English.
+- **25 languages** with automatic detection. A separate household setting decides the language of entries myCrib creates itself, so an exported calendar speaks your household's language instead of English.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Express-000000?style=flat-square&logo=express&logoColor=white" alt="Express">

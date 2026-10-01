@@ -16,8 +16,8 @@ const ATTACHMENT_RIGHTS = ' A new attachment creates a document in the Documents
   + 'there (member right, for API tokens a `documents:write` scope); without it any non-empty `attachment_data` is refused with 403 '
   + 'before the event is looked up. Replacing or removing an attachment needs read access to the Documents module and sight of the '
   + 'stored document; otherwise the same 403, and the attachment stays. The 403 bodies carry `reason` `ATTACHMENT_UPLOAD_REFUSED` or '
-  + '`ATTACHMENT_CHANGE_REFUSED`. Saving an event carries its visibility and assignees over to the attachment\'s document; it opens the '
-  + 'document further only for a caller with write access to documents who can see it and may manage it (its creator - for an attachment the event creator - or an admin), otherwise it only narrows. The default-assignee sync of connected calendars never changes document rights, with one exception: when the event is visible to its assignees and the document is already shared with selected members, the new assignee is added to those shares. Otherwise nothing changes - no document becomes visible to the family, none is opened, narrowed or made private, and no share is removed. A copy made on split or detach belongs to the owner of its source document. A split or a '
+  + '`ATTACHMENT_CHANGE_REFUSED`. Saving an event carries its visibility and assignees over to the attachment\'s document only when the save changes who sees the event (its visibility, or the assignees of an event for assignees); a save of the title, time or other fields leaves the document\'s visibility and shares alone. It opens the '
+  + 'document further only for a caller with write access to documents who can see it and may manage it (its creator - for an attachment the event creator - or an admin); otherwise the document keeps the visibility and shares its owner set, so the save neither opens nor narrows it and removes no share. A new attachment uploaded in the same save to an event the caller did not create is only narrowed to the event, never opened further. The default-assignee sync of connected calendars never changes document rights, with one exception: when the event is visible to its assignees and the document is already shared with selected members, the new assignee is added to those shares. Otherwise nothing changes - no document becomes visible to the family, none is opened, narrowed or made private, and no share is removed. A copy made on split or detach belongs to the owner of its source document. A split or a '
   + 'detach copies the attachment for the new series or event only for such a caller; otherwise the new one has no attachment and '
   + 'the original stays on the original series.';
 
@@ -114,7 +114,15 @@ export function calendarPaths() {
       post: op({ summary: 'Create CalDAV account', tag: 'Calendar', admin: true, stateChanging: true, requestBody: jsonBody(null) }),
     },
     '/api/v1/calendar/caldav/accounts/{id}': {
-      put: op({ summary: 'Update CalDAV account', tag: 'Calendar', admin: true, params: [idParam()], stateChanging: true, requestBody: jsonBody(null) }),
+      put: op({
+        summary: 'Update CalDAV account',
+        tag: 'Calendar',
+        admin: true,
+        description: 'An omitted or empty `password` keeps the stored one, but only while the server (scheme, host and port) and the `username` stay the same. A different server or username without a new password is refused with 400 and `errorCode: password_required` before any connection is made, and nothing is saved. A different path on the same server needs no password.',
+        params: [idParam()],
+        stateChanging: true,
+        requestBody: jsonBody(null),
+      }),
       delete: op({ summary: 'Delete CalDAV account', tag: 'Calendar', admin: true, params: [idParam()], stateChanging: true }),
     },
     '/api/v1/calendar/caldav/accounts/{id}/calendars': {

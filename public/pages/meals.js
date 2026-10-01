@@ -20,8 +20,8 @@ import { mountEmptyState, mountLoadError, emptyStateEl } from '/utils/empty-stat
 import { mealPayloadFromRecipe } from '/utils/recipe-to-meal.js';
 import { findPageFab } from '/utils/fab.js';
 import { pageToolsMenuHtml, installPopoverMenus, syncPopoverMenuItem } from '/utils/popover-menu.js';
-import { zonedWeekday } from '/utils/timezone.js';
-import { mealTypeList, primeMealTypeNames } from '/utils/meal-types.js';
+import { zonedWeekday, nowFields } from '/utils/timezone.js';
+import { mealTypeList, primeMealTypeNames, MEAL_TYPE_KEYS } from '/utils/meal-types.js';
 import { recipeThumbHtml, wireRecipeThumbs } from '/utils/recipe-thumb.js';
 import { toDecimalString, breaksOffAtSeparator, toStoredNumber } from '/utils/money.js';
 
@@ -85,6 +85,213 @@ function getMondayOf(dateStr) {
 
 function addDays(dateStr, n) {
   return addLocalDays(dateStr, n);
+}
+
+// --------------------------------------------------------
+// Rezept einplanen ohne Ziehen (Re-Kritik 2026-09-28, A4 P1-1)
+// --------------------------------------------------------
+
+/**
+ * Die Mahlzeit, die zur Uhrzeit passt: morgens Fruehstueck, mittags
+ * Mittagessen, danach Abendessen. Der Zwischensnack ist nie die Vermutung -
+ * er ist die Ausnahme, die man bewusst waehlt.
+ */
+function mealTypeForHour(hour) {
+  if (hour < 10) return 'breakfast';
+  if (hour < 15) return 'lunch';
+  return 'dinner';
+}
+
+/**
+ * Wohin ein Rezept aus der Spalte geplant wird, wenn es nicht gezogen,
+ * sondern angetippt wird.
+ *
+ * Mahlzeit: die zur Uhrzeit, sofern sie sichtbar ist und das Rezept sie
+ * erlaubt; sonst die naechste passende danach, sonst die erste passende. Tag:
+ * heute, wenn heute in der sichtbaren Woche liegt, sonst deren Montag - und
+ * von dort der erste Tag, an dem diese Mahlzeit noch frei ist. Ist die Woche
+ * voll, bleibt es beim ersten Tag; der Dialog laesst beides aendern.
+ *
+ * @returns {{date: string, mealType: string}}
+ */
+function railRecipeTarget({ recipe, weekStart, today, hour, visibleMealTypes, meals }) {
+  const visible = MEAL_TYPE_KEYS.filter((key) => visibleMealTypes.includes(key));
+  const allowed = visible.filter((key) => recipeAllowsMealType(recipe, key));
+  const pool = allowed.length ? allowed : (visible.length ? visible : ['lunch']);
+  const wanted = mealTypeForHour(hour);
+  const rank = (key) => MEAL_TYPE_KEYS.indexOf(key);
+  const mealType = pool.includes(wanted)
+    ? wanted
+    : (pool.find((key) => rank(key) > rank(wanted)) ?? pool[0]);
+
+  const week = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const days = week.includes(today) ? week.slice(week.indexOf(today)) : week;
+  const taken = (date) => meals.some((m) => m.date === date && m.meal_type === mealType);
+  const date = days.find((d) => !taken(d)) ?? days[0];
+  return { date, mealType };
+}
+
+/** Rezept aus der Spalte in den Dialog "Mahlzeit hinzufuegen" (Klick/Enter). */
+function planRecipeFromRail(recipeId) {
+  const recipe = state.recipes.find((r) => r.id === Number(recipeId));
+  if (!recipe) return;
+  const { date, mealType } = railRecipeTarget({
+    recipe,
+    weekStart: state.currentWeek,
+    today: todayKey(),
+    hour: nowFields()?.hour ?? 12,
+    visibleMealTypes: state.visibleMealTypes,
+    meals: state.meals,
+  });
+  openMealModal({ mode: 'create', date, mealType, recipeId: recipe.id });
+}
+
+/**
+ * Vorschlaege fuer das Namensfeld: gespeicherte Rezepte zuerst (sie bringen
+ * Zutaten und den Weg zum Einkauf mit), dahinter die Namen frueherer
+ * Mahlzeiten, die kein gleichnamiges Rezept schon abdeckt. Ein Rezept wird ueber
+ * einen Wortteil gefunden, nicht nur ueber den Anfang - "ridge" findet
+ * "Porridge"; was mit der Eingabe beginnt, steht vorn.
+ *
+ * @returns {Array<{title: string, recipeId: number|null}>}
+ */
+function mealTitleSuggestions(query, recipes, history, limit = 8) {
+  const norm = (v) => String(v ?? '').toLocaleLowerCase();
+  const needle = norm(query).trim();
+  if (!needle) return [];
+  const recipeHits = recipes
+    .filter((r) => norm(r.title).includes(needle))
+    .sort((a, b) => (norm(a.title).startsWith(needle) ? 0 : 1) - (norm(b.title).startsWith(needle) ? 0 : 1)
+      || String(a.title).localeCompare(String(b.title)))
+    .map((r) => ({ title: r.title, recipeId: r.id }));
+  const seen = new Set(recipeHits.map((h) => norm(h.title)));
+  const historyHits = [];
+  for (const h of history ?? []) {
+    const title = h?.title;
+    if (!title || seen.has(norm(title))) continue;
+    seen.add(norm(title));
+    historyHits.push({ title, recipeId: null });
+  }
+  return [...recipeHits, ...historyHits].slice(0, limit);
+}
+
+/**
+ * Das Namensfeld als ARIA-1.2-Combobox mit Liste.
+ *
+ * Vorher waren die Vorschlaege `div`s ohne Rolle, das Feld hatte weder
+ * `role=combobox` noch `aria-expanded`: fuer den Screenreader gab es die Liste
+ * nicht, und die Pfeiltasten bewegten nur eine CSS-Klasse. Jetzt bleibt der
+ * Fokus im Feld, die Pfeile bewegen die Markierung (`aria-activedescendant`,
+ * `aria-selected`), Enter uebernimmt, Escape schliesst NUR die Liste. Ein
+ * Rezepttreffer ruft `onRecipe` - der Dialog setzt dann Rezept, Zutaten und
+ * `recipe_id` wie die Rezeptauswahl darunter.
+ */
+function wireMealTitleCombobox(panel, { onRecipe } = {}) {
+  const input = panel.querySelector('#modal-title');
+  const box = panel.querySelector('#modal-autocomplete');
+  if (!input || !box) return;
+  let items = [];
+  let active = -1;
+  let timer;
+  let seq = 0;
+  const optionId = (i) => `modal-autocomplete-opt-${i}`;
+
+  const setActive = (index) => {
+    active = index;
+    [...box.children].forEach((el, i) => {
+      el.classList.toggle('meal-modal__autocomplete-item--active', i === index);
+      el.setAttribute('aria-selected', String(i === index));
+    });
+    if (index >= 0) input.setAttribute('aria-activedescendant', optionId(index));
+    else input.removeAttribute('aria-activedescendant');
+  };
+  const close = () => {
+    box.hidden = true;
+    input.setAttribute('aria-expanded', 'false');
+    setActive(-1);
+  };
+  const show = (list) => {
+    items = list;
+    box.replaceChildren(...list.map((s, i) => {
+      const option = document.createElement('div');
+      option.id = optionId(i);
+      option.className = 'meal-modal__autocomplete-item';
+      option.setAttribute('role', 'option');
+      option.setAttribute('aria-selected', 'false');
+      option.dataset.index = String(i);
+      const title = document.createElement('span');
+      title.className = 'meal-modal__autocomplete-title';
+      title.textContent = s.title;
+      option.appendChild(title);
+      if (s.recipeId) {
+        const kind = document.createElement('span');
+        kind.className = 'meal-modal__autocomplete-kind';
+        kind.textContent = t('meals.suggestionRecipe');
+        option.appendChild(kind);
+      }
+      return option;
+    }));
+    if (!list.length) { close(); return; }
+    box.hidden = false;
+    input.setAttribute('aria-expanded', 'true');
+    setActive(-1);
+  };
+  const pick = (index) => {
+    const s = items[index];
+    if (!s) return;
+    input.value = s.title;
+    close();
+    if (s.recipeId) onRecipe?.(s.recipeId);
+  };
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const q = input.value.trim();
+    const mine = ++seq;
+    if (!q) { show([]); return; }
+    timer = setTimeout(async () => {
+      let history = [];
+      try {
+        const res = await api.get(`/meals/suggestions?q=${encodeURIComponent(q)}`);
+        history = res?.data ?? [];
+      } catch { history = []; }
+      // Eine spaete Antwort auf eine alte Eingabe ueberschreibt nichts.
+      if (mine !== seq) return;
+      show(mealTitleSuggestions(q, state.recipes, history));
+    }, 200);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      if (box.hidden) return;
+      // Die Liste schliessen, nicht den Dialog darum.
+      e.preventDefault();
+      e.stopPropagation();
+      close();
+      return;
+    }
+    if (box.hidden || !items.length) return;
+    if (e.key === 'ArrowDown') { e.preventDefault(); setActive(Math.min(active + 1, items.length - 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(Math.max(active - 1, 0)); }
+    else if (e.key === 'Enter' && active >= 0) {
+      // Enter UEBERNIMMT den Vorschlag und endet hier: bis zum Dialog
+      // durchgereicht, loeste es dessen Enter-zum-Speichern aus, und die
+      // Mahlzeit war angelegt, bevor man sie gesehen hatte.
+      e.preventDefault();
+      e.stopPropagation();
+      pick(active);
+    }
+  });
+
+  // mousedown statt click: sonst nimmt der Blur des Feldes die Liste weg,
+  // bevor der Klick ankommt. preventDefault haelt den Fokus im Feld.
+  box.addEventListener('mousedown', (e) => {
+    const option = e.target.closest?.('.meal-modal__autocomplete-item');
+    if (!option) return;
+    e.preventDefault();
+    pick(Number(option.dataset.index));
+  });
+  input.addEventListener('blur', close);
 }
 
 /**
@@ -629,14 +836,14 @@ function renderWeekGrid() {
         <div class="day-header ${todayClass}" style="--day-col: ${dayCol}">
           <span class="day-header__name">${dayNames[dayNameIndex]}</span>
           <span class="day-header__date">${formatDayDate(date)}</span>
+          <button class="day-add" data-action="add-meal" data-date="${date}" data-type="${firstType}" aria-label="${esc(t('meals.addMealOnDay', { day: dayLongName(date) }))}">
+            <i data-lucide="plus" class="icon-md" aria-hidden="true"></i>
+            <span class="day-add__label">${t('meals.addMealTitle')}</span>
+          </button>
         </div>
         <div class="day-slots">
           ${visibleTypes.map((type, ti) => renderSlot(date, type, mealsForDay, dayCol, ti + 2)).join('')}
         </div>
-        <button class="day-add" data-action="add-meal" data-date="${date}" data-type="${firstType}" aria-label="${esc(t('meals.addMealOnDay', { day: dayLongName(date) }))}">
-          <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
-          <span>${t('meals.addMealTitle')}</span>
-        </button>
       </div>
     `;
   }).join(''));
@@ -737,7 +944,9 @@ function renderRecipeSidebar() {
 
   const hint = document.createElement('p');
   hint.className = 'recipe-sidebar__hint';
-  hint.textContent = t('recipes.dragToMealsHint');
+  // Antippen ODER Ziehen (Re-Kritik 2026-09-28): der alte Satz nannte nur das
+  // Ziehen, und genau das geht per Tastatur und fuer viele Haende nicht.
+  hint.textContent = t('recipes.railHint');
   sidebar.appendChild(hint);
 
   const list = document.createElement('div');
@@ -749,17 +958,30 @@ function renderRecipeSidebar() {
     card.draggable = true;
     card.dataset.recipeId = String(recipe.id);
 
-    const titleEl = document.createElement('div');
+    // DIE KARTE IST EIN KNOPF (Re-Kritik 2026-09-28, A4 P1-1). Sie war nur zu
+    // ziehen: ohne Fokus, ohne Klick - per Tastatur kam kein Rezept in den
+    // Plan, und ein Tipp auf die Karte tat nichts. Der Knopf fuellt die Karte
+    // und oeffnet "Mahlzeit hinzufuegen" mit gesetztem Rezept
+    // (planRecipeFromRail); das Ziehen bleibt am `article` als Beschleuniger.
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'recipe-sidebar__card-open';
+    open.dataset.action = 'plan-recipe';
+    open.dataset.recipeId = String(recipe.id);
+    open.setAttribute('aria-label', t('meals.planRecipeNamed', { name: recipe.title }));
+    card.appendChild(open);
+
+    const titleEl = document.createElement('span');
     titleEl.className = 'recipe-sidebar__card-title';
     titleEl.textContent = recipe.title;
-    card.appendChild(titleEl);
+    open.appendChild(titleEl);
 
     if (recipe.source !== 'native') {
       const sourceBadgeEl = document.createElement('span');
       sourceBadgeEl.className = `source-badge source-badge--${recipe.source}`;
       sourceBadgeEl.textContent = t(`recipes.source${recipe.source[0].toUpperCase()}${recipe.source.slice(1)}`);
       if (recipe.provider_account_name) sourceBadgeEl.title = recipe.provider_account_name;
-      card.appendChild(sourceBadgeEl);
+      open.appendChild(sourceBadgeEl);
     }
 
     // Mahlzeiten-Chips nur bei echter Teilmenge: ein Rezept, das zu allen Typen
@@ -780,7 +1002,7 @@ function renderRecipeSidebar() {
           badge.textContent = option.label;
           types.appendChild(badge);
         });
-      card.appendChild(types);
+      open.appendChild(types);
     } else if (!recipeTypes.length) {
       const types = document.createElement('div');
       types.className = 'recipe-sidebar__card-types';
@@ -788,7 +1010,7 @@ function renderRecipeSidebar() {
       badge.className = 'meal-type-badge meal-type-badge--none';
       badge.textContent = t('recipes.mealTypeNone');
       types.appendChild(badge);
-      card.appendChild(types);
+      open.appendChild(types);
     }
 
     list.appendChild(card);
@@ -872,6 +1094,13 @@ function renderSlot(date, type, mealsForDay, dayCol, typeRow) {
     // Dialog. Er steht AUSSERHALB von .meal-card__actions, die wireDragDrop
     // ausnimmt. Ausserhalb der schmalen Fassung ist er ausgeblendet: dort
     // greift die Maus weiter die ganze Karte.
+    //
+    // DER TYP STEHT ALS VORSATZ IM TITEL (R9 M6). Mobil ist eine Mahlzeit eine
+    // Zeile im Tagestraeger, und das Typ-Label kostete dort eine eigene
+    // Overline-Zeile ueber jeder Karte. `.meal-card__type` steht deshalb vor
+    // dem Namen und ist nur in der schmalen Fassung sichtbar (meals.css); am
+    // Board und am Tablet traegt weiter das Slot-Label den Typ. Nebenbei nennt
+    // der Oeffnen-Knopf damit mobil auch die Mahlzeit, nicht nur das Gericht.
     return `
       <div class="meal-card" data-meal-id="${meal.id}">
         <button type="button" class="meal-card__open${(meal.recipe_has_own_image || meal.recipe_has_image) ? ' meal-card__open--with-thumb' : ''}"
@@ -883,7 +1112,7 @@ function renderSlot(date, type, mealsForDay, dayCol, typeRow) {
             hasOwnImage: meal.recipe_has_own_image,
             className: 'meal-card__thumb',
           }) : ''}
-          <span class="meal-card__title"><span class="meal-card__title-text">${esc(meal.title)}</span>${recurrenceBadge}</span>
+          <span class="meal-card__title"><span class="meal-card__type">${esc(type.label)}</span><span class="meal-card__title-text">${esc(meal.title)}</span>${recurrenceBadge}</span>
           ${ingLabel ? `<span class="meal-card__meta">
             <span class="meal-card__ingredients-count">${ingLabel}${esc(ingDoneLabel)}</span>
           </span>` : ''}
@@ -910,7 +1139,7 @@ function renderSlot(date, type, mealsForDay, dayCol, typeRow) {
             data-meal-id="${meal.id}"
             aria-label="${esc(t('common.toShoppingListNamed', { title: meal.title }))}"
           ><i data-lucide="shopping-cart" class="icon-md" aria-hidden="true"></i></button>` : ''}
-          <button class="meal-card__action-btn"
+          <button class="meal-card__action-btn meal-card__action-btn--delete"
             data-action="delete-meal"
             data-meal-id="${meal.id}"
             aria-label="${esc(t('meals.deleteMealNamed', { title: meal.title }))}"
@@ -984,7 +1213,7 @@ function wireGrid(grid) {
     const action = btn.dataset.action;
 
     if (action === 'add-meal') {
-      openMealModal({ mode: 'create', date: btn.dataset.date, mealType: btn.dataset.type });
+      openMealModal({ mode: 'create', date: btn.dataset.date, mealType: btn.dataset.type, fromSlot: true });
       return;
     }
 
@@ -1074,6 +1303,11 @@ function wireRecipeSidebar() {
     card.classList.add('recipe-sidebar__card--dragging');
     e.dataTransfer.effectAllowed = 'copy';
     e.dataTransfer.setData('text/plain', card.dataset.recipeId);
+  });
+
+  sidebar.addEventListener('click', (e) => {
+    const open = e.target.closest('[data-action="plan-recipe"]');
+    if (open) planRecipeFromRail(open.dataset.recipeId);
   });
 
   sidebar.addEventListener('dragend', (e) => {
@@ -1461,44 +1695,6 @@ function openMealModal(opts) {
     content,
     size: 'md',
     onSave(panel) {
-      // Autocomplete
-      const titleInput = panel.querySelector('#modal-title');
-      const acDropdown = panel.querySelector('#modal-autocomplete');
-      let acIndex = -1;
-      let acTimer;
-
-      titleInput.addEventListener('input', () => {
-        clearTimeout(acTimer);
-        acTimer = setTimeout(async () => {
-          const q = titleInput.value.trim();
-          if (!q) { acDropdown.hidden = true; return; }
-          try {
-            const res = await api.get(`/meals/suggestions?q=${encodeURIComponent(q)}`);
-            if (!res.data.length) { acDropdown.hidden = true; return; }
-            acIndex = -1;
-            acDropdown.replaceChildren();
-            acDropdown.insertAdjacentHTML('beforeend', res.data.map((s) => `
-              <div class="meal-modal__autocomplete-item" data-title="${esc(s.title)}">${esc(s.title)}</div>
-            `).join(''));
-            acDropdown.hidden = false;
-          } catch { acDropdown.hidden = true; }
-        }, 200);
-      });
-
-      titleInput.addEventListener('keydown', (e) => {
-        const items = [...acDropdown.querySelectorAll('.meal-modal__autocomplete-item')];
-        if (!items.length) return;
-        if (e.key === 'ArrowDown') { e.preventDefault(); acIndex = Math.min(acIndex + 1, items.length - 1); items.forEach((el, i) => el.classList.toggle('meal-modal__autocomplete-item--active', i === acIndex)); }
-        if (e.key === 'ArrowUp')   { e.preventDefault(); acIndex = Math.max(acIndex - 1, 0);                items.forEach((el, i) => el.classList.toggle('meal-modal__autocomplete-item--active', i === acIndex)); }
-        if (e.key === 'Enter' && acIndex >= 0) { e.preventDefault(); titleInput.value = items[acIndex].dataset.title; acDropdown.hidden = true; acIndex = -1; }
-        if (e.key === 'Escape') acDropdown.hidden = true;
-      });
-
-      acDropdown.addEventListener('mousedown', (e) => {
-        const item = e.target.closest('.meal-modal__autocomplete-item');
-        if (item) { titleInput.value = item.dataset.title; acDropdown.hidden = true; }
-      });
-
       // Zutaten
       const ingList   = panel.querySelector('#ingredient-list');
       const addIngBtn = panel.querySelector('#add-ingredient-btn');
@@ -1540,6 +1736,18 @@ function openMealModal(opts) {
         if (recipeScaleInput) recipeScaleInput.value = '1';
         applyRecipe(recipeSelect.value);
       });
+
+      // Namensfeld als Combobox (Re-Kritik 2026-09-28, A4 P1-1): ein
+      // Rezepttreffer geht denselben Weg wie die Rezeptauswahl darunter.
+      const chooseRecipe = (id) => {
+        if (recipeSelect) recipeSelect.value = String(id);
+        if (recipeScaleInput) recipeScaleInput.value = '1';
+        applyRecipe(id);
+      };
+      wireMealTitleCombobox(panel, { onRecipe: chooseRecipe });
+      // Aus der Rezept-Spalte geoeffnet: das Rezept ist schon gewaehlt, also
+      // stehen Titel, Zutaten und Notizen gleich da.
+      if (opts.recipeId) chooseRecipe(opts.recipeId);
 
       recipeScaleInput?.addEventListener('input', () => {
         const currentRecipeId = Number(recipeSelect?.value || 0);
@@ -1695,7 +1903,7 @@ function openMealModal(opts) {
   });
 }
 
-function buildModalContent({ mode, date, mealType, meal }) {
+function buildModalContent({ mode, date, mealType, meal, fromSlot = false, recipeId = null }) {
   const isEdit   = mode === 'edit';
   const isRecurring = isEdit && meal.recurrence_template_id;
   const typeOpts = MEAL_TYPES().map((mt) =>
@@ -1719,7 +1927,8 @@ function buildModalContent({ mode, date, mealType, meal }) {
   // Transfer abwiese (#1290) - ein Auswahlfeld ohne Knopf verspraeche dasselbe.
   const canTransfer = hasIngOpen && mayTransferMealToShopping(meal.id);
 
-  const recipeOptionHtml = (r) => `<option value="${r.id}" ${isEdit && meal.recipe_id === r.id ? 'selected' : ''}>${esc(r.title)}</option>`;
+  const chosenRecipeId = isEdit ? meal.recipe_id : recipeId;
+  const recipeOptionHtml = (r) => `<option value="${r.id}" ${chosenRecipeId === r.id ? 'selected' : ''}>${esc(r.title)}</option>`;
   // Optgroups nur, sobald gespiegelte Rezepte wirklich vorkommen: ohne Mirror-
   // Account bleibt die flache Liste von vorher unverändert (kein UI-Rauschen).
   const hasMirroredRecipes = state.recipes.some((r) => r.source !== 'native');
@@ -1735,7 +1944,10 @@ function buildModalContent({ mode, date, mealType, meal }) {
       ...state.recipes.map(recipeOptionHtml),
     ].join('');
 
-  const advancedOpen = isEdit && (!!meal.recipe_id || !!meal.notes || !!meal.recipe_url || isRecurring);
+  // Wie beim Bearbeiten einer Mahlzeit mit Rezept: aus der Rezept-Spalte
+  // geoeffnet, steht die Rezeptauswahl offen da, damit sichtbar ist, WOHER Titel
+  // und Zutaten kommen.
+  const advancedOpen = (isEdit && (!!meal.recipe_id || !!meal.notes || !!meal.recipe_url || isRecurring)) || Boolean(recipeId);
 
   const advancedFieldsHtml = `
     <div class="form-group">
@@ -1798,8 +2010,8 @@ function buildModalContent({ mode, date, mealType, meal }) {
       </div>
     </div>`}`;
 
-  return `
-    <div class="modal-grid modal-grid--2">
+  const whenHtml = `
+    <div class="modal-grid modal-grid--2${fromSlot && !isEdit ? ' meal-modal__when' : ''}">
       <div class="form-group">
         <label class="form-label" for="modal-date">${t('meals.dateLabel')}</label>
         <yuvomi-datepicker type="date" id="modal-date" value="${formatDateInput(date)}"></yuvomi-datepicker>
@@ -1809,21 +2021,33 @@ function buildModalContent({ mode, date, mealType, meal }) {
         <select class="form-input" id="modal-type">${typeOpts}</select>
       </div>
     </div>
-
+`;
+  const nameHtml = `
     <div class="form-group" style="position:relative;">
       <label class="form-label" for="modal-title">${t('common.nameLabel')}</label>
       <input type="text" class="form-input" id="modal-title" required
              placeholder="${t('meals.titlePlaceholder')}"
              value="${esc(isEdit ? meal.title : '')}"
-             autocomplete="off">
-      <div id="modal-autocomplete" class="meal-modal__autocomplete" hidden></div>
+             autocomplete="off" role="combobox" aria-autocomplete="list"
+             aria-expanded="false" aria-controls="modal-autocomplete">
+      <div id="modal-autocomplete" class="meal-modal__autocomplete" role="listbox"
+           aria-label="${esc(t('meals.suggestionsLabel'))}" hidden></div>
     </div>
+`;
+  // AUS DEM SLOT: NAME ZUERST (Re-Critique 2026-09-28, A4 P2-9). Der Slot
+  // weiss Tag und Mahlzeit schon; oben standen trotzdem genau diese zwei
+  // Felder, und der Name lag bei 427px Hoehe unter dem Falz. Aus dem Slot
+  // fuehrt jetzt der Name (mit den Rezeptvorschlaegen des Autocompletes), Tag
+  // und Mahlzeit stehen als ruhige, weiter editierbare Zeile darunter. Ohne
+  // Slot (FAB, Kurzbefehl) bleibt "erst wann, dann was".
+  return `
+    ${fromSlot && !isEdit ? nameHtml + whenHtml : whenHtml + nameHtml}
 
     <div class="form-group">
       <label class="form-label">${t('meals.ingredientsLabel')}</label>
       <div class="ingredient-list" id="ingredient-list">${ingRows}</div>
-      <button class="add-ingredient-btn" id="add-ingredient-btn" type="button">
-        <i data-lucide="plus" class="icon-sm" aria-hidden="true"></i>
+      <button class="btn btn--secondary add-ingredient-btn" id="add-ingredient-btn" type="button">
+        <i data-lucide="plus" class="icon-md" aria-hidden="true"></i>
         ${t('meals.addIngredient')}
       </button>
     </div>
@@ -1854,7 +2078,7 @@ function buildModalContent({ mode, date, mealType, meal }) {
         * Mahlzeit sonst nur ueber den Papierkorb der Karte loeschbar. Es geht
         * denselben Weg wie dort (`deleteMeal`: Serienabfrage, Rueckgaengig). */ ''}
     <div class="modal-panel__footer modal-panel__footer--plain">
-      ${isEdit ? `<button type="button" class="btn btn--danger-outline" id="modal-delete" style="margin-inline-end:auto"><i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${esc(t('common.delete'))}</button>` : ''}
+      ${isEdit ? `<button type="button" class="btn btn--danger-outline" id="modal-delete" data-delete-name="${esc(meal.title)}" style="margin-inline-end:auto"><i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${esc(t('common.delete'))}</button>` : ''}
       <button class="btn btn--secondary" id="modal-cancel">${t('common.cancel')}</button>
       <button class="btn btn--primary" id="modal-save">${isEdit ? t('common.save') : t('common.add')}</button>
     </div>`;
@@ -2127,6 +2351,13 @@ export const __test = {
   buildModalContent,
   openMealModal,
   transferMeal,
+  // Re-Kritik 2026-09-28 (A4 P1-1): Rezept einplanen ohne Ziehen - Ziel der
+  // Spalte, Spalte samt Klick, Vorschlaege des Namensfelds
+  // (test-meals-recipe-entry.js).
+  railRecipeTarget,
+  renderRecipeSidebar,
+  wireRecipeSidebar,
+  mealTitleSuggestions,
 };
 
 // --------------------------------------------------------

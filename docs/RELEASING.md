@@ -9,14 +9,17 @@ first release of a fork under the clause in [CONTRIBUTING.md](../CONTRIBUTING.md
 A release is a tag `vX.Y.Z` on this repository. Everything downstream hangs on that tag:
 
 - `docker-publish.yml` runs on every `v*` tag, from any branch, and pushes the multi-arch image
-  to `ghcr.io/ulsklyc/yuvomi` and to the legacy mirror `ghcr.io/ulsklyc/oikos` (the mirror must
-  stay: installations from before the rename pull it and are updated through it).
+  to `ghcr.io/mokudev/mycrib`. Upstream also keeps a legacy `oikos` mirror for its own pre-rename
+  installations; that history is upstream's, not this fork's, so there is no second image name
+  here (the comment above `images:` in the workflow says the same).
 - `umbrel-publish.yml` runs when the GitHub release is published and opens, or renames, the
   store PR against `getumbrel/umbrel-apps`.
 - TrueNAS picks up the new image tag on its own; the Unraid template points at `latest`.
 
-The in-app changelog reads the GitHub release, not `CHANGELOG.md`, so a release without notes is
-visible to every household on the next start.
+The in-app changelog reads `CHANGELOG.md` from the image, not the GitHub release: this fork
+dropped the releases-API path, because for a fork it showed the upstream project's history
+(`server/routes/changelog.js`). What every household sees on the next start is therefore the file
+that shipped in the image - the GitHub release is for people reading the repository.
 
 ## Two tracks, and the check that decides
 
@@ -92,8 +95,8 @@ the last tag is an interface release.
     a failed shell substitution yields an empty string that `gh` accepts without a word:
 
     ```bash
-    gh release create vX.Y.Z --repo ulsklyc/yuvomi --title "vX.Y.Z" --notes-file <file>
-    gh release view vX.Y.Z --repo ulsklyc/yuvomi --json body --jq .body
+    gh release create vX.Y.Z --repo MokuDev/myCrib --title "vX.Y.Z" --notes-file <file>
+    gh release view vX.Y.Z --repo MokuDev/myCrib --json body --jq .body
     ```
 
     Read the body back. A successful `create` reports the URL either way.
@@ -102,13 +105,17 @@ the last tag is an interface release.
     the push did not start one - dispatch the workflow against the tag ref instead
     (`gh workflow run docker-publish.yml --ref vX.Y.Z`). The result is the same image and the
     same tags: `github.ref` is then `refs/tags/vX.Y.Z`, which is what the `latest` condition in
-    the workflow reads. This happened for v1.0.0. Then look the Umbrel PR up rather than
-    assuming a number - the workflow renames the open PR if there is one and opens a new one only
-    once the previous one was merged:
+    the workflow reads. This happened for v1.0.0.
 
-    ```bash
-    gh pr list --repo getumbrel/umbrel-apps --author ulsklyc --state all --limit 5
-    ```
+    **The Umbrel step does not run in this fork, and that is an open building site rather
+    than a step you forgot.** `umbrel-publish.yml` carries the image name hard-wired: it looks
+    for `ghcr.io/${{ github.repository_owner }}/yuvomi:X.Y.Z`, that is `ghcr.io/MokuDev/yuvomi`
+    - an image that does not exist, because this fork publishes `mycrib`, and uppercase on top
+    of that, which is what cosign already tripped over. It would also need a
+    `MokuDev/umbrel-apps` fork and the `UMBREL_FORK_TOKEN` secret. Whoever wants this fork in
+    the Umbrel store fixes the workflow first; until then a release ends after the image build.
+    The lookup that upstream kept here (`gh pr list --repo getumbrel/umbrel-apps --author
+    ulsklyc ...`) asked for the origin project's pull requests and never belonged in a fork.
 
 ## A security fix: patch release from the last tag
 

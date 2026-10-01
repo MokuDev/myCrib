@@ -108,91 +108,6 @@
   color: var(--color-accent);
 }
 
-/* --------------------------------------------------------
-   Akkordeon-Navigation (Desktop, ab 2 Domänen)
-   Single-Open: die aktive Domäne ist offen, die übrigen kollabieren auf ihre
-   Kopfzeile. Die Höhe animiert per grid-template-rows 0fr→1fr (kein JS-Messen).
-   -------------------------------------------------------- */
-
-.settings-shell__navigation--collapsible .settings-shell__navigation-group + .settings-shell__navigation-group {
-  margin-top: var(--space-1);
-}
-
-.settings-shell__navigation--collapsible .settings-shell__navigation-heading {
-  margin: 0;
-}
-
-.settings-shell__navigation-toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  width: 100%;
-  min-height: var(--target-md);
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  /* Typo (Größe/Tracking) kommt aus der Rollenebene (typography.css: Nav-
-     Gruppierungslabel, Sentence-Case); der Button erbt nur die Schriftfamilie,
-     die er sonst per UA-Default verlöre. */
-  font-family: inherit;
-  color: var(--color-text-secondary);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color var(--transition-fast),
-    color var(--transition-fast);
-}
-
-.settings-shell__navigation-toggle:hover {
-  background: var(--color-surface-hover);
-  color: var(--color-text-primary);
-}
-
-.settings-shell__navigation-group--active .settings-shell__navigation-toggle {
-  color: var(--color-accent);
-}
-
-.settings-shell__navigation-domain-label {
-  flex: 1 1 auto;
-  min-width: 0;
-}
-
-.settings-shell__navigation-chevron {
-  width: var(--space-4);
-  height: var(--space-4);
-  flex: 0 0 auto;
-  color: var(--color-text-tertiary);
-  transition: transform var(--transition-base);
-}
-
-.settings-shell__navigation-toggle[aria-expanded='true'] .settings-shell__navigation-chevron {
-  transform: rotate(180deg);
-}
-
-/* Bewusste Layout-Transition (Detector layout-transition, geprüft): das
- * Aufklappen ändert eine echte Höhe, und `transform` kann sie nicht - eine
- * skalierte Gruppe verzerrt ihre Beschriftungen und schiebt nichts unter sich
- * weg. `grid-template-rows: 0fr -> 1fr` ist der Weg, der ohne feste Zielhöhe
- * auskommt; `max-height` bräuchte eine geratene Obergrenze und liefe bei kurzen
- * Gruppen sichtbar zu lange nach. Es ist EIN Element je Domäne, einmal pro
- * Klick. Abgeschaltet im prefers-reduced-motion-Block dieser Datei, der
- * `.settings-shell__navigation-panel` namentlich führt. */
-.settings-shell__navigation-panel {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--transition-base);
-}
-
-.settings-shell__navigation-group--expanded .settings-shell__navigation-panel {
-  grid-template-rows: 1fr;
-}
-
-.settings-shell__navigation-panel > .settings-shell__navigation-list {
-  overflow: hidden;
-  min-height: 0;
-  padding-top: var(--space-1);
-}
-
-.settings-shell__navigation-domain-icon,
 /* ── DIE MARKE EINES BLATTES ──
  * Drei Orte zeigen dieselbe Liste (Seitenleiste, mobile Uebersicht,
  * Desktop-Uebersicht), also tragen sie dieselbe Marke - je in ihrer Groesse.
@@ -611,6 +526,17 @@
   min-width: 0;
 }
 
+/* DER BLATTWECHSEL BLENDET (R14, A7 P3; shell.js renderLeafContent). Nur
+ * Deckkraft - das Blatt steht, wo es stehen wird; unter reduzierter Bewegung
+ * nimmt die globale Sperre (reset.css) die Dauer auf 0. */
+@keyframes settings-sheet-enter {
+  from { opacity: 0; }
+}
+
+.settings-sheet-enter {
+  animation: settings-sheet-enter var(--duration-md) var(--ease-out);
+}
+
 .settings-leaf-header {
   display: grid;
   gap: var(--space-2);
@@ -622,6 +548,105 @@
  * und der Rueckweg steht im Kopf - das Blatt beginnt direkt unter ihm. */
 @media (max-width: 767px) {
   .settings-leaf-header { margin-top: 0; }
+}
+
+/* --------------------------------------------------------
+   Ein Blatt je Modul (Re-Critique 2026-09-27, S1)
+
+   Statuszeile oben, dann die Reichweiten "Fuer mich" und "Fuer den Haushalt".
+   Jeder Abschnitt ist ein frueheres Blatt in seinem eigenen Traeger
+   (shell.js, renderLeafContent).
+   -------------------------------------------------------- */
+
+/* Die Reichweite ist ein Gruppenkopf, keine weitere Karte: ruhig, auf dem
+ * Grund, mit Luft darueber - die Abschnitte darunter tragen ihre eigenen
+ * Titel. Der zweite Kopf haelt mehr Abstand, damit "Fuer den Haushalt" als
+ * neue Gruppe liest und nicht als letzte Karte der ersten. */
+.settings-scope + .settings-scope {
+  margin-top: var(--space-8);
+}
+
+.settings-scope__title {
+  margin: 0 0 var(--space-3) var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: var(--text-base);
+  font-weight: var(--font-weight-semibold);
+}
+
+.settings-sheet-section {
+  min-width: 0;
+  /* Sprungziel von `?section=`: nicht unter den klebenden Kopf. */
+  scroll-margin-block-start: calc(var(--target-base) + var(--space-8));
+}
+
+/* Die letzte Karte eines Abschnitts haelt den Abschnittsabstand der Seite
+ * (.settings-section), nicht zusaetzlich den der Karte. */
+.settings-sheet-section > .settings-section:last-child {
+  margin-bottom: var(--space-6);
+}
+
+/* Zustand des Moduls: ein Zeichen fuer alle, der Weg zum Schalter nur fuer
+ * Admins (Nur-lesen-Regel). Eine Zeile im Traeger wie Apples Kopfzeile in
+ * "Einstellungen > App" - der Schalter selbst lebt in Aktive Module. */
+.settings-sheet-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2) var(--space-4);
+  min-height: var(--target-lg);
+  margin-bottom: var(--space-6);
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-work);
+  box-shadow: var(--shadow-sm);
+}
+
+.settings-sheet-status__state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--text-sm);
+}
+
+.settings-sheet-status__icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
+  flex: 0 0 auto;
+}
+
+.settings-sheet-status--on .settings-sheet-status__icon {
+  color: var(--color-success-ink);
+}
+
+.settings-sheet-status--off .settings-sheet-status__icon {
+  color: var(--color-text-tertiary);
+}
+
+.settings-sheet-status__link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: var(--target-md);
+  padding-inline: var(--space-2);
+  margin-inline-end: calc(-1 * var(--space-2));
+  border-radius: var(--radius-full);
+  color: var(--color-accent);
+  font-size: var(--text-sm);
+  font-weight: var(--font-weight-medium);
+  transition: background-color var(--transition-fast);
+}
+
+.settings-sheet-status__link:hover {
+  background: var(--color-surface-hover);
+}
+
+.settings-sheet-status__link-icon {
+  width: var(--icon-md);
+  height: var(--icon-md);
 }
 
 .settings-setting-row {
@@ -805,44 +830,94 @@
   border-color: var(--color-danger-ink);
 }
 
+/* --------------------------------------------------------
+   Liste + Detail ab der Split-Schwelle (Re-Critique 2026-09-27, S3)
+
+   Unter der Schwelle ist die Wurzel die gruppierte Liste und ein Blatt steht
+   allein (mobil mit Zurueck im Kopf, ab 768px mit Breadcrumb) - die
+   Push-Navigation. Ab der Schwelle steht die Liste als Seitenleiste links
+   (~320px) und das Blatt rechts im Lesemass; die Wurzel waehlt dann das erste
+   Blatt vor (shell.js, preselectSheet), statt dieselbe Liste ein zweites Mal
+   ueber 1156px zu ziehen (A8 P1-1: Titel und Chevron 1100px auseinander).
+
+   DIE ABFRAGE MISST DIE MODULFLAECHE (`.settings-page`), nicht den Viewport:
+   dieselbe Regel wie der Liste-+-Detail-Baustein (layout.css, module-surface).
+   `@container` kann keine Variable lesen - das Literal ist
+   `--layout-split-threshold` aus tokens.css, und test:settings-navigation
+   haelt beide gleich. Ob die Seitenleiste steht, liest die Shell an ihrer
+   gerechneten Darstellung ab (kein zweites `matchMedia`).
+   -------------------------------------------------------- */
+
+.settings-page {
+  container: settings-surface / inline-size;
+  /* Die Listenspur der Einstellungen: schmaler als die des Bausteins
+   * (--layout-list-min 420px), weil sie nur Namen traegt, keine
+   * zweizeiligen Datensaetze - Apples Systemeinstellungen fuehren ~320px. */
+  --settings-list-width: var(--layout-nav-list);
+}
+
+.settings-shell {
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+
+/* Blatt und Wurzel-Liste lesen im Lesemass (DESIGN.md, Breitenregel):
+ * vorher lief die Wurzel ueber 1156px, ein Blatt ueber 912px. */
+.settings-shell__content {
+  max-inline-size: var(--layout-reading);
+}
+
+.settings-shell__navigation { display: none; }
+
 @media (min-width: 1024px) {
-  /* Eine Navigation je Modus, nicht zwei. Auf der Wurzel standen bisher
-     Sidebar (23 Blätter) und Kachelübersicht (dieselben 23 Blätter)
-     nebeneinander, dazu die globale App-Sidebar: drei parallele
-     Navigationsspalten plus Breadcrumb - genau die Enterprise-SaaS-Referenz,
-     die PRODUCT.md ausschliesst (Critique 2026-07-27).
-
-     Die Übersicht gehört den Kacheln: sie tragen die Beschreibungen und sind
-     der Einstieg. Die Sidebar gehört dem Blatt: sie ist zum Wechseln da. */
-  .settings-shell {
-    grid-template-columns: minmax(0, 1fr);
-    gap: var(--space-6);
-    align-items: start;
-  }
-
-  .settings-page--leaf .settings-shell {
-    grid-template-columns: var(--sidebar-width-expanded) minmax(0, 1fr);
-  }
-
-  .settings-shell__navigation { display: none; }
-
-  /* `block`, nicht `flex`: die Basisregel ist ein Block, und die Gruppen
-     stapeln über `margin-top`. Ein Flex-Container legt sie in eine Zeile. */
-  .settings-page--leaf .settings-shell__navigation {
-    display: block;
+  /* Die Grundform der Seitenleiste; sichtbar wird sie erst an der Schwelle. */
+  .settings-shell__navigation {
     position: sticky;
     top: calc(var(--space-4) + var(--safe-area-inset-top));
     align-self: start;
-    max-height: calc(100vh - var(--space-8));
-    overflow-y: auto;
   }
 }
 
-@media (max-width: 1023px) {
-  .settings-shell__navigation {
-    display: none;
+@container settings-surface (min-width: 65rem) {
+  .settings-shell {
+    grid-template-columns: var(--settings-list-width) minmax(0, 1fr);
+    max-inline-size: var(--content-max-width);
+    margin-inline: auto;
   }
 
+  /* `block`, nicht `flex`: die Gruppen stapeln ueber `margin-top`. Die Liste
+   * scrollt fuer sich, wenn sie hoeher ist als das Fenster. */
+  .settings-shell__navigation {
+    display: block;
+    position: sticky;
+    top: calc(var(--space-4) + var(--safe-area-inset-top));
+    /* Minus `--shell-tail`: die klebende Liste endet ueber dem, was unten
+     * fest steht (Installationsbanner), wie jede klebende Spalte. */
+    max-height: calc(var(--viewport-height) - var(--space-8) - var(--shell-tail, 0px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* Die Suche bleibt an der Listenkante stehen, wenn die Liste scrollt: ein
+   * Streifen im Grund der Leiste, ueber den Polsterrand der Leiste gezogen. */
+  .settings-shell__navigation-search {
+    position: sticky;
+    top: calc(-1 * var(--space-3));
+    z-index: 1;
+    margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) var(--space-3);
+    padding: var(--space-3);
+    background: var(--color-surface-raised);
+  }
+
+  /* Der Ort steht links markiert - der Breadcrumb waere derselbe Weg ein
+   * zweites Mal, und der Blatt-Titel beginnt auf der Hoehe der Suche. */
+  .settings-breadcrumb { display: none; }
+
+  .settings-leaf-header { margin-top: 0; }
+}
+
+@media (max-width: 1023px) {
   .settings-setting-row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -859,9 +934,7 @@
   .settings-module-row,
   .settings-module-move,
   .settings-disclosure__icon,
-  .settings-shell__navigation-panel,
-  .settings-shell__navigation-chevron,
-  .settings-shell__navigation-toggle {
+  .settings-sheet-status__link {
     transition: none;
   }
 }
@@ -1371,19 +1444,22 @@
    Familienmitglieder
    -------------------------------------------------------- */
 
+/* Die Liste liegt in der Karte und traegt deshalb `.row-divided` (list-row.css):
+ * Haarlinien zwischen den Zeilen, keine zweite Flaeche (R14, A7 P2-4 - die
+ * Zeilen standen vorher mit 12px Luft und ohne Trennung untereinander). */
 .settings-members {
   list-style: none;
   margin: 0 0 var(--space-4);
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
 }
 
 .settings-member {
   display: flex;
   align-items: center;
   gap: var(--space-3);
+  padding-block: var(--space-2);
 }
 
 .settings-member__info {
@@ -1406,8 +1482,10 @@
   margin-top: 1px;
 }
 
+/* Anlegen ist ein ruhiger Knopf unter der Liste, kein violetter Balken ueber
+ * die volle Breite (R14, A7 P2-4); das Formular kommt als Blatt-Dialog. */
 .settings-add-btn {
-  width: 100%;
+  align-self: flex-start;
 }
 
 .settings-token-output {
@@ -2752,41 +2830,11 @@
   line-height: 1.5;
 }
 
-/* Modus-Umschalter (Rolle / Mitglied) — segmentierte Pille */
-.perm-modeswitch {
-  display: inline-flex;
-  gap: var(--space-1);
-  padding: var(--space-1);
+/* Modus-Umschalter (Rolle / Mitglied): der Kanon-Umschalter `.segmented`
+ * (panel.css) samt `.settings-segmented`; hier steht nur sein Abstand zur
+ * Subjekt-Auswahl darunter (R14). */
+.perm-mode {
   margin-bottom: var(--space-4);
-  background: var(--color-surface-raised);
-  border: var(--space-px) solid var(--color-border-subtle);
-  border-radius: var(--radius-full);
-}
-
-.perm-modeswitch__btn {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-height: var(--target-md);
-  padding: 0 var(--space-4);
-  border: none;
-  border-radius: var(--radius-full);
-  background: transparent;
-  color: var(--color-text-secondary);
-  font: inherit;
-  font-size: var(--text-sm);
-  font-weight: var(--font-weight-medium);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-
-/* Aktiv: gefülltes Segment statt erhabener Kachel (DESIGN.md „Segmented
- * Controls"). */
-/* Aktiv = erhabene Surface-Pille, Ton in der Tinte (tokens.css, Abschnitt 6c). */
-.perm-modeswitch__btn.is-active {
-  background: var(--seg-active-bg);
-  box-shadow: var(--seg-active-shadow);
-  color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
 }
 
 /* Subjekt-Auswahl (Rollen-/Mitglieder-Chips) */
@@ -3057,11 +3105,23 @@
   left: 2px;
   width: calc((100% - 4px) / var(--seg-count, 3));
   border-radius: var(--radius-full);
-  /* Der gleitende Daumen IST das aktive Segment - er trägt deshalb die
-   * Segment-Sprache der Shell: erhabene Surface-Pille, Modulton in der Tinte
-   * des Glyphs darauf (tokens.css, Abschnitt 6c; siehe .perm-seg__opt.is-active). */
-  background: var(--seg-active-bg);
-  box-shadow: var(--seg-active-shadow);
+  /* Der gleitende Daumen IST das aktive Segment. Er trug bis zur Re-Critique
+   * 2026-09-28 die Segment-Sprache der Shell (erhabene Surface-Pille, Modulton
+   * in der Tinte) - und war damit praktisch unsichtbar: gemessen weiss auf
+   * rgb(251,251,253) = 1,03:1, in Dark sogar DUNKLER als das Segment, und der
+   * Modulton der Einstellungen ist neutral, also trug auch die Tinte nichts
+   * (1,2:1 gegen das inaktive Glyph). Die Matrix ist die Aufgabe mit den
+   * groessten sozialen Folgen (was darf das Kind) und steht am Zeiger nur als
+   * Icon - die Label-Verlust-Regel verlangt getoente Flaeche PLUS gefuelltes
+   * Glyph (layout.css, Filled Variant), beides im App-Akzent.
+   *
+   * Die KANTE traegt den Kontrast: eine Toenung allein erreicht die 3:1 gegen
+   * das Segment nie (24 %: 1,41 hell / 1,28 dunkel), der Akzent als Kante
+   * 5,86 hell / 4,61 dunkel (nachgerechnet in test-permission-sheet-ui.js). Als
+   * inset-Schatten, damit sie den Daumen nicht vergroessert. Nie die Kante
+   * allein - Flaeche und Glyph sagen den Zustand mit. */
+  background: color-mix(in srgb, var(--color-accent) var(--tint-surface), var(--color-surface));
+  box-shadow: inset 0 0 0 1.5px var(--color-accent);
   transform: translateX(calc(var(--seg-index, 0) * 100%));
   transition: transform var(--duration-lg) var(--ease-out);
   pointer-events: none;
@@ -3089,10 +3149,12 @@
 }
 
 .perm-seg__opt:disabled { cursor: not-allowed; }
-/* Die Fläche liefert der gleitende Daumen; das Glyph darauf trägt den Modulton
- * als Tinte - dieselbe Mischung wie jedes andere aktive Segment. */
+/* Die Fläche liefert der gleitende Daumen; das Glyph darauf trägt die Tinte -
+ * dieselbe Mischung wie jedes andere aktive Segment, aber im APP-Akzent statt
+ * im Modulton: der der Einstellungen ist neutral und hob das aktive Glyph nur
+ * 1,2:1 vom inaktiven ab (Re-Critique 2026-09-28, A7 P1-1). */
 .perm-seg__opt.is-active {
-  color: color-mix(in srgb, var(--module-accent, var(--color-accent)) var(--tint-ink), var(--color-text-primary));
+  color: color-mix(in srgb, var(--color-accent) var(--tint-ink), var(--color-text-primary));
 }
 
 /* Am Zeiger traegt der Tooltip den Klartext; unter 768px wird er sichtbar. */
@@ -3165,7 +3227,6 @@
   .perm-modgroup__widgets { padding-inline-start: var(--space-4); }
   .perm-modgroup__capabilities { margin-inline-start: var(--space-4); }
 
-  .perm-modeswitch__btn,
   .perm-chip { min-height: var(--target-base); }
 
   .perm-row {
@@ -3215,10 +3276,19 @@
     flex-basis: 100%;
     margin-right: 0;
   }
+
+  /* Klebend nur, solange etwas ungespeichert ist (Re-Critique 2026-09-28,
+   * A7 P2-5): vorher 73px dauerhaft ueber der 76px-Kapsel, auch mit gesperrtem
+   * „Speichern", und im ersten Bild lag er auf dem Rollen-Hinweis. Ohne
+   * Aenderung steht der Fuss am Ende der Liste - „Zuruecksetzen" bleibt dort
+   * erreichbar. `is-dirty` setzt updateSaveState(), derselbe Weg, der
+   * „Speichern" freigibt. */
+  .perm-actions:not(.is-dirty) {
+    position: static;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .perm-modeswitch__btn,
   .perm-chip,
   .perm-seg__opt,
   .perm-seg__thumb { transition: none; }

@@ -21,6 +21,8 @@
  *          segment-indicator   jede Segment-/Tab-Leiste gleitet mit dem geteilten Indikator
  *          search-width        Breite und Lage der Kopfsuche gehoeren page-search.css
  *          sheet-drag          ein Blatt zieht ueber utils/sheet-drag.js, nicht per Eigenbau
+ *        Runde 14 (Re-Critique 2026-09-28, A6 P2-5):
+ *          native-date         ein Datumsfeld ist `yuvomi-datepicker`, kein `<input type="date">`
  *
  * DAS IST EIN RATCHET, KEINE ALLOWLIST. `PENDING` ist der Bestand vom
  * 2026-09-26 (Datei -> Anzahl), fuer die sechs Regeln der Runde 7 der vom
@@ -572,8 +574,7 @@ export function scanSegmentIndicator(src, file = '') {
  * `--page-search-width` und der Center-Slot in page-search.css.
  */
 const NOT_HEAD_SEARCH = new Map([
-  ['subscriptions-search', 'eigene Werkzeugzeile der Abos, kein .page-toolbar'],
-  ['split-search', 'Gruppen-Seitenpanel des Ausgleichs'],
+  ['split-search', 'Gruppenkopf der Aufteilung (.section-toolbar), ab 976px Container eigene Zeile'],
   ['cal-search__field', 'Suchzeile unter dem Kalenderkopf (eigene Ergebnisansicht)'],
   ['event-icon-picker__search', 'Icon-Dialog im Kalender'],
   ['doc-attach-picker__search', 'Dokument-Auswahldialog'],
@@ -620,6 +621,28 @@ export function scanSheetDrag(src, file = '') {
   while ((m = re.exec(src))) {
     if (inComment(src, m.index)) continue;
     found.push({ line: lineOf(src, m.index), what: `${m[1]} ${m[2]}` });
+  }
+  return found;
+}
+
+/**
+ * Punkt D9 (Runde 14, Re-Critique 2026-09-28, A6 P2-5): ein natives
+ * Datumsfeld. Fuenf standen noch da (Dokumente-Ablauf, Vorsorge zweimal,
+ * Fasten-Filter zweimal) - sie zeigten "tt.mm.jjjj" des Browsers, oeffneten
+ * den System-Kalender statt des Kanon-Pickers und folgten weder Wochenstart
+ * noch Datumsformat der Einstellungen. Gezaehlt wird das Template
+ * (`<input ... type="date">`) und die DOM-API (`.type = 'date'`,
+ * `setAttribute('type', 'date')`). Kanon: `<yuvomi-datepicker type="date">`
+ * (components/datepicker.js), der das native Feld intern selbst verwaltet.
+ */
+export function scanNativeDate(src, file = '') {
+  if (file === 'public/components/datepicker.js') return [];
+  const found = [];
+  const re = /<input\b[^>]*\btype=(["'])date\1[^>]*>|\.type\s*=\s*(["'])date\2|setAttribute\(\s*(["'])type\3\s*,\s*(["'])date\4\s*\)/g;
+  let m;
+  while ((m = re.exec(src))) {
+    if (inComment(src, m.index)) continue;
+    found.push({ line: lineOf(src, m.index), what: m[0].slice(0, 80) });
   }
   return found;
 }
@@ -817,7 +840,7 @@ test('Scanner: segment-indicator zaehlt Leisten minus Anschluesse und laesst die
 test('Scanner: search-width faengt Modulbreiten der Kopfsuche, nicht Aussehen und nicht Suchen ausserhalb des Kopfes', () => {
   const classes = headSearchClasses([{ src: `
     renderPageSearch({ id: 'a', className: 'x-toolbar__search page-toolbar__center' })
-    renderPageSearch({ id: 'b', className: 'subscriptions-search' })` }]);
+    renderPageSearch({ id: 'b', className: 'split-search' })` }]);
   assert.deepEqual([...classes], ['x-toolbar__search'], 'Center-Slot und die benannten Nicht-Kopf-Suchen fallen weg');
   const bad = `
     .x-toolbar__search { flex: 1 1 0; max-width: 280px; margin-inline-start: auto; }
@@ -826,8 +849,25 @@ test('Scanner: search-width faengt Modulbreiten der Kopfsuche, nicht Aussehen un
   const good = `
     .x-toolbar__search .page-search__input { color: red; }
     .x-toolbar__search[hidden] { display: none; }
-    .subscriptions-search { max-width: 28rem; }`;
+    .split-search { max-width: 28rem; }`;
   assert.deepEqual(scanSearchWidth(good, classes), []);
+});
+
+test('Scanner: native-date faengt das native Datumsfeld (Template und DOM) und laesst den Kanon-Picker durch', () => {
+  const bad = `
+    <input class="input" id="document-expires-at" type="date" value="\${esc(x)}">
+    <label>\${t('a')}<input type='date' name="from"></label>
+    field.type = 'date';
+    input.setAttribute("type", "date");`;
+  assert.equal(scanNativeDate(bad, 'public/pages/x.js').length, 4);
+  const good = `
+    <yuvomi-datepicker id="document-expires-at" type="date" label="\${esc(l)}"></yuvomi-datepicker>
+    <input type="month" class="form-input" id="lm-start">
+    <input type="time" class="form-input">
+    // <input type="date"> stand hier bis R14
+    el.dataset.type = 'dates';`;
+  assert.deepEqual(scanNativeDate(good, 'public/pages/x.js'), []);
+  assert.deepEqual(scanNativeDate(bad, 'public/components/datepicker.js'), [], 'der Baustein selbst zaehlt nicht');
 });
 
 test('Scanner: sheet-drag faengt Touch-Gesten an Blatt und Tafel ausserhalb des Helfers', () => {
@@ -967,6 +1007,10 @@ const PENDING = {
   // D2: leer seit Runde 7, Schritt 1 - Dialog-Sheet und Mehr-Blatt ziehen
   // ueber utils/sheet-drag.js.
   'sheet-drag': {},
+  // --- Runde 14, Bestand 2026-09-28 (g14, z14), nach der Integration (i14). ---
+  // D9: leer - die letzten fuenf (documents.js 1, health.js 2,
+  // health-fasting.js 2) sind yuvomi-datepicker. Ab hier ist jedes neue rot.
+  'native-date': {},
 };
 
 const HEAD_SEARCH = headSearchClasses(JS);
@@ -988,6 +1032,7 @@ const RULES = {
   'segment-indicator': { files: JS, scan: (s, f) => scanSegmentIndicator(s, f), canon: '`attachSegmentIndicator(bar)` bzw. `renderSubTabs({ indicator })` (utils/segment-indicator.js)' },
   'search-width': { files: CSS.filter((f) => f.file !== 'public/styles/page-search.css'), scan: (s) => scanSearchWidth(s, HEAD_SEARCH), canon: '`--page-search-width` + Center-Slot (page-search.css), keine Modulbreite' },
   'sheet-drag': { files: JS, scan: (s, f) => scanSheetDrag(s, f), canon: '`wireSheetDrag()` (utils/sheet-drag.js)' },
+  'native-date': { files: JS, scan: (s, f) => scanNativeDate(s, f), canon: '`<yuvomi-datepicker type="date">` (components/datepicker.js)' },
 };
 
 function census(rule) {
@@ -1105,4 +1150,115 @@ test('Auswahlkreis: EIN Baustein in der Shell (layout.css), jede Mehrfachauswahl
     const src = JS.find(({ file }) => file === `public/pages/${page}.js`)?.src ?? '';
     assert.match(src, /<button type="button" class="select-circle[^"]*"/, `${page}.js waehlt per Auswahlkreis`);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Die Rueckfrage der Sammelaktions-Pille (utils/bulk-pill.js) als Programm
+//
+// ANLASS (R11, 2026-09-27): die Dokumente-Auswahl zog in die Pille, und dabei
+// ging der Satz verloren, der vor dem Sammel-Loeschen stand - einen Papierkorb
+// gibt es nicht. Die Frage selbst kann ihn nicht tragen: gemessen bei 390px
+// passte "12 Dokumente endgueltig loeschen? Kein Papierkorb." in 15 von 24
+// Sprachen nicht in eine Zeile (die Frage bricht bewusst nicht innen um).
+// Also traegt die Rueckfrage eine optionale Detailzeile - eigene Zeile unter
+// Frage und Wahl, im Gruppennamen mitgelesen, und wer sie nicht setzt, bekommt
+// die Pille wie bisher.
+// ---------------------------------------------------------------------------
+
+class PillEl {
+  constructor(tag) {
+    this.tagName = tag.toUpperCase();
+    this.children = [];
+    this.attrs = {};
+    this.classes = new Set();
+    this.listeners = {};
+    this.textContent = '';
+    this.disabled = false;
+    this.id = '';
+    this.classList = { add: (c) => this.classes.add(c), contains: (c) => this.classes.has(c) };
+  }
+  set className(v) { this.classes = new Set(String(v).split(/\s+/).filter(Boolean)); }
+  get className() { return [...this.classes].join(' '); }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  getAttribute(k) { return this.attrs[k] ?? null; }
+  appendChild(c) { this.children.push(c); return c; }
+  addEventListener(type, fn) { this.listeners[type] = fn; }
+  all() { return this.children.flatMap((c) => [c, ...c.all()]); }
+  querySelectorAll(sel) { return this.all().filter((c) => c.classes.has(sel.replace(/^\./, ''))); }
+  querySelector(sel) { return this.querySelectorAll(sel)[0] ?? null; }
+  contains() { return false; }
+  focus() {}
+}
+
+async function withPillDom(run) {
+  const layer = { bar: null, replaceChildren(...n) { this.bar = n[0] ?? null; }, querySelector() { return this.bar; } };
+  const saved = globalThis.document;
+  globalThis.document = {
+    activeElement: null,
+    getElementById: (id) => (id === 'bulk-pill-layer' ? layer : null),
+    createElement: (tag) => new PillEl(tag),
+  };
+  try {
+    const { setBulkPill } = await import('../public/utils/bulk-pill.js');
+    await run({ setBulkPill, layer });
+  } finally {
+    globalThis.document = saved;
+  }
+}
+
+/** Oeffnet die Rueckfrage der ersten Kapsel und liefert die Pille danach. */
+function openConfirm(layer) {
+  layer.bar.querySelector('.list-bulkbar__action').listeners.click();
+  return layer.bar;
+}
+
+test('Pillen-Rueckfrage: confirm.detail steht als eigene Zeile unter Frage und Wahl und im Gruppennamen', async () => {
+  await withPillDom(async ({ setBulkPill, layer }) => {
+    setBulkPill({ label: '3 ausgewaehlt', actions: [
+      { label: 'Loeschen', count: 3, danger: true, confirm: { question: '3 Dokumente loeschen?', detail: 'Kein Papierkorb.' }, onClick() {} },
+    ] });
+    // Im Ruhezustand steht die Detailzeile nicht - sie gehoert zur Frage.
+    assert.equal(layer.bar.querySelector('.list-bulkbar__detail'), null);
+
+    const bar = openConfirm(layer);
+    assert.ok(bar.classes.has('list-bulkbar--confirming'));
+    const detail = bar.querySelector('.list-bulkbar__detail');
+    assert.ok(detail, 'die Rueckfrage zeigt ihre Detailzeile');
+    assert.equal(detail.textContent, 'Kein Papierkorb.');
+    // Direktes Kind der Pille NACH dem Paar: eine eigene Zeile unter Frage und
+    // Wahl, nicht zwischen Abbrechen und Bestaetigen.
+    const kinder = bar.children.map((c) => c.className);
+    assert.deepEqual(kinder, ['list-bulkbar__subject', 'list-bulkbar__choices', 'list-bulkbar__detail']);
+    // Der Fokuswechsel in die Gruppe liest ihren Namen - der Satz muss darin
+    // stehen, sonst hoert ihn niemand (die Rueckfrage hat keine Live-Region).
+    const ids = bar.getAttribute('aria-labelledby').split(/\s+/);
+    assert.deepEqual(ids, [bar.children[0].id, detail.id]);
+    assert.ok(detail.id && detail.id !== bar.children[0].id);
+  });
+});
+
+test('Pillen-Rueckfrage: ohne confirm.detail bleibt die Pille, wie sie war', async () => {
+  await withPillDom(async ({ setBulkPill, layer }) => {
+    setBulkPill({ label: '2 ausgewaehlt', actions: [
+      { label: 'Loeschen', danger: true, confirm: { question: '2 Aufgaben loeschen?' }, onClick() {} },
+    ] });
+    const bar = openConfirm(layer);
+    assert.equal(bar.querySelector('.list-bulkbar__detail'), null);
+    assert.deepEqual(bar.children.map((c) => c.className), ['list-bulkbar__subject', 'list-bulkbar__choices']);
+    assert.equal(bar.getAttribute('aria-labelledby'), bar.children[0].id);
+  });
+});
+
+test('Pillen-Rueckfrage: die Detailzeile nimmt eine ganze Zeile und bricht innen um', () => {
+  // Die Frage bricht nicht innen um (sie schiebt die Wahl in die naechste
+  // Zeile, test:frontend-audit) - die Detailzeile schon: sie ist in manchen
+  // Sprachen laenger als die Pille breit ist. Ohne `white-space: normal` erbte
+  // sie nichts Kappendes, aber auch nichts, das sie haelt; ohne die volle Basis
+  // stuende sie neben der Wahl und quetschte das Paar.
+  const layout = readFileSync(join(PUBLIC, 'styles/layout.css'), 'utf8');
+  const rule = [...eachRule(layout)].find((r) => r.selector.trim() === '.list-bulkbar__detail' && !r.at.length);
+  assert.ok(rule, '.list-bulkbar__detail braucht eine Basisregel in layout.css (Shell-Schicht)');
+  assert.match(rule.body, /flex:\s*1\s+0\s+100%|flex-basis:\s*100%/, 'eine eigene Zeile');
+  assert.match(rule.body, /white-space:\s*normal/, 'bricht innen um');
+  assert.match(rule.body, /font-size:\s*var\(--text-/, 'Schriftgroesse aus den Tokens');
 });

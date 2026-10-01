@@ -6,14 +6,14 @@
  * Liste des ganzen Haushalts (Critique 2026-07-30). Ein Überlaufmenü löst beides
  * auf einmal: eine Zeile Chrome statt drei, und jeder Eintrag trägt sein Label.
  *
- * WARUM HIER UND NICHT IN shopping.js: Kontakte (`.contact-more-menu__panel`)
- * und Dokumente (`.documents-context-menu`) haben je eine private Kopie derselben
- * Sache - gleiche Popover-Mechanik, gleiche Positionierungsrechnung, gleiche
+ * WARUM HIER UND NICHT IN shopping.js: Kontakte und Dokumente
+ * (`.documents-context-menu`) hatten je eine private Kopie derselben Sache -
+ * gleiche Popover-Mechanik, gleiche Positionierungsrechnung, gleiche
  * Eintrags-Geometrie, drei Klassennamen. Eine dritte Kopie in der Küche wäre
  * genau der Befund, den dieser Umbau abstellt („inkonsistentes
- * Komponenten-Vokabular"). Die beiden Bestandskopien sind hier bewusst NICHT
- * mitmigriert: das sind zwei fremde Module, und der Auftrag ist die Küche. Wer
- * sie nachzieht, löscht rund 60 Zeilen CSS und diese Datei bleibt unverändert.
+ * Komponenten-Vokabular"). Die Kontakte nutzen seit R16 (Re-Critique
+ * 2026-09-28) dieses Menü; die Kopie der Dokumente steht noch. Wer sie
+ * nachzieht, löscht dort das CSS, und diese Datei bleibt unverändert.
  *
  * WARUM NATIVE POPOVER UND KEIN EIGENES OVERLAY: Top-Layer, Light-Dismiss (Klick
  * daneben) und Esc kommen vom Browser, inklusive Fokusrückgabe an den Trigger.
@@ -145,7 +145,7 @@ function onToggle(event) {
   const trigger = document.querySelector(`[popovertarget="${panel.id}"]`);
   trigger?.setAttribute('aria-expanded', String(event.newState === 'open'));
 
-  if (event.newState !== 'open') { panel.style.opacity = ''; return; }
+  if (event.newState !== 'open') { panel.style.opacity = ''; panel.style.transform = ''; return; }
 
   if (trigger) {
     const rect = trigger.getBoundingClientRect();
@@ -167,8 +167,15 @@ function onToggle(event) {
     else if (!topStart && top + height > window.innerHeight - 8) top = rect.top - height - gap;
     panel.style.left = `${Math.round(left)}px`;
     panel.style.top = `${Math.round(Math.max(8, top))}px`;
+    // DAS MENUE WAECHST VOM AUSLOESER AUS (R14, A1 P3-4): der Ursprung der
+    // Skalierung ist die Ecke, die am Ausloeser liegt - oben, wenn es darunter
+    // steht, unten, wenn es darueber steht; rechts beim rechtsbuendigen, links
+    // bei `top-start`. Nur diese Rechnung kennt die Ecke (layout.css `.popover-menu`).
+    const above = top < rect.top;
+    panel.style.transformOrigin = `${above ? 'bottom' : 'top'} ${topStart ? 'left' : 'right'}`;
   }
   panel.style.opacity = '1';
+  panel.style.transform = 'none';
 
   // DER FOKUS ZIEHT MIT INS MENUE. `role="menu"` sagt der assistiven Technik
   // eine Menue-Bedienung zu, und die Popover-API haelt davon nichts: sie

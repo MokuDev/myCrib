@@ -20,10 +20,15 @@ const layoutCss = readFileSync(new URL('../public/styles/layout.css', import.met
 const glassCss = readFileSync(new URL('../public/styles/glass.css', import.meta.url), 'utf8');
 const tokensCss = readFileSync(new URL('../public/styles/tokens.css', import.meta.url), 'utf8');
 
+/* Der Rumpf der ersten Regel, deren Selektorliste GENAU diesen Selektor
+ * fuehrt. Frueher ein Regex auf `<selektor> {` - das fand auch das Ende eines
+ * laengeren Selektors: seit `html.page-swapping .nav-bottom` (Re-Critique
+ * 2026-09-28, G1) las der Safe-Area-Guard den Uebergangsnamen statt der Bar. */
 function cssRuleBody(css, selector) {
-  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const match = css.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`, 'm'));
-  return match?.[1] ?? '';
+  for (const rule of eachRule(css)) {
+    if (rule.selector.split(',').some((part) => part.trim() === selector)) return rule.body;
+  }
+  return '';
 }
 
 test('mobile scrolling keeps navigation and fixed layers stable', () => {
@@ -221,13 +226,13 @@ test('the router resets the surviving scrollport on every navigation', () => {
  * Grenze (siehe utils/scroll-restore.js und SPEC, Responsive Composition), keine
  * versehentliche.
  *
- * Dieser Guard hält die Liste ehrlich: kommt ein neuntes Modul dazu oder
+ * Dieser Guard hält die Liste ehrlich: kommt ein zehntes Modul dazu oder
  * verliert eines seinen inneren Scroller, verschiebt sich die Reichweite der
  * Zusage - und Kommentar wie Spezifikation müssen mitziehen, statt still falsch
  * zu werden. Geprüft wird die REGEL über alle Modul-Stylesheets, nicht eine
  * Handvoll bekannter Dateien.
  */
-test('the modules with an inner scroll container are the documented eight', () => {
+test('the modules with an inner scroll container are the documented nine', () => {
   const styleDir = new URL('../public/styles/', import.meta.url);
   const found = [];
 
@@ -243,7 +248,10 @@ test('the modules with an inner scroll container are the documented eight', () =
   assert.deepEqual(
     [...new Set(found)].sort(),
     [
-      '.budget-page', '.calendar-page', '.contacts-page', '.meals-page',
+      // .health-page seit R10: Liste + Detail wie Kontakte und Rezepte - ab der
+      // Split-Schwelle scrollen Liste und Bereich je fuer sich, darunter EIN
+      // Port (.health-browse, ein .page-scrollport mit Nachlauf).
+      '.budget-page', '.calendar-page', '.contacts-page', '.health-page', '.meals-page',
       '.notes-page', '.pantry-page', '.recipes-page', '.shopping-page',
     ],
     'Die Module mit innerem Scroller haben sich geändert. Sie sind genau die, in '

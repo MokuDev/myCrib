@@ -986,7 +986,15 @@ test('das Popover gibt den Fokus nur zurueck, wo niemand woanders hin wollte (#1
   const fn = src.match(/export function closeDetailView\([\s\S]*?\n\}/)?.[0] ?? '';
   assert.match(fn, /if \(fokus && merker\) restoreFocusAfterClose\(merker\);\s*else forgetRestore\(\);/,
     'Rueckgabe mit eigenem Merker, sonst verwerfen - nie einen fremden stehen lassen');
-  assert.match(src, /!popover\.contains\(e\.target\)\) closeDetailView\(\{ fokus: false \}\)/,
+  // Die Regel am Klick-daneben-Handler selbst, nicht an einer Zeile: seit er
+  // den Klick schluckt (Re-Kritik 2026-09-28, E2), steht die Pruefung auf
+  // "im Popover" als eigene Frueh-Rueckkehr davor - geschlossen wird danach
+  // weiterhin ohne Fokus-Rueckgabe, und nirgends im Handler mit.
+  const outside = src.match(/const onOutsideClick = \(e\) => \{[\s\S]*?\n {2}\};/)?.[0] ?? '';
+  assert.ok(outside, 'der Klick-daneben-Handler des Popovers ist auffindbar');
+  const schliesst = [...outside.matchAll(/closeDetailView\(([^)]*)\)/g)].map((m) => m[1].trim());
+  assert.ok(schliesst.length > 0, 'ein Klick daneben schliesst das Popover');
+  assert.deepEqual([...new Set(schliesst)], ['{ fokus: false }'],
     'ein Klick daneben wollte woanders hin - der Fokus springt nicht zurueck');
   assert.match(src, /if \(activePopover\) closeDetailView\(\{ fokus: false \}\)/,
     'eine neue Ansicht nimmt den Fokus selbst');
@@ -1453,4 +1461,311 @@ test('Erstfokus: ein auf body gefallener Fokus ist keine Wahl, das erste Feld ko
   } finally {
     lage.aufraeumen();
   }
+});
+
+// --------------------------------------------------------
+// Dialogfuss mit Loeschen mobil (Re-Critique 2026-09-27, R9 M8)
+// --------------------------------------------------------
+
+/**
+ * Eine Attrappe, die genau so viel DOM kann, wie `decorateFooterDelete`
+ * braucht: Klassen, data-Attribute, Kindknoten (Text und Elemente) und ein
+ * Selektor-Matcher fuer die Formen, die dort vorkommen (`.klasse`, `[attr]`,
+ * `tag`, `input[type="text"]`, `input:not([type])`, Kommalisten).
+ */
+function fussAttrappe() {
+  const matches = (el, sel) => sel.split(',').map((s) => s.trim()).some((s) => {
+    if (el.nodeType !== 1) return false;
+    if (s === 'input:not([type])') return el.tagName === 'INPUT' && !('type' in el.attrs);
+    const typed = s.match(/^(\w+)\[type="(\w+)"\]$/);
+    if (typed) return el.tagName === typed[1].toUpperCase() && el.attrs.type === typed[2];
+    if (s.startsWith('.')) return el.classes.has(s.slice(1));
+    if (s.startsWith('[')) {
+      const name = s.slice(1, -1);
+      return name.startsWith('data-')
+        ? el.dataset[name.slice(5).replace(/-(\w)/g, (_m, c) => c.toUpperCase())] !== undefined
+        : name in el.attrs;
+    }
+    return el.tagName === s.toUpperCase();
+  });
+  const all = (root) => root.childNodes.flatMap((c) => (c.nodeType === 1 ? [c, ...all(c)] : []));
+  const el = (tag, { cls = [], attrs = {}, data = {}, text = null, kids = [] } = {}) => {
+    const node = {
+      nodeType: 1, tagName: tag.toUpperCase(), attrs: { ...attrs }, dataset: { ...data },
+      classes: new Set(cls), childNodes: [], parentElement: null, value: attrs.value ?? '', form: null,
+      get classList() {
+        const set = node.classes;
+        return {
+          add: (...c) => c.forEach((x) => set.add(x)),
+          remove: (...c) => c.forEach((x) => set.delete(x)),
+          contains: (c) => set.has(c),
+          toggle: (c, on) => { if (on) set.add(c); else set.delete(c); },
+        };
+      },
+      set className(v) { node.classes = new Set(String(v).split(/\s+/).filter(Boolean)); },
+      get className() { return [...node.classes].join(' '); },
+      textContent: text ?? '',
+      hasAttribute: (n) => n in node.attrs,
+      getAttribute: (n) => node.attrs[n] ?? null,
+      setAttribute: (n, v) => { node.attrs[n] = String(v); },
+      appendChild(c) { c.parentElement = node; node.childNodes.push(c); return c; },
+      prepend(c) { c.parentElement = node; node.childNodes.unshift(c); },
+      querySelectorAll: (s) => all(node).filter((c) => matches(c, s)),
+      querySelector: (s) => all(node).find((c) => matches(c, s)) ?? null,
+      closest(s) { for (let x = node; x; x = x.parentElement) if (matches(x, s)) return x; return null; },
+    };
+    for (const k of kids) node.appendChild(k);
+    return node;
+  };
+  const txt = (s) => {
+    const node = { nodeType: 3, textContent: s, parentElement: null };
+    node.remove = () => { const p = node.parentElement.childNodes; p.splice(p.indexOf(node), 1); };
+    return node;
+  };
+  const withText = (node, ...texts) => { for (const s of texts) { const n = txt(s); n.parentElement = node; node.childNodes.push(n); } return node; };
+  return { el, txt, withText };
+}
+
+test('M8: der Loeschen-Knopf im Fuss wird erkannt, bekommt Symbol, Wortspanne und Objektnamen', async () => {
+  const { decorateFooterDelete } = await import('../public/components/modal.js');
+  const { el, withText } = fussAttrappe();
+  const savedWindow = globalThis.window;
+  const savedCreate = global.document.createElement;
+  globalThis.window = { lucide: { icons: { Trash2: [] }, createElement: () => el('svg', { attrs: { 'data-icon': 'trash-2' } }) } };
+  global.document.createElement = (tag) => el(tag);
+  try {
+    const titel = el('input', { attrs: { type: 'text', value: 'Wocheneinkauf' } });
+    const del = withText(el('button', { cls: ['btn', 'btn--danger-ghost'] }), '\n  ', 'Loeschen', '\n');
+    const cancel = withText(el('button', { cls: ['btn', 'btn--secondary'] }), 'Abbrechen');
+    const save = withText(el('button', { cls: ['btn', 'btn--primary'] }), 'Speichern');
+    const footer = el('div', { cls: ['modal-panel__footer'], kids: [del, cancel, save] });
+    const form = el('form', { kids: [titel] });
+    for (const b of [del, cancel, save]) b.form = form;
+    el('div', { cls: ['modal-panel'], kids: [el('div', { cls: ['modal-panel__body'], kids: [form] }), footer] });
+
+    const found = decorateFooterDelete(footer);
+    assert.deepEqual(found, [del], 'genau der Gefahrenknopf ist Loeschen');
+    assert.ok(del.classList.contains('modal-panel__delete'));
+    assert.ok(footer.classList.contains('modal-panel__footer--has-delete'));
+    assert.ok(footer.classList.contains('modal-panel__footer--one-row'), 'Dreiheit Loeschen/Abbrechen/Primaer steht in einer Zeile');
+    const label = del.childNodes.find((n) => n.nodeType === 1 && n.classList.contains('modal-panel__delete-label'));
+    assert.equal(label?.textContent, 'Loeschen', 'das Wort steht in einer eigenen Spanne, die das CSS mobil ausblendet');
+    assert.equal(del.childNodes[0].tagName, 'SVG', 'fehlendes Papierkorb-Symbol kommt dazu');
+    assert.match(del.getAttribute('aria-label'), /common\.deleteNamed.*Wocheneinkauf/, 'Objektname aus dem ersten Textfeld');
+
+    decorateFooterDelete(footer);
+    assert.equal(del.childNodes.filter((n) => n.nodeType === 1 && n.classList.contains('modal-panel__delete-label')).length, 1, 'idempotent');
+    assert.equal(del.childNodes.filter((n) => n.tagName === 'SVG').length, 1, 'kein zweites Symbol');
+  } finally {
+    globalThis.window = savedWindow;
+    global.document.createElement = savedCreate;
+  }
+});
+
+test('M8: data-delete-name und ein vorhandenes aria-label gewinnen; off und die Detailansicht mit drei Aktionen bleiben beim Umbruch', async () => {
+  const { decorateFooterDelete } = await import('../public/components/modal.js');
+  const { el, withText } = fussAttrappe();
+  const savedCreate = global.document.createElement;
+  const savedWindow = globalThis.window;
+  global.document.createElement = (tag) => el(tag);
+  globalThis.window = {};
+  try {
+    const named = withText(el('button', { cls: ['btn', 'btn--danger-outline'], data: { deleteName: 'Blutdruck 12.09.' } }), 'Loeschen');
+    const f1 = el('div', { cls: ['modal-panel__footer'], kids: [named, withText(el('button', { cls: ['btn'] }), 'Abbrechen')] });
+    decorateFooterDelete(f1);
+    assert.match(named.getAttribute('aria-label'), /Blutdruck 12\.09\./);
+
+    const labelled = withText(el('button', { cls: ['btn', 'btn--danger-outline'], attrs: { 'aria-label': 'Eintrag „Miete" loeschen' } }), 'Loeschen');
+    decorateFooterDelete(el('div', { cls: ['modal-panel__footer'], kids: [labelled] }));
+    assert.equal(labelled.getAttribute('aria-label'), 'Eintrag „Miete" loeschen', 'ein vorhandenes aria-label wird nie ueberschrieben');
+
+    const primary = withText(el('button', { cls: ['btn', 'btn--danger-outline'], data: { footerDelete: 'off' } }), 'Liste leeren');
+    const f3 = el('div', { cls: ['modal-panel__footer'], kids: [primary] });
+    assert.deepEqual(decorateFooterDelete(f3), [], 'off nimmt den Knopf heraus');
+    assert.equal(f3.classList.contains('modal-panel__footer--has-delete'), false);
+
+    const detail = el('div', { cls: ['modal-panel__footer'], kids: [
+      withText(el('button', { cls: ['btn', 'btn--danger-ghost'] }), 'Loeschen'),
+      withText(el('button', { cls: ['btn', 'btn--secondary'] }), 'Erledigen'),
+      withText(el('button', { cls: ['btn', 'btn--ghost'] }), 'Starten'),
+      withText(el('button', { cls: ['btn', 'btn--ghost'] }), 'Aufgabe archivieren'),
+    ] });
+    const detailTitle = el('h2', { cls: ['modal-panel__title'], text: 'Kinderzimmer aufraeumen' });
+    detail.classList.add('detail-view__footer');
+    el('div', { cls: ['modal-panel'], kids: [el('div', { cls: ['modal-panel__header'], kids: [detailTitle] }), detail] });
+    decorateFooterDelete(detail);
+    assert.ok(detail.classList.contains('modal-panel__footer--has-delete'), 'der Papierkorb gilt auch hier');
+    assert.match(detail.childNodes[0].getAttribute('aria-label') ?? '', /Kinderzimmer aufraeumen/,
+      'in der Detailansicht ist der Dialogtitel der Objektname');
+    assert.equal(detail.classList.contains('modal-panel__footer--one-row'), false,
+      'drei beschriftete Aktionen neben Loeschen quetschen sich in einer Zeile auf ~80px - dort bleibt der Umbruch');
+
+    const konto = el('div', { cls: ['modal-panel__footer'], kids: [
+      el('div', { kids: [withText(el('button', { cls: ['btn', 'btn--danger-outline'] }), 'Loeschen'), el('button', { cls: ['btn', 'btn--secondary', 'btn--icon'] })] }),
+      el('div', { kids: [withText(el('button', { cls: ['btn'] }), 'Abbrechen'), withText(el('button', { cls: ['btn', 'btn--primary'] }), 'Speichern')] }),
+    ] });
+    decorateFooterDelete(konto);
+    assert.ok(konto.classList.contains('modal-panel__footer--one-row'), 'ein Icon-Knopf daneben zaehlt nicht als beschriftete Aktion');
+  } finally {
+    global.document.createElement = savedCreate;
+    globalThis.window = savedWindow;
+  }
+});
+
+test('M8: mountFooter dekoriert die gehobene Fusszeile', () => {
+  const src = readFileSync(new URL('../public/components/modal.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function mountFooter'), src.indexOf('export const FOOTER_DELETE_SELECTOR'));
+  assert.match(fn, /panel\.appendChild\(bodyFooter\);\s*decorateFooterDelete\(bodyFooter\);/,
+    'ohne den Aufruf bleibt jede Regel unten wirkungslos - der Fuss traegt nie die Klassen');
+});
+
+test('M8: mobil ist Loeschen ein Icon-Knopf der Zielgroesse, das Wort nur fuer den Screenreader, die Dreiheit bricht nicht um', () => {
+  const css = readFileSync(new URL('../public/styles/layout.css', import.meta.url), 'utf8');
+  const mobile = [...eachRule(css)].filter((r) => r.at.some((a) => /max-width:\s*639px/.test(a)));
+  const rule = (sel) => mobile.find((r) => r.selector.split(',').map((s) => s.trim()).includes(sel))?.body ?? '';
+  const btn = rule('.modal-panel__footer .btn.modal-panel__delete');
+  assert.match(btn, /width:\s*var\(--target-base\)/, 'Treffflaeche der Geraeteklasse (44 Zeiger / 48 Finger)');
+  assert.match(btn, /min-width:\s*var\(--target-base\)/);
+  assert.match(btn, /padding:\s*0/);
+  const label = rule('.modal-panel__footer .modal-panel__delete .modal-panel__delete-label');
+  assert.match(label, /position:\s*absolute/, 'das Wort verlaesst das Bild ...');
+  assert.match(label, /clip:\s*rect\(0,\s*0,\s*0,\s*0\)/, '... aber nicht den Baum (sr-only, nicht display:none)');
+  assert.doesNotMatch(label, /display:\s*none/);
+  const row = rule('.modal-panel__footer.modal-panel__footer--one-row');
+  assert.match(row, /flex-wrap:\s*nowrap/, 'Speichern steht nie allein in Zeile 2');
+  assert.match(rule('.modal-panel__footer.modal-panel__footer--one-row .btn:not(.modal-panel__delete):not(.btn--icon)'),
+    /overflow-wrap:\s*anywhere/, 'eine lange Beschriftung bricht innen statt den Fuss nach links hinauszuschieben (#872)');
+});
+
+/*
+ * F3 (Re-Critique 2026-09-28, A5 P2-4): IN JEDEM FUSS PASST LOESCHEN IN SEINEN
+ * KNOPF. Die Detailansicht (components/detail-view.js) baut ihre Knoepfe mit
+ * Symbol und einer `.btn__label`-Spanne, nicht mit losem Text. decorateFooterDelete
+ * packte nur losen Text in `.modal-panel__delete-label`; das Wort blieb sichtbar
+ * und ragte bei 390px aus dem 48px-Quadrat (Kontakt-Detail: Inhalt 72px, der
+ * Papierkorb 5px vom Blattrand). Die Regel, die jeder Fuss erfuellen muss: kein
+ * sichtbares Wort im Loeschen-Knopf ausserhalb der ausgeblendeten Spanne.
+ */
+function visibleWordsOutsideLabel(btn) {
+  const out = [];
+  const walk = (node, hidden) => {
+    for (const c of node.childNodes) {
+      if (c.nodeType === 3) { if (!hidden && c.textContent.trim()) out.push(c.textContent.trim()); continue; }
+      if (c.tagName === 'SVG' || c.tagName === 'I') continue;
+      const inLabel = hidden || c.classList.contains('modal-panel__delete-label');
+      if (!inLabel && !c.childNodes.length && c.textContent.trim()) out.push(c.textContent.trim());
+      walk(c, inLabel);
+    }
+  };
+  walk(btn, false);
+  return out;
+}
+
+test('F3: in jedem Fuss liegt das Wort des Loeschen-Knopfs in der ausgeblendeten Spanne - auch mit .btn__label', async () => {
+  const { decorateFooterDelete } = await import('../public/components/modal.js');
+  const { el, withText } = fussAttrappe();
+  const savedCreate = global.document.createElement;
+  const savedWindow = globalThis.window;
+  global.document.createElement = (tag) => el(tag);
+  globalThis.window = {};
+  try {
+    const cases = {
+      // Die Form aus detail-view.js: Symbol + .btn__label.
+      detailansicht: () => el('button', { cls: ['btn', 'btn--danger-ghost'], kids: [
+        el('i', { data: { lucide: 'trash-2' } }),
+        el('span', { cls: ['btn__label'], text: 'Loeschen' }),
+      ] }),
+      // Die Form der Formular-Dialoge: loser Text.
+      formular: () => withText(el('button', { cls: ['btn', 'btn--danger-outline'] }), 'Loeschen'),
+      // Symbol und loser Text gemischt.
+      gemischt: () => withText(el('button', { cls: ['btn', 'btn--danger-outline'], kids: [el('i', { data: { lucide: 'trash-2' } })] }), 'Loeschen'),
+    };
+    for (const [name, make] of Object.entries(cases)) {
+      const del = make();
+      const footer = el('div', { cls: ['modal-panel__footer', 'detail-view__footer'], kids: [del, withText(el('button', { cls: ['btn', 'btn--primary'] }), 'Bearbeiten')] });
+      el('div', { cls: ['modal-panel'], kids: [el('h2', { cls: ['modal-panel__title'], text: 'Dr. Anna Weber' }), footer] });
+      decorateFooterDelete(footer);
+      assert.ok(del.classList.contains('modal-panel__delete'), `${name}: nicht erkannt`);
+      assert.deepEqual(visibleWordsOutsideLabel(del), [],
+        `${name}: das Wort bleibt sichtbar und sprengt mobil das 48px-Quadrat`);
+      const labels = del.querySelectorAll('.modal-panel__delete-label');
+      assert.equal(labels.length, 1, `${name}: genau eine Wortspanne`);
+      assert.equal(labels[0].textContent, 'Loeschen', `${name}: das Wort bleibt fuer den Screenreader im Baum`);
+      decorateFooterDelete(footer);
+      assert.equal(del.querySelectorAll('.modal-panel__delete-label').length, 1, `${name}: idempotent`);
+    }
+  } finally {
+    global.document.createElement = savedCreate;
+    globalThis.window = savedWindow;
+  }
+});
+
+/*
+ * LOESCHEN STEHT IM DIALOGFUSS AM ANFANG (Re-Critique 2026-09-28, A2 P1-2).
+ * Der Termindialog - das Vorbild des Kanons - stellte "Loeschen" 12px neben
+ * "Abbrechen" an den rechten Rand, weil der Fuss rechtsbuendig ist und nur
+ * wer den Knopf selbst wegschob (`style="margin-inline-end:auto"`, zwanzig
+ * Module), ihn links hatte. Die Zusage gilt fuer JEDEN Fuss mit Loeschen:
+ * (1) EINE Regel in layout.css schiebt den erkannten Knopf (und seine Gruppe)
+ * an den Anfang, (2) in jedem Fuss-Markup ist Loeschen der erste Knopf -
+ * sonst schoebe die Regel Abbrechen mit nach links.
+ */
+function footerChunks(source) {
+  const chunks = [];
+  for (const m of source.matchAll(/<div class="modal-panel__footer[^"]*"[^>]*>/g)) {
+    let depth = 0;
+    let end = source.length;
+    const tokens = /<div\b|<\/div>/g;
+    tokens.lastIndex = m.index;
+    for (let t = tokens.exec(source); t; t = tokens.exec(source)) {
+      depth += t[0] === '</div>' ? -1 : 1;
+      if (depth === 0) { end = t.index; break; }
+    }
+    chunks.push(source.slice(m.index, end));
+  }
+  return chunks;
+}
+
+const DELETE_BUTTON = /class="[^"]*\bbtn--danger-(?:outline|ghost)\b|data-footer-delete(?!="off")/;
+
+test('A2 P1-2: in jedem Dialogfuss steht Loeschen am Anfang, Abbrechen und Primaer am Ende', async () => {
+  const { readdirSync, statSync } = await import('node:fs');
+  const { join, relative } = await import('node:path');
+  const root = new URL('..', import.meta.url).pathname;
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      if (name === 'vendor' || name === 'locales') continue;
+      const path = join(dir, name);
+      if (statSync(path).isDirectory()) walk(path);
+      else if (name.endsWith('.js')) files.push(path);
+    }
+  };
+  walk(join(root, 'public'));
+
+  const rules = [...eachRule(layoutCss)].filter((r) => !r.at.length && /margin-inline-end:\s*auto/.test(r.body));
+  const selectors = rules.flatMap((r) => r.selector.split(',').map((s) => s.trim().replace(/\s+/g, ' ')));
+  const globalRule = selectors.includes('.modal-panel__footer > .modal-panel__delete')
+    && selectors.includes('.modal-panel__footer > :has(> .modal-panel__delete)');
+
+  let seen = 0;
+  const notFirst = [];
+  const notStart = [];
+  for (const path of files) {
+    const file = relative(root, path);
+    for (const chunk of footerChunks(readFileSync(path, 'utf8'))) {
+      const buttons = [...chunk.matchAll(/<button\b[^>]*>/g)].map((b) => b[0]);
+      const del = buttons.findIndex((b) => DELETE_BUTTON.test(b));
+      if (del < 0) continue;
+      seen += 1;
+      if (del !== 0) notFirst.push(file);
+      const own = /margin-inline-end:\s*auto/.test(buttons[del])
+        || /<div[^>]*margin-inline-end:\s*auto[^>]*>\s*(?:\$\{[^`]*`)?\s*<button[^>]*btn--danger/.test(chunk);
+      if (!globalRule && !own) notStart.push(file);
+    }
+  }
+  assert.ok(seen >= 15, `nur ${seen} Fuesse mit Loeschen gefunden - der Guard waere blind`);
+  assert.deepEqual(notFirst, [], 'Loeschen ist nicht der erste Knopf im Fuss - die Regel schoebe Abbrechen mit nach links');
+  assert.deepEqual(notStart, [], 'hier steht Loeschen neben Abbrechen am Ende statt am Anfang');
+  assert.ok(globalRule, 'die eine Regel in layout.css fehlt - jeder neue Fuss muesste wieder selbst schieben');
 });

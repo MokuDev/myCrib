@@ -2768,6 +2768,110 @@ test('Wand-Modus: das Nachtfenster läuft über Mitternacht (22:00 bis 06:00)', 
   nodeAssert.deepEqual(['/tasks', '/settings', '/calendar'].filter(isWallRoute), []);
 });
 
+/* #1453: NACH EINEM RELOAD IN DER NACHT BLIEB DIE WAND HELL.
+ *
+ * Drei Stellen fassen beim Laden die Wurzel an: theme-init.js setzt nachts
+ * `data-wall-night` und erzwingt `data-theme="dark"`, die Router-Init stellt
+ * das gespeicherte Theme wieder her („Automatisch" entfernt `data-theme`,
+ * „Hell" setzt `light`), und `syncWallMode` las `wasNight` aus dem Attribut -
+ * Nacht und schon Nacht, also kein Zweig, und die helle Flaeche blieb bis
+ * 06:00. Nachgespielt wird die Reihenfolge mit einer Stub-Wurzel: theme-init
+ * als echtes Skript, die Router-Init als ihre Drei-Wege-Logik (router.js,
+ * Initialisierung), dann der echte `syncWallMode` samt Minutentakt.
+ */
+test('Wand-Modus: nach einem Reload in der Nacht ist die Wand dunkel (#1453)', async () => {
+  const wall = await import('../public/utils/wall-mode.js');
+  const tz = await import('/utils/timezone.js');
+  const themeInit = readFileSync(new URL('../public/theme-init.js', import.meta.url), 'utf8');
+
+  function makeStorage(entries) {
+    const map = new Map(Object.entries(entries));
+    return {
+      get length() { return map.size; },
+      key: (i) => [...map.keys()][i] ?? null,
+      getItem: (k) => (map.has(k) ? map.get(k) : null),
+      setItem: (k, v) => { map.set(k, String(v)); },
+      removeItem: (k) => { map.delete(k); },
+    };
+  }
+  function makeRoot() {
+    const attrs = new Map();
+    return {
+      attrs,
+      setAttribute: (k, v) => { attrs.set(k, String(v)); },
+      getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null),
+      removeAttribute: (k) => { attrs.delete(k); },
+      hasAttribute: (k) => attrs.has(k),
+      toggleAttribute: (k, force) => {
+        const on = force === undefined ? !attrs.has(k) : Boolean(force);
+        if (on) attrs.set(k, ''); else attrs.delete(k);
+        return on;
+      },
+    };
+  }
+  const RealDate = Date;
+  function atInstant(iso, fn) {
+    const fixed = RealDate.parse(iso);
+    class FixedDate extends RealDate {
+      constructor(...args) { if (args.length === 0) super(fixed); else super(...args); }
+      static now() { return fixed; }
+    }
+    globalThis.Date = FixedDate;
+    try { return fn(); } finally { globalThis.Date = RealDate; }
+  }
+
+  // Die Nacht: 23:00 in Berlin (Haushalt) - und auf der Geraeteuhr, die
+  // theme-init liest, ebenfalls Nacht, damit alle drei Stellen dasselbe sehen.
+  const NIGHT = '2026-09-23T21:00:00Z';
+  const MORNING = '2026-09-24T04:00:00Z'; // 06:00 in Berlin
+  const deviceNight = class extends RealDate { getHours() { return 23; } };
+
+  const results = [];
+  for (const stored of [null, 'light', 'dark']) {
+    const root = makeRoot();
+    const storage = makeStorage({ 'yuvomi-wall-mode': '1', ...(stored ? { 'yuvomi-theme': stored } : {}) });
+    const prev = { document: globalThis.document, localStorage: globalThis.localStorage, location: globalThis.location, window: globalThis.window };
+    globalThis.document = { documentElement: root, querySelectorAll: () => [] };
+    globalThis.localStorage = storage;
+    globalThis.location = { pathname: '/' };
+    globalThis.window = { yuvomi: { restoreThemeColor: () => {} } };
+    tz.setDisplayTimeZone('Europe/Berlin');
+    try {
+      // 1. theme-init.js, das echte Skript
+      new Function('localStorage', 'sessionStorage', 'document', 'location', 'Date', themeInit)(
+        storage, makeStorage({}), globalThis.document, globalThis.location, deviceNight,
+      );
+      nodeAssert.ok(root.hasAttribute('data-wall-night'), 'Vorbedingung: theme-init setzt nachts data-wall-night');
+      // 2. Router-Init: das gespeicherte Theme noch einmal (router.js, Initialisierung)
+      if (stored === 'dark' || stored === 'light') root.setAttribute('data-theme', stored);
+      else root.removeAttribute('data-theme');
+      // 3. syncWallMode aus der Navigation, danach ein Minutentakt in der Nacht
+      atInstant(NIGHT, () => wall.syncWallMode('/'));
+      const afterLoad = root.getAttribute('data-theme');
+      atInstant(NIGHT, () => wall.syncWallMode('/'));
+      const afterTick = root.getAttribute('data-theme');
+      const night = root.hasAttribute('data-wall-night');
+      // 4. der Takt um 06:00 stellt die Wahl des Nutzers zurueck
+      atInstant(MORNING, () => wall.syncWallMode('/'));
+      results.push({
+        stored,
+        afterLoad, afterTick, night,
+        morning: root.getAttribute('data-theme'),
+        morningNight: root.hasAttribute('data-wall-night'),
+        kept: storage.getItem('yuvomi-theme'),
+      });
+    } finally {
+      tz.setDisplayTimeZone(null);
+      Object.assign(globalThis, prev);
+    }
+  }
+  nodeAssert.deepEqual(results, [
+    { stored: null, afterLoad: 'dark', afterTick: 'dark', night: true, morning: null, morningNight: false, kept: null },
+    { stored: 'light', afterLoad: 'dark', afterTick: 'dark', night: true, morning: 'light', morningNight: false, kept: 'light' },
+    { stored: 'dark', afterLoad: 'dark', afterTick: 'dark', night: true, morning: 'dark', morningNight: false, kept: 'dark' },
+  ], `nachts dunkel nach dem Laden und im Takt, morgens die Wahl des Nutzers, yuvomi-theme unberuehrt - bekam ${JSON.stringify(results)}`);
+});
+
 // --------------------------------------------------------
 // Widget-Konfiguration (public/utils/dashboard-widgets.js)
 //
@@ -2978,6 +3082,114 @@ test('suggestGridHoleFill: ohne Loch und ohne Ausweg schweigt er', () => {
   // Nur die eigene Groesse im Angebot: es gibt nichts vorzuschlagen.
   assert(widgets.suggestGridHoleFill([kachel('a', 2, 1), kachel('b', 2, 1), kachel('c', 1, 1)], 3, presets) === null,
     'ohne Kandidaten darf kein Vorschlag entstehen');
+});
+
+// --------------------------------------------------------
+// Normalmodus ohne Loecher (Re-Critique 2026-09-27, A7 P2-12 / R10 L9)
+//
+// Gemessen bei 1440x900 im Demo-Haushalt: neben den Kennzahlen (367x110) und
+// neben den Notizen (367x201) blieb je eine Spalte leer, und den Loch-Hinweis
+// gibt es nur im Anpassen-Modus. `rowFillSpans` sagt, welche Kachel in den
+// Rest ihrer Zeile waechst; applyRowFill() setzt es als Darstellung.
+// --------------------------------------------------------
+
+/** Die Positionen einer Packung: Id -> [Zeile, Spalte] der ersten Zelle. */
+function positions(cells) {
+  const pos = {};
+  cells.forEach((row, r) => row.forEach((id, c) => { if (id && !pos[id]) pos[id] = [r, c]; }));
+  return pos;
+}
+
+const DEMO_RASTER = [
+  kachel('family', 1, 2), kachel('budget', 1, 2), kachel('birthdays', 1, 2),
+  kachel('weather', 2, 1), kachel('metrics', 2, 1), kachel('rewards', 1, 1), kachel('notes', 2, 1),
+];
+
+test('rowFillSpans: im Demo-Raster wachsen Kennzahlen und Notizen in ihren Zeilenrest', () => {
+  nodeAssert.equal(typeof widgets.rowFillSpans, 'function', 'rowFillSpans fehlt in utils/dashboard-widgets.js');
+  const grown = widgets.rowFillSpans(DEMO_RASTER, 3);
+  nodeAssert.deepEqual([...grown], [['metrics', 3], ['notes', 3]]);
+  // Einspaltig gibt es keinen Rest, und ein volles Raster laesst alles stehen.
+  nodeAssert.equal(widgets.rowFillSpans(DEMO_RASTER, 1).size, 0);
+  nodeAssert.equal(widgets.rowFillSpans([kachel('a', 1, 1), kachel('b', 1, 1)], 2).size, 0);
+});
+
+test('rowFillSpans: eine hohe Kachel waechst nur, wo BEIDE ihrer Zeilen frei sind', () => {
+  // family 1x2 links, rechts daneben oben notes 1x1, unten nichts: die Zelle
+  // unten rechts ist frei, aber die obere nicht - family darf nicht wachsen,
+  // die einzeilige Kachel daneben schon nicht, weil ihre Zeile voll ist.
+  const grown = widgets.rowFillSpans([kachel('family', 1, 2), kachel('notes', 1, 1)], 2);
+  nodeAssert.deepEqual([...grown], []);
+  // Zwei hohe Kacheln in drei Spalten: die zweite waechst in die dritte Spalte.
+  nodeAssert.deepEqual([...widgets.rowFillSpans([kachel('a', 1, 2), kachel('b', 1, 2)], 3)], [['b', 2]]);
+});
+
+test('rowFillSpans: das Wachstum wirft die Packung nicht um (Aequivalenz)', () => {
+  // Gewachsen wird nur in Zellen, die nach der VOLLEN Packung leer sind - die
+  // Neupackung mit den breiteren Spans muss jede Kachel an ihrer Stelle lassen
+  // und die gewachsenen Zeilen voll machen. Geprueft an mehreren Rastern,
+  // nicht nur am Demo-Haushalt.
+  const raster = [
+    [DEMO_RASTER, 3],
+    [DEMO_RASTER, 4],
+    [DEMO_RASTER, 2],
+    [[kachel('a', 2, 1), kachel('b', 1, 2), kachel('c', 1, 1), kachel('d', 2, 2), kachel('e', 1, 1)], 3],
+    [[kachel('a', 1, 1), kachel('b', 3, 1), kachel('c', 1, 2), kachel('d', 1, 1)], 4],
+  ];
+  for (const [items, cols] of raster) {
+    const before = widgets.packGrid(items, cols);
+    const grown = widgets.rowFillSpans(items, cols);
+    const widened = items.map((it) => (grown.has(it.id) ? { ...it, cols: grown.get(it.id) } : it));
+    const after = widgets.packGrid(widened, cols);
+    nodeAssert.deepEqual(positions(after), positions(before), `Positionen verschoben (${cols} Spalten)`);
+    nodeAssert.ok(after.length <= before.length, 'das Raster wird nicht hoeher');
+    for (const [id] of grown) {
+      const [r] = positions(after)[id];
+      nodeAssert.ok(after[r].every(Boolean), `die Zeile von ${id} ist nach dem Wachsen voll (${cols} Spalten)`);
+    }
+  }
+});
+
+test('applyRowFill: waechst im Normalmodus, im Anpassen-Modus nimmt es alles zurueck', async () => {
+  const { __test } = await import('../public/pages/dashboard.js');
+  nodeAssert.equal(typeof __test.applyRowFill, 'function', 'applyRowFill fehlt im __test-Export');
+  const SPANS = { family: [1, 2], budget: [1, 2], birthdays: [1, 2], weather: [2, 1], metrics: [2, 1], rewards: [1, 1], notes: [2, 1] };
+  const tile = (id) => {
+    const props = new Map();
+    return {
+      dataset: { widgetId: id },
+      style: { setProperty: (k, v) => props.set(k, v), removeProperty: (k) => props.delete(k), props },
+    };
+  };
+  const tiles = Object.keys(SPANS).map(tile);
+  const grid = { children: tiles };
+  const vorher = globalThis.getComputedStyle;
+  globalThis.getComputedStyle = (el) => {
+    if (el === grid) return { gridTemplateColumns: '366px 366px 366px' };
+    const [cols, rows] = SPANS[el.dataset.widgetId];
+    return { display: 'flex', gridColumnStart: 'auto', gridColumnEnd: `span ${cols}`, gridRowStart: 'auto', gridRowEnd: `span ${rows}` };
+  };
+  try {
+    __test.applyRowFill(grid);
+    const gewachsen = tiles.filter((t) => 'rowFill' in t.dataset).map((t) => [t.dataset.widgetId, t.style.props.get('--widget-fill-span')]);
+    nodeAssert.deepEqual(gewachsen, [['metrics', '3'], ['notes', '3']]);
+    __test.applyRowFill(grid, { editing: true });
+    nodeAssert.equal(tiles.filter((t) => 'rowFill' in t.dataset || t.style.props.size).length, 0,
+      'im Anpassen-Modus zeigt das Raster die gewaehlten Groessen');
+  } finally {
+    globalThis.getComputedStyle = vorher;
+  }
+});
+
+test('das Wachstum ist verdrahtet: CSS liest den Span, der Aufbau ruft es nach dem Anpassen-Draht', () => {
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const regel = [...eachRule(css)].find((r) => r.selector.trim() === '.dashboard__grid > [data-row-fill]');
+  nodeAssert.ok(regel, 'keine Regel fuer [data-row-fill] in dashboard.css');
+  nodeAssert.match(regel.body, /grid-column:\s*span var\(--widget-fill-span\)/);
+  nodeAssert.ok(regel.at.some((a) => /min-width:\s*768px/.test(a)), 'nur ab zwei Spalten');
+  const src = withoutBlockComments(readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8'));
+  nodeAssert.match(src, /wireDashboardEditMode\(\);\s*wireRowFill\(\);/, 'rebuildDashboard ruft wireRowFill() nach dem Anpassen-Draht');
+  nodeAssert.match(src, /applyRowFill\(grid, \{ editing: isCustomizing \}\)/, 'wireRowFill nimmt das Wachstum im Anpassen-Modus zurueck');
 });
 
 test('isUserOrderedConfig gibt es nicht mehr - das Raster schaltet nach keiner Reihenfolge um', () => {
@@ -3490,6 +3702,31 @@ test('Wetter: ohne Bezugstag gibt es kein "Heute"', async () => {
       'ohne today.date darf kein Tag geraten werden',
     );
   }
+});
+
+test('Wetter-Verfuegbarkeit: der Grund des Proxys entscheidet, die Praeferenzen nur ohne Antwort', async () => {
+  const { __test } = await import('../public/pages/dashboard.js');
+  const avail = __test.weatherAvailableFrom;
+  const HH = { weather_source: { source: 'db' }, weather_user: {} };
+  const NONE = { weather_source: { source: 'none' }, weather_user: { lat: null, lon: null } };
+  const MEMBER = { weather_source: { source: 'none' }, weather_user: { lat: '51.5', lon: '7.4' } };
+  assert(avail({ data: { current: {} } }, NONE) === true, 'Daten sind immer verfuegbar');
+  assert(avail({ data: null, reason: 'upstream_error' }, NONE) === true, 'gescheitert heisst eingerichtet');
+  assert(avail({ data: null, reason: 'not_configured' }, HH) === false,
+    'der Proxy kennt die ganze Regel - sein "nicht eingerichtet" schlaegt die Haushaltsquelle');
+  // Die Anfrage selbst scheiterte (`.catch` im Client): kein Grund, also die Praeferenzen.
+  assert(avail({ data: null }, HH) === true, 'Haushalt eingerichtet');
+  assert(avail({ data: null }, MEMBER) === true, 'Standort des Mitglieds zaehlt mit');
+  assert(avail({ data: null }, NONE) === false, 'nichts eingerichtet');
+  assert(avail(null, null) === false, 'vor dem Laden verspricht nichts eine Kachel');
+});
+
+test('Wetter-Karte ohne Wetter: ruhiger Zustand, kein Alarm, Aktualisieren bleibt', async () => {
+  const { __test } = await import('../public/pages/dashboard.js');
+  const html = __test.renderWeatherUnavailable();
+  assert(html.includes('dashboard.weatherUnavailable'), 'der Zustand sagt, was los ist');
+  assert(html.includes('id="weather-refresh-btn"'), 'der Weg zurueck bleibt');
+  assert(!/role="alert"/.test(html), 'kein Alarm bei jedem Aufbau');
 });
 
 test('Wetter-Karte: die Reihe beginnt beschriftet mit morgen, nicht mit "Heute"', async () => {

@@ -9,7 +9,10 @@ const log = createLogger('CalDAV');
 
 import * as db from '../db.js';
 import { upsertExternalCalendar } from './external-calendars.js';
-import { legacyColorSnapshotKey, forgetLegacyColorSnapshot, legacyColorChosenIds } from './legacy-color-snapshot.js';
+import {
+  legacyColorSnapshotKey, forgetLegacyColorSnapshot, legacyColorChosenIds,
+  legacyColorHealKey, legacyColorHealEnded, legacyColorCutoff,
+} from './legacy-color-snapshot.js';
 import { assignDefaultToEvent, reassignDefaultOnCalendarMove } from './sync-assignment.js';
 import { pruneDeletedEvents, countMirroredEvents, deleteMirroredEvents } from './calendar-prune.js';
 import * as outbound from './calendar-outbound.js';
@@ -21,6 +24,7 @@ import { eventDateTimeFields } from '../utils/ics-datetime.js';
 import { vtimezoneFor } from '../utils/vtimezone.js';
 import { householdTimeZone } from '../utils/timezone.js';
 import { createCalDAVClient, supportsComponent } from '../utils/caldav-client.js';
+import { sameCredentialOrigin } from '../utils/credential-origin.js';
 import { rruleLine } from './recurrence.js';
 import { nearestIcalColorName } from '../utils/ical-color.js';
 import { outboundEvent } from './outbound-dtstart.js';
@@ -120,24 +124,6 @@ function uploadedRowRule(t) {
               WHERE source = 'caldav' AND external_id = ${t}target_caldav_calendar_url AND color IS NOT NULL)))`;
 }
 
-/** Migration, mit der #891 den Import aufhoeren liess, Kalenderfarben einzubrennen. */
-const LEGACY_COLOR_FIX_MIGRATION = 166;
-
-/**
- * Wann diese Installation den Fix aus #891 bekam (`applied_at` von Migration
- * 166), oder null ohne `schema_migrations` - das gibt es nur in gekuerzten
- * Test-Fixtures, nie nach `migrate()`. Aeltere Zeilen koennen eine
- * eingebrannte Farbe tragen, juengere nicht (#1270).
- */
-function legacyColorCutoff(conn) {
-  const hasTable = conn.prepare(
-    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'"
-  ).get();
-  if (!hasTable) return null;
-  return conn.prepare('SELECT applied_at FROM schema_migrations WHERE version = ?')
-    .get(LEGACY_COLOR_FIX_MIGRATION)?.applied_at ?? null;
-}
-
 /**
  * Das Kalender-Home einer Sammlungs-URL fuer die Zurechnung verwaister
  * Kalender (#1270): Origin plus Pfad ohne letztes Segment, oder null, wenn es
@@ -165,18 +151,6 @@ function sameAccountUrl(a, b) {
     } catch { return String(raw).trim(); }
   };
   return norm(a) === norm(b);
-}
-
-/** So lange laeuft die Farb-Heilung (#1270) je Konto, ab seinem ersten Lauf. */
-const LEGACY_HEAL_DAYS = 30;
-
-/**
- * sync_config-Schluessel der Farb-Heilung je Konto (#1270). Wert: der Beginn
- * der Frist als ISO-Zeitstempel, oder `never` fuer ein Konto, das nichts zu
- * heilen hat. Fehlt er, beginnt die Frist mit dem naechsten Lauf.
- */
-function legacyColorHealKey(accountId) {
-  return `caldav_legacy_color_heal_since_${accountId}`;
 }
 
 
@@ -228,9 +202,14 @@ function legacyHealState(conn, accountId, { serverCalendars = [], cutoff = null,
   // das lange nicht synchronisiert, also spaet. Das ist dasselbe Risiko wie
   // ein frueher Beginn; eine gerade gewaehlte Farbe schuetzt der Schnappschuss
   // (und fuer den laufenden Sync die Neupruefung im UPDATE).
-  const since = Date.parse(value);
-  const elapsed = now.getTime() - since;
-  if (!(Number.isFinite(since) && elapsed >= 0 && elapsed < LEGACY_HEAL_DAYS * 24 * 60 * 60 * 1000)) return null;
+  //
+  // Ist die Frist vorbei, faellt der Schnappschuss (#1442): aus ihm heilt
+  // nichts mehr. Der Fristbeginn bleibt, sonst finge sie neu an.
+  if (legacyColorHealEnded(value, now)) {
+    conn.prepare('DELETE FROM sync_config WHERE key = ?').run(snapshotKey);
+    return null;
+  }
+  if (now.getTime() < Date.parse(value)) return null;
   // Fehlt der Schnappschuss oder ist er unlesbar, heilt nichts (fail closed).
   let parsed;
   try { parsed = JSON.parse(conn.prepare('SELECT value FROM sync_config WHERE key = ?').get(snapshotKey)?.value ?? ''); }
@@ -526,10 +505,31 @@ function listAccounts() {
   }));
 }
 
+/**
+ * Zugangsdaten eines Kontos aendern; ein leeres Feld laesst den gespeicherten
+ * Wert stehen.
+ *
+ * DAS GESPEICHERTE PASSWORT GEHOERT ZU EINEM SERVER UND EINEM BENUTZER, wie bei
+ * CardDAV (server/utils/credential-origin.js). Wer den Server (Schema, Host,
+ * Port) oder den Benutzernamen wechselt, muss es neu eingeben; sonst wirft die
+ * Funktion mit `code = 'password_required'`, bevor irgendetwas gesendet oder
+ * geschrieben ist. Ohne diese Regel testete der Verbindungstest unten die neue
+ * Adresse mit dem gespeicherten Passwort - ein PUT mit fremder Adresse schickte
+ * die Zugangsdaten des Haushalts sofort per Basic Auth dorthin. Ein anderer Pfad
+ * auf demselben Server bleibt ohne Passwort moeglich.
+ */
 async function updateAccount(accountId, { name, caldavUrl, username, password, createClient }) {
   const account = getAccountById(accountId);
   if (!account) {
     throw new Error(`Account ${accountId} not found.`);
+  }
+
+  if (!password
+      && ((caldavUrl && !sameCredentialOrigin(caldavUrl, account.caldav_url))
+        || (username && username !== account.username))) {
+    const err = new Error('A new server or username needs the password again.');
+    err.code = 'password_required';
+    throw err;
   }
 
   // If credentials changed, test connection

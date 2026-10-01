@@ -17,7 +17,7 @@
  *   → bypassCacheUntil (in-memory + Cache API für SW-Restart-Robustheit)
  */
 
-const APP_RELEASE        = '1.0.0';
+const APP_RELEASE        = '1.1.0';
 const APP_BUILD_REVISION = '__YUVOMI_BUILD_REVISION__';
 const CACHE_RELEASE      = `${APP_RELEASE}-${APP_BUILD_REVISION}`;
 const SHELL_CACHE        = `yuvomi-shell-${CACHE_RELEASE}`;
@@ -137,6 +137,7 @@ const APP_SHELL = [
   '/utils/extension-i18n.js',
   '/utils/extension-widgets.js',
   '/utils/fab.js',
+  '/utils/flip.js',
   '/utils/filter-sheet.js',
   '/utils/folder-upload.js',
   '/utils/folder-tree.js',
@@ -147,6 +148,7 @@ const APP_SHELL = [
   '/components/fasting-dial.js',
   '/components/fasting-help.js',
   '/styles/fasting-controls.css',
+  '/utils/health-hoist.js',
   '/utils/health-labs.js',
   '/utils/health-meds.js',
   '/utils/health-nutrition.js',
@@ -163,6 +165,7 @@ const APP_SHELL = [
   '/utils/inventory-warranty.js',
   '/utils/kitchen-tabs.js',
   '/utils/kitchen-transfer.js',
+  '/utils/leave-guard.js',
   '/utils/live-feed.js',
   '/utils/markdown-checklist.js',
   '/utils/markdown-toolbar.js',
@@ -172,6 +175,7 @@ const APP_SHELL = [
   '/utils/module-accent.js',
   '/utils/module-access.js',
   '/utils/metric-card.js',
+  '/utils/metric-glance.js',
   '/utils/money.js',
   '/utils/nav-badges.js',
   '/utils/note-category-filter.js',
@@ -182,6 +186,8 @@ const APP_SHELL = [
   '/utils/page-layout.js',
   '/utils/page-lifecycle.js',
   '/utils/page-search.js',
+  '/utils/search-sections.js',
+  '/utils/palette-combobox.js',
   '/utils/pantry-locations.js',
   '/utils/pantry-status.js',
   '/utils/pantry-units.js',
@@ -201,6 +207,7 @@ const APP_SHELL = [
   '/utils/roving-toolbar.js',
   '/utils/row-action.js',
   '/utils/schedule-tabs.js',
+  '/utils/schedule-reminder-offset.js',
   '/utils/scroll-restore.js',
   '/utils/seal-pair.js',
   '/utils/segment-indicator.js',
@@ -214,6 +221,7 @@ const APP_SHELL = [
   '/utils/task-fields.js',
   '/utils/timezone.js',
   '/utils/toast-placement.js',
+  '/utils/toast-show.js',
   '/utils/toast-surface.js',
   '/utils/today-sheet.js',
   '/utils/ux.js',
@@ -258,6 +266,7 @@ const APP_LOCALES = [
   '/locales/ko.json',
   '/locales/nl.json',
   '/locales/pl.json',
+  '/locales/pt-BR.json',
   '/locales/pt.json',
   '/locales/ru.json',
   '/locales/sv.json',
@@ -328,6 +337,7 @@ const PAGE_MODULES = [
   '/settings/weather-location.js',
   '/settings/family-users.js',
   '/settings/pages/personal-account.js',
+  '/settings/pages/personal-schedule.js',
   '/settings/pages/admin-email.js',
   '/settings/pages/admin-permissions.js',
   '/settings/pages/personal-calendar-subscriptions.js',

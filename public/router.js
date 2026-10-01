@@ -13,8 +13,9 @@ import { forgetLayoutHint } from '/utils/dashboard-layout-hint.js';
 import { initI18n, getLocale, t, formatDate, formatTime } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { emptyHintEl, emptyStateEl } from '/utils/empty-state.js';
-import { wireScrollFade, wireCollapsingHeader, wireSwipeToDismiss, watchNavCapsuleHeight } from '/utils/ux.js';
-import { TOAST_SURFACES, toastSurface } from '/utils/toast-surface.js';
+import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight } from '/utils/ux.js';
+import { TOAST_SURFACES } from '/utils/toast-surface.js';
+import { showToast } from '/utils/toast-show.js';
 import { BULK_PILL_LAYER, clearBulkPill } from '/utils/bulk-pill.js';
 import { watchToastPlacement } from '/utils/toast-placement.js';
 import { COMPOSITION_MODES } from '/utils/page-layout.js';
@@ -28,13 +29,18 @@ import { moduleAccentToken, moduleAccentVar } from '/utils/module-accent.js';
 import { getLastHealthRoute, HEALTH_ROUTES } from '/utils/health-tabs.js';
 import { SCHEDULE_ROUTES } from '/utils/schedule-tabs.js';
 import { activityType } from '/utils/health-activity.js';
+import {
+  SEARCH_SECTIONS, NEW_ACTIONS, searchResultCount, markSegments, paletteCommands,
+} from '/utils/search-sections.js';
 import { buildHelpRows } from '/utils/help.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
+import { wirePaletteCombobox } from '/utils/palette-combobox.js';
 import { triggerPageFab } from '/utils/fab.js';
+import { hasLeaveGuard, mayLeave } from '/utils/leave-guard.js';
 import { wireSheetDrag } from '/utils/sheet-drag.js';
 import {
   handleBackNavigation, closeAllOverlays, consumeOverlayMarker,
-  pushOverlay, dropOverlay, attachOverlay,
+  pushOverlay, dropOverlay, attachOverlay, whenHistorySettled,
 } from '/utils/overlay-history.js';
 import {
   applyNavBadges, setNavBadge, resetNavBadges, navBadgeRoutes,
@@ -54,7 +60,9 @@ import { prefersInkText } from '/utils/contrast.js';
 import { handleMasterDetailPopstate } from '/utils/master-detail.js';
 import '/components/datepicker.js';
 import { NAV_ICONS, MODULE_ICON, moduleIconEl } from '/nav-icons.js';
-import { RENAMED_SETTINGS_SOURCE_PATHS, SETTINGS_LEAVES } from '/settings/registry.js';
+import {
+  RENAMED_SETTINGS_SOURCE_PATHS, SETTINGS_LEAVES, searchSettings, settingsOptionUrl, settingsSectionUrl,
+} from '/settings/registry.js';
 import {
   NAV_SECTION,
   resolveMobileNavOrder,
@@ -540,12 +548,6 @@ function updateBranding(path = currentPath) {
   const appName = getAppName();
   const sidebarLogoName = document.querySelector('.nav-sidebar__brand-name');
   if (sidebarLogoName) sidebarLogoName.textContent = appName;
-  const sidebarVersion = document.querySelector('.nav-sidebar__version');
-  if (sidebarVersion) {
-    const version = getAppVersion();
-    sidebarVersion.textContent = version ? t('login.version', { version }) : '';
-    sidebarVersion.hidden = !version;
-  }
 
   const loginTitle = document.querySelector('.auth-hero__title');
   if ((path === '/login' || path === '/setup') && loginTitle) loginTitle.textContent = appName;
@@ -630,6 +632,26 @@ function createFocusTrap(container) {
  */
 async function navigate(path, userOrPushState = true, pushState = true) {
   if (isNavigating) return;
+  // VERLASSEN-SCHUTZ (utils/leave-guard.js, Re-Critique 2026-09-28 A7 P2-1):
+  // eine Seite mit ungespeicherter Arbeit - der Anpassen-Modus der Uebersicht -
+  // fragt, bevor sie verschwindet. Jeder Weg endet hier: Seitenleiste,
+  // Tab-Leiste, Mehr-Blatt, Befehlspalette, Zurueck (popstate). Nur fuer
+  // Wechsel einer angemeldeten Sitzung: das Anmelden (Objekt) und ein
+  // Sitzungsablauf fragen nicht. Ohne Waechter kein await: zwischen der
+  // Pruefung oben und `isNavigating = true` darf keine Luecke entstehen.
+  if (currentUser && typeof userOrPushState !== 'object' && hasLeaveGuard() && !(await mayLeave(path))) {
+    // Ein Zurueck hat die Adresse schon gewechselt - sie gehoert wieder der
+    // Seite, die stehen bleibt.
+    // Erst wenn die Rueckfrage ihren History-Eintrag zurueckgegeben hat
+    // (whenHistorySettled in utils/overlay-history.js) - sonst truege deren
+    // spaetes back() die Adresse gleich wieder weg.
+    if (userOrPushState === false && currentPath) {
+      const stay = currentPath;
+      await whenHistorySettled();
+      history.pushState({ path: stay }, '', stay);
+    }
+    return;
+  }
   isNavigating = true;
 
   // Offenes „Mehr“-Sheet beim Navigieren immer schließen — robust und
@@ -1901,12 +1923,10 @@ function renderAppShell(container) {
   const sidebarLogoSpan = document.createElement('span');
   sidebarLogoSpan.className = 'nav-sidebar__brand-name';
   sidebarLogoSpan.textContent = getAppName();
-  const sidebarVersion = document.createElement('small');
-  sidebarVersion.className = 'nav-sidebar__version';
-  const cachedVersion = getAppVersion();
-  sidebarVersion.textContent = cachedVersion ? t('login.version', { version: cachedVersion }) : '';
-  sidebarVersion.hidden = !cachedVersion;
-  sidebarBrandText.append(sidebarLogoSpan, sidebarVersion);
+  // KEINE VERSION UNTER DER WORTMARKE (R14, A1 P3-7): sie stand dauerhaft da
+  // und sagte in jeder Sitzung dasselbe. Wer sie sucht, findet sie in den
+  // Neuigkeiten (aktuelle Version) und im Blatt System.
+  sidebarBrandText.append(sidebarLogoSpan);
   sidebarLogo.appendChild(sidebarBrandText);
 
   const sidebarToggle = document.createElement('button');
@@ -2194,9 +2214,10 @@ function renderAppShell(container) {
   searchStatus.setAttribute('role', 'status');
   searchStatus.setAttribute('aria-live', 'polite');
   searchPanel.appendChild(searchStatus);
-  // Schließen NACH den Treffern im DOM (visuell absolut oben rechts): Tab aus
-  // dem Suchfeld erreicht so direkt das erste Ergebnis statt erst den
-  // Schließen-Button (Audit A1-14); Esc bleibt der schnelle Ausstieg.
+  // Schließen NACH den Treffern im DOM (visuell absolut oben rechts). Die
+  // Treffer selbst stehen nicht mehr in der Tab-Folge: das Feld ist eine
+  // Combobox, Pfeile markieren und Enter oeffnet (utils/palette-combobox.js);
+  // Tab fuehrt vom Feld zum Schliessen, Esc bleibt der schnelle Ausstieg.
   searchPanel.appendChild(searchClose);
   searchOverlay.appendChild(searchPanel);
 
@@ -3326,17 +3347,48 @@ function initMoreSheet(container, openSearch) {
 /**
  * Initialisiert die Suchfunktion (Overlay + API-Calls).
  */
-// Durchsuchbare Domänen des /search-Endpunkts, in Anzeige-Reihenfolge. Dienen
-// im Leerzustand als Direktsprung-Kacheln (labelKey/icon gespiegelt aus der
-// Haupt-Navigation, damit Suche und Nav dieselbe Sprache sprechen).
-const SEARCH_SCOPES = [
-  { labelKey: 'nav.tasks',    route: '/tasks'    },
-  { labelKey: 'nav.calendar', route: '/calendar' },
-  { labelKey: 'nav.notes',    route: '/notes'    },
-  { labelKey: 'nav.contacts', route: '/contacts' },
-  { labelKey: 'nav.shopping', route: '/shopping' },
-  { labelKey: 'nav.health',   route: '/health'   },
-];
+// Die Palette hinter ⌘K (Re-Critique 2026-09-28, A1 P2-1): zuerst ORTE und
+// HANDLUNGEN, dann Daten. Die Orte sind genau die Ziele der Navigation
+// (navItems - abgeschaltet, gesperrt oder ausgeblendet faellt heraus), dazu die
+// Einstellungsblaetter aus derselben Suche wie in den Einstellungen; die
+// Handlungen sind die Anlege-Aktionen (utils/search-sections.js NEW_ACTIONS),
+// nur wo der Betrachter schreiben darf.
+function paletteLocal(q) {
+  const targets = navItems();
+  const places = targets.map((item) => ({
+    label: item.label, route: item.navHref ?? item.path, module: item.module, icon: item.icon,
+  }));
+  const settings = [];
+  if (currentUser && targets.some((item) => item.module === 'settings')) {
+    const found = searchSettings(q, { user: currentUser, translate: t });
+    const settingsLabel = t('nav.settings');
+    found.leaves.forEach((leaf) => settings.push({
+      label: t(leaf.labelKey), route: leaf.path, context: settingsLabel, module: 'settings',
+    }));
+    found.sections.forEach(({ leaf, section, label }) => settings.push({
+      label, route: settingsSectionUrl(leaf, section.id), context: t(leaf.labelKey), module: 'settings',
+    }));
+    found.options.forEach(({ leaf, key, label }) => settings.push({
+      label, route: settingsOptionUrl(leaf, key), context: t(leaf.labelKey), module: 'settings',
+    }));
+  }
+  const visible = new Set(targets.map((item) => item.module));
+  const verb = t('search.newSection');
+  const actions = NEW_ACTIONS
+    .filter((action) => visible.has(action.module) && navModuleAccess(action.module) === 'write')
+    .map((action) => ({
+      label: t(action.labelKey), route: action.route, module: action.module,
+      context: t(`nav.${action.module}`), verb, create: true,
+    }));
+  // Hilfe hat keine Seite, nur ein Blatt - am Desktop lag sie hinter dem
+  // Avatar (R14, A1 P3-6). Die Tastenkombinationen stehen im Hilfeblatt.
+  const commands = [
+    { label: t('nav.help'), run: () => showHelpModal() },
+    { label: t('shortcuts.help'), run: () => showHelpModal() },
+    { label: t('nav.changelog'), run: () => showChangelogModal() },
+  ];
+  return paletteCommands(q, { places, settings, actions, commands });
+}
 
 function initSearch(container) {
   const searchClose = container.querySelector('#search-close');
@@ -3345,6 +3397,12 @@ function initSearch(container) {
   const results      = container.querySelector('#search-results');
   const status       = container.querySelector('#search-status');
   if (!overlay || !input || !results) return null;
+
+  // Das Feld ist eine Combobox ueber der Trefferliste (Re-Critique
+  // 2026-09-28, A1 P1-1): Enter oeffnet die markierte Zeile, Pfeiltasten
+  // bewegen nur die Markierung, der Fokus bleibt im Feld. Nach jedem Rendern
+  // liest `combo.refresh()` die Zeilen neu ein (utils/palette-combobox.js).
+  const combo = wirePaletteCombobox({ input, listbox: results });
 
   function setStatus(text) {
     if (status) status.textContent = text || '';
@@ -3374,19 +3432,24 @@ function initSearch(container) {
     scopes.appendChild(scopesHeading);
     const list = document.createElement('div');
     list.className = 'search-scopes__list';
-    SEARCH_SCOPES.forEach((scope) => {
+    // ALLE SICHTBAREN ZIELE, nicht die durchsuchten Module: "Direkt oeffnen"
+    // kannte Schichtplan, Haushaltshilfe, Belohnungen und Mahlzeiten nicht,
+    // weil die Suche dort keine Daten hat (Re-Critique 2026-09-28, A1 P2-1).
+    navItems().forEach((item) => {
+      const scope = { label: item.label, route: item.navHref ?? item.path };
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'search-scope';
       // Markensiegel (Herkunfts-Regel, Block 2): die Kachel benennt ihr
-      // Zielmodul ueber Familienton + Icon; der Slug ist die Route selbst.
+      // Zielmodul ueber Familienton + Icon.
       const seal = document.createElement('span');
       seal.className = 'module-seal module-seal--sm search-scope__seal';
       seal.setAttribute('aria-hidden', 'true');
-      seal.style.setProperty('--seal-accent', moduleAccentVar(scope.route.slice(1)));
-      seal.appendChild(moduleIconEl(MODULE_ICON[scope.route.slice(1)]));
+      const accent = item.accent ? `var(--${item.accent}, var(--color-accent))` : moduleAccentVar(item.module);
+      if (accent) seal.style.setProperty('--seal-accent', accent);
+      seal.appendChild(moduleIconEl(item.icon));
       const label = document.createElement('span');
-      label.textContent = t(scope.labelKey);
+      label.textContent = scope.label;
       btn.append(seal, label);
       btn.addEventListener('click', () => {
         closeSearch({ restoreFocus: false });
@@ -3396,6 +3459,9 @@ function initSearch(container) {
     });
     scopes.appendChild(list);
     results.appendChild(scopes);
+    // Die Kacheln sind per Pfeil erreichbar, aber nichts ist vorgewaehlt:
+    // Enter auf ein leeres Feld oeffnet keine Kachel.
+    combo.refresh({ preselect: false });
     // Auch aus dem input-Handler (< 2 Zeichen) aufgerufen, wo openSearch die
     // Icons nicht nachzieht — daher hier selbst rendern.
     window.lucide?.createIcons({ el: results });
@@ -3445,6 +3511,7 @@ function initSearch(container) {
     input.value = '';
     results.replaceChildren();
     results.removeAttribute('aria-busy');
+    combo.clear();
     setStatus('');
     if (restoreFocus) returnFocus(lastFocusedBeforeSearch);
   }
@@ -3457,55 +3524,69 @@ function initSearch(container) {
     }
   });
 
-  // Pfeiltasten führen vom Suchfeld durch die Treffer (Audit A1-14): Enter
-  // aktiviert den fokussierten Treffer nativ (Buttons), Esc schließt.
-  overlay.addEventListener('keydown', (e) => {
-    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
-    const hits = [...results.querySelectorAll('.search-result')];
-    if (!hits.length) return;
-    e.preventDefault();
-    const idx = hits.indexOf(document.activeElement);
-    if (e.key === 'ArrowDown') {
-      (idx < 0 ? hits[0] : hits[Math.min(idx + 1, hits.length - 1)]).focus();
-    } else if (idx > 0) {
-      hits[idx - 1].focus();
-    } else if (idx === 0) {
-      input.focus();
-    }
-  });
+  // Pfeiltasten und Enter gehoeren dem Feld selbst (Combobox oben): die
+  // Pfeile schoben frueher den Fokus in die Treffer, und Enter im Feld tat
+  // nichts (A1 P1-1).
+
+  const announceCount = (count) => setStatus(
+    count === 0 ? t('search.noResults')
+      : count === 1 ? t('search.resultCountOne', { count })
+      : t('search.resultCountMany', { count }),
+  );
 
   let searchTimer = null;
   input.addEventListener('input', () => {
     clearTimeout(searchTimer);
     const q = input.value.trim();
-    if (q.length < 2) {
+    if (q.length < 1) {
       renderSearchHint();
       return;
     }
+    // ORTE UND HANDLUNGEN SOFORT, ohne Server und ab dem ersten Zeichen: sie
+    // kennt der Client selbst. Die Daten kommen ab zwei Zeichen dazu.
+    const local = paletteLocal(q);
+    const onClose = () => closeSearch({ restoreFocus: false });
+    if (q.length < 2) {
+      // Ohne Ort und ohne Aktion bliebe die Flaeche leer: der Server wird
+      // unter zwei Zeichen nicht gefragt, sein "Keine Ergebnisse" kommt nie.
+      // Dann steht weiter der Hinweis mit den Kacheln.
+      const localCount = local.places.length + local.actions.length;
+      if (localCount === 0) {
+        renderSearchHint();
+        return;
+      }
+      renderSearchResults(results, null, onClose, { local, query: q });
+      combo.refresh();
+      results.setAttribute('aria-busy', 'false');
+      announceCount(localCount);
+      return;
+    }
+    renderSearchResults(results, null, onClose, { local, query: q });
+    combo.refresh();
     searchTimer = setTimeout(async () => {
       // Ladezustand erst wenn der Fetch wirklich startet (nach dem Debounce):
-      // Skeletons + „Suche läuft…" statt einer eingefroren wirkenden Fläche auf
-      // langsamem Home-Server (Critique P1). Kein Flackern bei schnellem Tippen.
-      results.replaceChildren();
+      // Skeletons + „Suche läuft…" unter den Orten statt einer eingefroren
+      // wirkenden Fläche auf langsamem Home-Server (Critique P1).
       results.setAttribute('aria-busy', 'true');
       results.insertAdjacentHTML('beforeend', renderSkeletonList({ rows: 4, lines: 2 }));
       setStatus(t('search.loading'));
       try {
         const data = await api.get(`/search?q=${encodeURIComponent(q)}`);
-        const count = renderSearchResults(results, data, () => closeSearch({ restoreFocus: false }));
+        const count = renderSearchResults(results, data, onClose, { local, query: q });
+        // Die Daten kommen UNTER die Orte: eine schon bewegte Markierung
+        // bleibt, wo sie ist; war noch keine gesetzt, steht sie jetzt oben.
+        combo.refresh({ keep: true });
         results.setAttribute('aria-busy', 'false');
-        setStatus(
-          count === 0 ? t('search.noResults')
-            : count === 1 ? t('search.resultCountOne', { count })
-            : t('search.resultCountMany', { count }),
-        );
+        announceCount(count);
       } catch {
         // Fehler nicht verschlucken: sichtbare Meldung statt „wirkt wie 0 Treffer".
-        // Die Ansage besitzt jetzt #search-status; der sichtbare Text bleibt rein
+        // Die Ansage besitzt #search-status; der sichtbare Text bleibt rein
         // visuell (kein role=status), sonst läse der Screenreader ihn doppelt.
-        results.replaceChildren();
+        // Die Orte bleiben stehen - sie brauchen den Server nicht.
+        renderSearchResults(results, null, onClose, { local, query: q, silent: true });
         results.setAttribute('aria-busy', 'false');
         results.appendChild(emptyHintEl(t('search.error')));
+        combo.refresh({ keep: true });
         setStatus(t('search.error'));
       }
     }, 300);
@@ -3514,17 +3595,33 @@ function initSearch(container) {
   return openSearch;
 }
 
+/** Text mit markierten Fundstellen als Knoten (`<mark>`), ohne innerHTML. */
+function appendMarked(el, text, query) {
+  for (const seg of markSegments(text, query)) {
+    if (seg.mark) {
+      const mark = document.createElement('mark');
+      mark.className = 'search-result__hit';
+      mark.textContent = seg.text;
+      el.appendChild(mark);
+    } else {
+      el.appendChild(document.createTextNode(seg.text));
+    }
+  }
+}
+
 /**
- * Rendert Suchergebnisse in den Ergebnis-Container.
+ * Rendert die Palette: Orte und Aktionen (lokal) vor den Datentreffern.
+ * `data` ist null, solange der Server nicht geantwortet hat (oder unter zwei
+ * Zeichen gar nicht gefragt wird).
+ * @returns {number} Zahl aller Zeilen - fuer die Ansage
  */
-function renderSearchResults(container, data, onClose) {
+function renderSearchResults(container, data, onClose, { local = { places: [], actions: [] }, query = '', silent = false } = {}) {
   container.replaceChildren();
-  const { tasks = [], events = [], notes = [], contacts = [], items = [], meds = [], activities = [], waste = [] } = data;
-  const total = tasks.length + events.length + notes.length + contacts.length + items.length
-    + meds.length + activities.length + waste.length;
+  const localCount = local.places.length + local.actions.length;
+  const total = localCount + (data ? searchResultCount(data) : 0);
 
   if (total === 0) {
-    container.appendChild(emptyHintEl(t('search.noResults')));
+    if (data && !silent) container.appendChild(emptyHintEl(t('search.noResults')));
     return 0;
   }
 
@@ -3539,7 +3636,7 @@ function renderSearchResults(container, data, onClose) {
   // der Sektion ist die Herkunft damit selbstverstaendlich, die Zeilen
   // bleiben siegelfrei. Die Zeilen selbst liegen in GENAU EINEM Traeger
   // (Zeilenlisten-Regel) statt als Karte pro Treffer.
-  function makeSection(labelKey, sealModule, items, routeFn, labelFn, metaFn) {
+  function makeSection(label, sealModule, items, { route, title, meta, go }) {
     if (!items.length) return;
     const section = document.createElement('div');
     section.className = 'search-section';
@@ -3553,29 +3650,33 @@ function renderSearchResults(container, data, onClose) {
       sealEl.appendChild(moduleIconEl(MODULE_ICON[sealModule]));
       heading.appendChild(sealEl);
     }
-    heading.appendChild(document.createTextNode(t(labelKey)));
+    heading.appendChild(document.createTextNode(label));
     section.appendChild(heading);
     const rows = document.createElement('div');
     rows.className = 'search-section__rows';
     items.forEach((item) => {
       const btn = document.createElement('button');
+      btn.type = 'button';
       btn.className = 'search-result';
-      const title = document.createElement('span');
-      title.className = 'search-result__title';
-      title.textContent = labelFn ? labelFn(item) : item.title;
-      btn.appendChild(title);
-      // Zweitzeile mit Datum/Detail: Treffer ohne jeden Kontext waren nicht
-      // unterscheidbar (Audit A1-14).
-      const metaText = metaFn?.(item);
-      if (metaText) {
-        const meta = document.createElement('span');
-        meta.className = 'search-result__meta';
-        meta.textContent = metaText;
-        btn.appendChild(meta);
+      const titleEl = document.createElement('span');
+      titleEl.className = 'search-result__title';
+      appendMarked(titleEl, title(item), query);
+      btn.appendChild(titleEl);
+      // Zweitzeile: Datum/Detail (Audit A1-14) und - steht das Suchwort nicht
+      // im Titel - der Ausschnitt, in dem es steht (A1 P2-2). Ohne ihn las sich
+      // "sch" -> "Klavier üben" wie ein Zufall.
+      const metaText = meta?.(item) || '';
+      const excerpt = item.excerpt || '';
+      if (metaText || excerpt) {
+        const metaEl = document.createElement('span');
+        metaEl.className = 'search-result__meta';
+        appendMarked(metaEl, [metaText, excerpt].filter(Boolean).join(' · '), query);
+        btn.appendChild(metaEl);
       }
       btn.addEventListener('click', () => {
         onClose();
-        navigate(routeFn(item));
+        if (go) go(item);
+        else navigate(route(item));
       });
       rows.appendChild(btn);
     });
@@ -3583,18 +3684,37 @@ function renderSearchResults(container, data, onClose) {
     container.appendChild(section);
   }
 
-  makeSection('nav.tasks',    'tasks',    tasks,    (i) => `/tasks?open=${i.id}`, null,
-    (i) => (i.due_date ? formatDate(i.due_date) : ''));
-  makeSection('nav.calendar', 'calendar', events,   (i) => `/calendar?open=${i.id}`, null,
-    (i) => (i.start_datetime ? `${formatDate(i.start_datetime)}${i.all_day ? '' : ` · ${formatTime(i.start_datetime)}`}` : ''));
-  makeSection('nav.notes',    'notes',    notes,    (i) => `/notes?open=${i.id}`);
-  makeSection('nav.contacts', 'contacts', contacts, (i) => `/contacts?open=${i.id}`);
-  makeSection('nav.shopping', 'shopping', items,    (i) => `/shopping?list=${i.list_id}&highlight=${i.id}`);
-  makeSection('health.tabs.meds',     'health', meds,       () => '/health/meds', null,
-    (i) => i.dosage_text || '');
-  makeSection('health.tabs.activity', 'health', activities, () => '/health/activity', activityLabel,
-    (i) => (i.performed_at ? formatDate(i.performed_at) : ''));
-  makeSection('nav.waste', 'waste', waste, (i) => `/waste?type=${i.id}`);
+  // 1. GEHE ZU - Navigationsziele und Einstellungsblaetter.
+  makeSection(t('search.goTo'), null, local.places, {
+    title: (item) => item.label,
+    meta: (item) => item.context || '',
+    go: (item) => (item.run ? item.run() : navigate(item.route)),
+  });
+  // 2. NEU ANLEGEN - die Seite oeffnen und ihre Primaeraktion ausloesen, genau
+  //    wie der Kurzbefehl `n` (triggerPageFab: nichts, wo kein FAB zu sehen ist).
+  makeSection(t('search.newSection'), null, local.actions, {
+    title: (item) => item.label,
+    meta: (item) => item.context || '',
+    go: async (item) => {
+      await navigate(item.route);
+      triggerPageFab();
+    },
+  });
+
+  // 3. DATEN - Reihenfolge, Ueberschrift, Ziel und Zweitzeile je Trefferart:
+  // utils/search-sections.js (test:search-permissions prueft sie gegen die
+  // Antwort des Servers).
+  const fmt = { formatDate, formatTime, activityLabel };
+  if (data) {
+    SEARCH_SECTIONS.forEach((section) => {
+      const hits = Array.isArray(data?.[section.bucket]) ? data[section.bucket] : [];
+      makeSection(t(section.labelKey), section.module, hits, {
+        route: section.route,
+        title: (item) => (section.label ? section.label(item, fmt) : item.title),
+        meta: section.meta ? (item) => section.meta(item, fmt) : null,
+      });
+    });
+  }
 
   // Die Siegel-Icons kommen als data-lucide-Platzhalter; der Treffer-Pfad
   // rendert sie selbst (der Leerzustands-Pfad tut es bereits genauso).
@@ -4409,104 +4529,8 @@ function errorDetails(err) {
 // Toast-Benachrichtigungen (global)
 // --------------------------------------------------------
 
-/**
- * Zeigt eine Toast-Benachrichtigung an.
- * @param {string} message
- * @param {'default'|'success'|'danger'|'warning'} type
- * @param {number} duration - ms
- */
-const TOAST_SUCCESS_KEY = 'yuvomi:toastSuccessCount';
-const TOAST_SUCCESS_MAX = 50;
-
-function _toastSvg(children) {
-  const NS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(NS, 'svg');
-  svg.setAttribute('class', 'toast__icon');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('fill', 'none');
-  svg.setAttribute('stroke', 'currentColor');
-  svg.setAttribute('stroke-width', '2.5');
-  svg.setAttribute('aria-hidden', 'true');
-  for (const [tag, attrs] of children) {
-    const el = document.createElementNS(NS, tag);
-    for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v);
-    svg.appendChild(el);
-  }
-  return svg;
-}
-
-const TOAST_ICONS = {
-  success: () => _toastSvg([['polyline', { points: '20 6 9 17 4 12' }]]),
-  danger:  () => _toastSvg([
-    ['circle', { cx: '12', cy: '12', r: '10' }],
-    ['line',   { x1: '12', y1: '8',  x2: '12',   y2: '12' }],
-    ['line',   { x1: '12', y1: '16', x2: '12.01', y2: '16' }],
-  ]),
-  warning: () => _toastSvg([
-    ['path', { d: 'M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z' }],
-    ['line', { x1: '12', y1: '9',  x2: '12',   y2: '13' }],
-    ['line', { x1: '12', y1: '17', x2: '12.01', y2: '17' }],
-  ]),
-};
-
-function showToast(message, type = 'default', duration = 3000, onUndo = null) {
-  const container = toastSurface((type === 'danger' || type === 'warning') ? 'assertive' : 'polite');
-  if (!container) return;
-
-  // Aktions-Button: Legacy-Undo (Funktion) oder benannte Aktion ({ label, onClick }).
-  const action = typeof onUndo === 'function'
-    ? { label: t('common.undo'), onClick: onUndo }
-    : (onUndo && typeof onUndo.onClick === 'function' ? onUndo : null);
-
-  // Long Loop: Success-Toasts nach TOAST_SUCCESS_MAX Aufrufen unterdrücken.
-  // Aktions-Toasts (Undo oder benannte Aktion) sind wichtig → nie unterdrücken.
-  if (type === 'success' && !action) {
-    const successCount = parseInt(localStorage.getItem(TOAST_SUCCESS_KEY) ?? '0', 10) + 1;
-    localStorage.setItem(TOAST_SUCCESS_KEY, String(successCount));
-    if (successCount > TOAST_SUCCESS_MAX) return;
-  }
-
-  // Max. 3 gleichzeitige Toasts (global): ältesten entfernen falls Limit erreicht
-  const existing = document.querySelectorAll('.toast-container .toast');
-  if (existing.length >= 3) existing[0].remove();
-
-  const toast = document.createElement('div');
-  toast.className = `toast ${type !== 'default' ? `toast--${type}` : ''}`;
-  // Keine eigene Live-Rolle: die Region (hoeflich oder bestimmt) sagt an.
-  // `role="alert"` machte jeden Toast bestimmt, auch in der hoeflichen Region,
-  // und liess ihn je nach Screenreader doppelt ansagen.
-
-  const iconEl = TOAST_ICONS[type]?.();
-  if (iconEl) toast.appendChild(iconEl);
-  const span = document.createElement('span');
-  span.textContent = message;
-  toast.appendChild(span);
-
-  if (action) {
-    const actionBtn = document.createElement('button');
-    actionBtn.className = 'toast__undo';
-    actionBtn.textContent = action.label;
-    actionBtn.addEventListener('click', () => {
-      clearTimeout(dismissTimer);
-      toast.remove();
-      action.onClick();
-    });
-    toast.appendChild(actionBtn);
-  }
-
-  container.appendChild(toast);
-  const dismiss = () => {
-    clearTimeout(dismissTimer);
-    toast.classList.add('toast--out');
-    toast.addEventListener('animationend', () => toast.remove(), { once: true });
-  };
-  const dismissTimer = setTimeout(dismiss, duration);
-
-  // Wischen zum Verwerfen: die Geste samt ihrer zwei Fallen liegt in
-  // `wireSwipeToDismiss` (utils/ux.js), das CSS-Gegenstück ist das
-  // `touch-action: pan-y` auf `.toast`.
-  wireSwipeToDismiss(toast, { onDismiss: dismiss });
-}
+// showToast lebt in utils/toast-show.js (Frist mit Pause, Ansage trotz
+// Erfolgs-Zaehler); window.yuvomi.showToast unten reicht sie weiter.
 
 // --------------------------------------------------------
 // Event-Listener
@@ -4974,12 +4998,19 @@ if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
 // Globale Exporte
 window.yuvomi = {
   navigate,
+  // Die globale Suche fuer Seiten, die einen eigenen Einstieg anbieten (die
+  // Uebersicht mobil, Re-Critique 2026-09-27 A1 P2-6) - dasselbe Overlay wie
+  // Seitenleiste, Mehr-Blatt und Cmd-K.
+  openSearch: () => _openSearch?.(),
   showToast,
   friendlyError,
   setThemeColor,
   setDisabledModules,
   setHiddenModules,
   setModuleOrder,
+  // Die Anordnung der Seitenleiste, fuer die Modulblaetter der Einstellungen
+  // (settings/registry.js, settingsSheetsForDomain) - eine Reihenfolge, zwei Orte.
+  moduleOrder: () => _moduleOrder.slice(),
   setMobileNavOrder,
   refreshThirdPartyModules,
   isModuleDisabled,

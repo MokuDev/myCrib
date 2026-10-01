@@ -9,6 +9,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { readFileSync, readdirSync } from 'node:fs';
 import { MIGRATIONS_SQL } from '../server/db-schema-test.js';
 import { eachRule } from './css-rules.js';
+import { installMiniDom } from './mini-dom.js';
 const { __test: calendarHelpers } = await import('../public/pages/calendar.js');
 const periodSwipe = await import('../public/utils/period-swipe.js');
 
@@ -2779,7 +2780,20 @@ test('renderDayView: der Zeit-Text am zweiten Tag sagt "bis", ein eintaegiger Te
 // eine DOM-Oberflaeche mehr als das Zeitraster.
 function fakeAgendaContainer() {
   const container = fakeContainer();
-  return { ...container, querySelectorAll: () => [], get html() { return container.html; } };
+  // Seit R10 (L5) steht die Agenda in Liste + Detail: `.calendar-agenda-split`
+  // gibt es im Textstub nicht, der Baustein haengt sich dann nicht ein.
+  return {
+    ...container,
+    querySelector: (sel) => (sel === '.calendar-agenda-split' ? null : container.querySelector(sel)),
+    querySelectorAll: () => [],
+    get html() { return container.html; },
+  };
+}
+
+/** Die Detailspalte baut ihren Leerzustand per DOM-API - fuer die Dauer des Aufrufs ein Mini-DOM. */
+function renderAgendaWithDom(agenda) {
+  const restore = installMiniDom();
+  try { calendarHelpers.renderAgendaView(agenda); } finally { restore(); }
 }
 
 test('Zeitraster und Agenda sagen fuer denselben Tag denselben Zeit-Text (PR #1323, Befund 1)', () => {
@@ -2787,7 +2801,7 @@ test('Zeitraster und Agenda sagen fuer denselben Tag denselben Zeit-Text (PR #13
     const raster = fakeContainer();
     calendarHelpers.renderDayView(raster);
     const agenda = fakeAgendaContainer();
-    calendarHelpers.renderAgendaView(agenda);
+    renderAgendaWithDom(agenda);
 
     const rasterText = dayEventTimeText(raster.html, 4131);
     const agendaText = agendaTimeText(agenda.html, 4131, '2026-06-15');
@@ -2996,7 +3010,7 @@ test('Ganztags-Chip und Agenda sagen fuer denselben Tag dieselbe Uhrzeit (#1350)
     let agendaText = '';
     withOvernightState({ cursor: day, events: [longTimedEvent()] }, () => {
       const agenda = fakeAgendaContainer();
-      calendarHelpers.renderAgendaView(agenda);
+      renderAgendaWithDom(agenda);
       agendaText = agendaTimeText(agenda.html, ev.id, day);
     });
     assert(agendaText !== '', `Vorbedingung: die Agenda muss den Termin am ${day} auffuehren`);
@@ -4169,6 +4183,108 @@ test('Baender: im Nachbarmonat toent das Band zurueck wie der Chip der Zelle, ni
   assert(!/opacity|filter/.test(band.body), 'nie ueber Opacity auf Text');
 });
 
+test('Baender in RTL: offene Kante, Chevron und Nachbarmonat-Toenung kippen mit der Schreibrichtung (#1467)', () => {
+  // Das Raster kippt in RTL selbst: Spalte 1 steht rechts, `first` und
+  // --band-out-start zaehlen vom Zeilenanfang. Was an einer SEITE des Bands
+  // haengt, muss darum logisch sein oder unter [dir="rtl"] eigens kippen.
+  const all = [...eachRule(calendarCss)];
+  const where = (r) => `${r.selector.trim()}${r.at.length ? ` (in ${r.at.join(' ')})` : ''}`;
+  const rule = (sel) => {
+    const found = all.find((r) => r.at.length === 0 && r.selector.trim() === sel);
+    assert(found, `Regel nicht gefunden: ${sel}`);
+    return found;
+  };
+  // Jede Regel, deren Selektorliste die Klasse traegt - auch in @media und
+  // spaeter im File -, damit eine Ueberschreibung nicht durchrutscht.
+  const withClass = (cls) => {
+    const re = new RegExp(`${cls.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w-])`);
+    return all.filter((r) => r.selector.split(',').some((s) => re.test(s)));
+  };
+  const physical = /(?:^|[;\s])(?:margin|padding|border)-(?:left|right)\b|border-(?:top|bottom)-(?:left|right)-radius|(?:^|[;\s])(?:left|right)\s*:|translateX/;
+  // Kurzschreibweisen mit verschiedenen Werten links und rechts sind genauso
+  // physisch: `margin: 0 var(--band-me) 0 var(--band-ms)` setzt den Einzug in
+  // RTL auf die falsche Seite. Drei Werte (`a b c`) sind seitengleich, weil
+  // der mittlere Wert fuer links UND rechts gilt.
+  const words = (value) => {
+    const out = [];
+    let depth = 0;
+    let cur = '';
+    for (const ch of value.trim()) {
+      if (ch === '(') depth += 1;
+      if (ch === ')') depth -= 1;
+      if (/\s/.test(ch) && depth === 0) {
+        if (cur) out.push(cur);
+        cur = '';
+      } else {
+        cur += ch;
+      }
+    }
+    if (cur) out.push(cur);
+    return out;
+  };
+  const lopsided = (body) => [...body.matchAll(/(?:^|[;{\s])(margin|padding|inset|border-radius)\s*:\s*([^;]+)/g)]
+    .filter(([, prop, raw]) => {
+      const value = raw.replace(/!important/, '').trim();
+      if (prop !== 'border-radius') {
+        const v = words(value);
+        return v.length === 4 && v[1] !== v[3];
+      }
+      // Radius: gespiegelt tauschen oben-links/oben-rechts und unten-links/unten-rechts.
+      return value.split('/').some((half) => {
+        const [tl, tr = tl, br = tl, bl = tr] = words(half);
+        return tl !== tr || br !== bl;
+      });
+    })
+    .map(([, prop, raw]) => `${prop}: ${raw.trim()}`);
+
+  // (1) Offene Kante, Einzug und Rundung: nur logische Eigenschaften, in
+  // jeder Regel dieser Klassen.
+  for (const cls of ['.cal-band', '.cal-band--before', '.cal-band--after']) {
+    for (const r of withClass(cls)) {
+      if (/\[dir=/.test(r.selector)) continue;
+      assert(!physical.test(r.body), `${where(r)} haengt an einer physischen Seite: ${r.body}`);
+      const odd = lopsided(r.body);
+      assert(odd.length === 0, `${where(r)} setzt links und rechts verschieden: ${odd.join('; ')}`);
+    }
+  }
+  const band = rule('.month-bands > .cal-band');
+  assert(/margin-inline:\s*var\(--band-ms\)\s+var\(--band-me\)/.test(band.body),
+    `der Einzug des Bands laeuft ueber margin-inline mit --band-ms/--band-me: ${band.body}`);
+  const after = rule('.cal-band--after');
+  assert(/border-start-end-radius:\s*0/.test(after.body) && /border-end-end-radius:\s*0/.test(after.body),
+    'das offene Ende verliert die Rundung am Zeilenende');
+
+  // (2) Das Zeichen: vorn ein Chevron nach links, hinten nach rechts, beide
+  // unter RTL gespiegelt, das hintere per logischem auto-Rand am Zeilenende.
+  const ev = bandEvent(21, '2026-10-30', '2026-11-02');
+  const html = ['2026-10-26', '2026-11-02']
+    .map((monday) => calendarHelpers.monthBandsHtml(segmentsFor([ev], bandDays(monday)))).join('');
+  assert(/data-lucide="chevron-left" class="cal-band__cont cal-band__cont--before"/.test(html)
+    && /data-lucide="chevron-right" class="cal-band__cont cal-band__cont--after"/.test(html),
+    `vorn chevron-left, hinten chevron-right: ${html}`);
+  const mirror = rule('[dir="rtl"] .cal-band__cont');
+  assert(/transform:\s*scaleX\(-1\)/.test(mirror.body), 'in RTL zeigt das Zeichen zur anderen Seite');
+  // Nur die RTL-Regel darf das Zeichen transformieren - ein spaeteres
+  // `transform: none` wuerde die Spiegelung still aufheben.
+  const transforms = withClass('.cal-band__cont').filter((r) => r !== mirror && /(?:^|[;\s])transform\s*:/.test(r.body));
+  assert(transforms.length === 0, `weitere transform-Regeln am Zeichen: ${transforms.map(where).join(', ')}`);
+  const toEnd = withClass('.cal-band__cont--after');
+  assert(toEnd.some((r) => /margin-inline-start:\s*auto/.test(r.body)), 'das hintere Zeichen steht am Zeilenende');
+  for (const r of toEnd) {
+    assert(!physical.test(r.body), `${where(r)} haengt an einer physischen Seite: ${r.body}`);
+  }
+
+  // (3) Die Toenung: die Stopps messen vom Anfang des Bands (--band-ms, die
+  // Spalten ab `first`); physisch ist nur die Richtung des Verlaufs, und die
+  // kippt unter RTL mit, sonst laege die Grenze in der gespiegelten Spalte.
+  const tint = rule('.month-bands > .cal-band--outside');
+  assert(/linear-gradient\(to var\(--band-to, right\),/.test(tint.body), `Richtung ueber --band-to: ${tint.body}`);
+  assert(/--band-a:[^;]*var\(--band-out-start\)[^;]*var\(--band-ms\)/.test(tint.body)
+    && /--band-b:[^;]*var\(--band-out-end\)[^;]*var\(--band-ms\)/.test(tint.body),
+    'beide Stopps messen vom Anfang des Bands');
+  const rtl = rule('[dir="rtl"] .month-bands > .cal-band--outside');
+  assert(/--band-to:\s*left/.test(rtl.body), 'in RTL laeuft der Verlauf von rechts nach links');
+});
 test('Monatszelle: der Fokusring liegt ueber der Band-Schicht, die Zelle nicht', () => {
   // Ein Band liegt in `.month-bands` (z-index 1) ueber den Zellen. Hob sich die
   // fokussierte Zelle mit z-index 1 an, malte die spaetere Schicht trotzdem
@@ -4246,6 +4362,531 @@ test('Monatszelle: ein Band ist kein Chip in seinen Zellen, zaehlt aber mit', ()
   } finally {
     Object.assign(calendarHelpers.state, previous);
   }
+});
+
+// --------------------------------------------------------
+// R10 L5: die Agenda ist Liste + Detail
+// --------------------------------------------------------
+
+test('Agenda: jede Terminzeile ist je Tag eindeutig waehlbar, Haushaltshilfe-Besuche nicht', () => {
+  const ev = { id: 9, title: 'Serie', start_datetime: '2026-10-14T10:00:00', end_datetime: '2026-10-14T11:00:00' };
+  assert(calendarHelpers.agendaMdId(ev, '2026-10-14') === '9.2026-10-14', 'Termin UND Tag - eine Serie steht an mehreren Tagen');
+  const row = calendarHelpers.renderAgendaEvent(ev, '2026-10-14');
+  assert(/data-md-id="9\.2026-10-14"/.test(row), `die Zeile traegt ihre Auswahl-ID: ${row}`);
+  const visit = { ...ev, housekeeping_visit_id: 3 };
+  assert(calendarHelpers.agendaMdId(visit, '2026-10-14') === null, 'ein Besuch oeffnet sein eigenes Modul');
+  assert(!/data-md-id/.test(calendarHelpers.renderAgendaEvent(visit, '2026-10-14')), 'und steht nicht zur (Vor-)Wahl');
+});
+
+test('Agenda: die Auswahl-ID findet das Vorkommen ihres Tages, sonst den Termin', () => {
+  const previous = calendarHelpers.state.events;
+  try {
+    calendarHelpers.state.events = [
+      { id: 9, start_datetime: '2026-10-07T10:00:00' },
+      { id: 9, start_datetime: '2026-10-14T10:00:00' },
+      { id: 4, start_datetime: '2026-10-13T00:00:00' },
+    ];
+    assert(calendarHelpers.eventForAgendaMdId('9.2026-10-14') === calendarHelpers.state.events[1], 'das Vorkommen am Tag');
+    assert(calendarHelpers.eventForAgendaMdId('4.2026-10-14') === calendarHelpers.state.events[2], 'mehrtaegig: Tag 2 zeigt den Termin');
+    assert(calendarHelpers.eventForAgendaMdId('77.2026-10-14') === null, 'unbekannt: kein Termin (Leerzustand)');
+    assert(calendarHelpers.eventForAgendaMdId('9:x') === null, 'fremde Form: keine Vermutung');
+  } finally {
+    calendarHelpers.state.events = previous;
+  }
+});
+
+test('Agenda: Liste + Detail nur in der Agenda, mit Detailspalte aus dem Baustein', () => {
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  assert(/page\?\.classList\.toggle\('app-page--list-detail', state\.view === 'agenda'\)/.test(src),
+    'der Container der Schwelle steht nur in der Agenda an der Seitenwurzel');
+  const from = src.indexOf('function renderAgendaView');
+  const agenda = src.slice(from, src.indexOf('\n// Termin-Suche (#471)', from));
+  assert(/<div class="split-view calendar-agenda-split">/.test(agenda), 'die Agenda steht in .split-view');
+  assert(/class="agenda-view page-scrollport split-view__list"/.test(agenda), 'die Liste ist die linke Spalte');
+  assert(/splitViewDetailHtml\(\{/.test(agenda), 'rechts die Spalte aus dem Baustein');
+  assert(/mountAgendaDetail\(container\)/.test(agenda), 'und der Baustein haengt sich ein');
+  // Die Zeile oeffnet ueber den Baustein: Spalte ab der Schwelle, darunter wie bisher.
+  const act = src.slice(src.indexOf('function handleDayRowActivation'), src.indexOf('function agendaMdId'));
+  assert(/if \(_agendaMd && evEl\.dataset\.mdId\) \{ _agendaMd\.open\(evEl\.dataset\.mdId, evEl\); return; \}/.test(act),
+    'der Klick geht durch den Baustein');
+  // Ein Zahl-Link der globalen Suche bleibt beim Kalender (Vorkommen am Zieltag).
+  assert(/claimInitial: !\(open && \/\^\\d\+\$\/\.test\(open\)\)/.test(src), 'der Baustein beansprucht nur <id>.<Tag>');
+});
+
+// Codex P2 zu R10: die Detailspalte schreibt `?open=<id>.<Tag>`, der Aufbau
+// las nur `^\d+$`. Neuladen oder Teilen setzte den Cursor auf heute, der Tag
+// lag ausserhalb der geladenen Agenda, und die Auswahl fiel weg.
+test('Agenda: ein geteilter Auswahl-Link <id>.<Tag> positioniert Cursor und Termin wie ?open=<id>&date=', () => {
+  assert(typeof calendarHelpers.openDeepLink === 'function', 'openDeepLink fehlt im __test-Export');
+  const p = (qs) => JSON.stringify(calendarHelpers.openDeepLink(new URLSearchParams(qs)));
+  const eq = (qs, want, msg) => assert(p(qs) === JSON.stringify(want), `${msg ?? qs}: ${p(qs)}`);
+  eq('open=12.2026-10-14', { id: '12', date: '2026-10-14' }, 'die Form der Detailspalte');
+  eq('open=12', { id: '12', date: '' }, 'der Zahl-Link der Suche bleibt');
+  eq('open=12&date=2026-06-29', { id: '12', date: '2026-06-29' }, 'mit Vorkommen-Tag');
+  eq('open=12.2026-10-14&date=2026-06-29', { id: '12', date: '2026-10-14' }, 'der Tag der Auswahl gewinnt');
+  eq('open=12.x', null, 'fremde Form: keine Vermutung');
+  eq('open=abc', null);
+  eq('', null);
+  // Der Aufbau liest die Adresse nur ueber diesen Leser: der Termin wird
+  // geladen, der Cursor steht auf seinem Tag (deepLinkTargetDate).
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const page = src.slice(src.indexOf('export async function render('), src.indexOf('// Toolbar\n', src.indexOf('export async function render(')));
+  assert(/const openLink\s*=\s*openDeepLink\(params\)/.test(page), 'render() liest ?open= ueber openDeepLink');
+  assert(!/\/\^\\d\+\$\/\.test\(openId\)/.test(page), 'kein Zahl-Riegel mehr vor dem Laden des Termins');
+  assert(/const dateParam\s*=\s*openLink \? openLink\.date/.test(page), 'der Tag des Links wird der Zieltag');
+});
+
+test('Rasterbloecke nennen im Namen den Tag ihrer Spalte, die Agenda nicht (A2 P2-2)', () => {
+  // Im Wochen- und Tagesraster tragen die Spalten kein Label: "Fussball,
+  // 14:00" sagte nicht, an welchem der sieben Tage. Die Agenda-Zeile steht
+  // unter ihrer Tagesueberschrift und bleibt ohne Wiederholung.
+  const views = everyEventView(glyphEvent({ title: 'Fussball' }));
+  const label = (html) => /aria-label="([^"]*)"/.exec(html)?.[1] ?? '';
+  for (const name of ['Woche', 'Tag', 'Ganztag']) {
+    assert(/calendar\.dayLongThursday, 2026-09-24/.test(label(views[name])),
+      `${name}: der Name nennt Wochentag und Datum der Spalte: ${label(views[name])}`);
+  }
+  assert(!/calendar\.dayLong/.test(label(views.Agenda)), `die Agenda wiederholt ihre Tagesueberschrift nicht: ${label(views.Agenda)}`);
+  // "Titel, Zeit" beginnt in jeder Ansicht gleich; der Tag folgt der Zeit.
+  const week = label(views.Woche);
+  assert(week.startsWith('Fussball, calendar.dayRangeLabel') && week.indexOf('dayRangeLabel') < week.indexOf('calendar.dayLong'),
+    `Titel und Zeit vor dem Tag: ${week}`);
+});
+
+test('Wochenblock-Titel trennen mit Strich statt mitten im Wort (A2 P2-1)', () => {
+  const rule = [...eachRule(calendarCss)].find((r) => r.selector.trim() === '.week-event__title > span:last-child');
+  assert(rule, 'die Titelregel des Wochenblocks fehlt');
+  assert(/(?:^|[\s;])hyphens:\s*auto/.test(rule.body), `ohne hyphens: auto bricht "Betriebsversam|mlung": ${rule.body}`);
+});
+
+// Re-Critique 2026-09-28 (A2 P3, R14 P11): der Wechsel Monat/Woche/Tag/Agenda
+// war ein harter Schnitt nach dem Fetch. Die neue Ansicht blendet jetzt kurz
+// ein (Tokens, ohne Versatz - sie antwortet auf einen Tipp, nicht auf eine
+// Geste); unter reduzierter Bewegung bleibt es beim Schnitt.
+test('Ansichtswechsel blendet die neue Ansicht ein, reduzierte Bewegung schneidet (A2 P3)', () => {
+  const play = calendarHelpers.playViewSwap;
+  assert(typeof play === 'function', 'playViewSwap() ist die EINE Stelle fuer den Ansichtswechsel');
+  const fakeBody = () => {
+    const classes = new Set();
+    const listeners = {};
+    return {
+      classes,
+      listeners,
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+      addEventListener: (type, fn) => { listeners[type] = fn; },
+    };
+  };
+  const savedMatch = globalThis.matchMedia;
+  try {
+    globalThis.matchMedia = () => ({ matches: false });
+    const body = fakeBody();
+    play(body);
+    assert(body.classes.has('cal-view-swap-in'), 'die neue Ansicht traegt die Einblende-Klasse');
+    body.listeners.animationend?.();
+    assert(!body.classes.has('cal-view-swap-in'), 'nach der Animation raeumt sie ab');
+    globalThis.matchMedia = () => ({ matches: true });
+    const still = fakeBody();
+    play(still);
+    assert(!still.classes.has('cal-view-swap-in'), 'reduzierte Bewegung: kein Einblenden');
+  } finally {
+    if (savedMatch === undefined) delete globalThis.matchMedia; else globalThis.matchMedia = savedMatch;
+  }
+  const rules = [...eachRule(calendarCss)];
+  const swap = rules.find((r) => r.selector.trim() === '.cal-view-swap-in' && !r.at.length);
+  assert(swap && /animation:\s*cal-view-swap-in var\(--duration-[a-z]+\) var\(--ease-[a-z-]+\)/.test(swap.body), `Einblenden mit Tokens: ${swap?.body}`);
+  assert(rules.some((r) => r.selector.trim() === '.cal-view-swap-in' && r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)) && /animation:\s*none/.test(r.body)),
+    'das Netz unter reduzierter Bewegung');
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  const onChange = src.slice(src.indexOf("activeClass: 'cal-toolbar__view-btn--active'"), src.indexOf("attachSegmentIndicator(bar.querySelector('.cal-toolbar__views')"));
+  assert(/renderView\(\);\s*\n\s*playViewSwap\(/.test(onChange), 'der Tab-Wechsel spielt die Einblende nach dem Neuaufbau');
+});
+
+// Re-Critique 2026-09-28 (A2 P2-7, R14 P12): am Desktop oeffneten die Filter
+// ein zentriertes 400x805-Blatt mit Blur-Backdrop - die Wirkung eines Hakens
+// war live, aber unsichtbar dahinter. Ab 1024px haengen sie jetzt als
+// Popover am Filterknopf, ohne Abdunkeln (Apple Kalender); schmaler bleibt
+// es das Blatt.
+test('Filter am Desktop: verankertes Popover ohne Abdunkeln statt Blatt (A2 P2-7)', () => {
+  const made = [];
+  const fakeEl = (tag) => {
+    const attrs = new Map();
+    const el = {
+      tagName: tag, html: '', style: {}, listeners: {}, shown: false, dataset: {},
+      setAttribute: (k, v) => attrs.set(k, String(v)),
+      getAttribute: (k) => (attrs.has(k) ? attrs.get(k) : null),
+      insertAdjacentHTML: (_pos, h) => { el.html += h; },
+      addEventListener: (type, fn) => { el.listeners[type] = fn; },
+      querySelector: () => null,
+      querySelectorAll: () => [],
+      showPopover: () => { el.shown = true; },
+      hidePopover: () => { el.shown = false; },
+      remove: () => {},
+      contains: () => false,
+      focus: () => {},
+      getBoundingClientRect: () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 }),
+      offsetWidth: 360, offsetHeight: 400,
+      attrs,
+    };
+    made.push(el);
+    return el;
+  };
+  let opened = null;
+  const saved = { open: globalThis.__openModal, doc: globalThis.document, win: globalThis.window, he: globalThis.HTMLElement, mm: globalThis.matchMedia };
+  const hadWindow = 'window' in globalThis;
+  globalThis.__openModal = (opts) => { opened = opts; };
+  globalThis.HTMLElement = class { get popover() { return null; } };
+  const wide = (q) => ({ matches: /min-width:\s*1024px/.test(q) });
+  globalThis.window = { matchMedia: wide, innerWidth: 1440, innerHeight: 900 };
+  globalThis.matchMedia = wide;
+  const appended = [];
+  globalThis.document = {
+    ...(saved.doc ?? {}),
+    querySelector: () => null,
+    getElementById: () => null,
+    createElement: fakeEl,
+    body: { appendChild: (el) => { appended.push(el); return el; } },
+    documentElement: { clientWidth: 1440, clientHeight: 900 },
+    activeElement: null,
+  };
+  try {
+    calendarHelpers.openCalendarFilters();
+  } finally {
+    globalThis.__openModal = saved.open;
+    globalThis.document = saved.doc;
+    if (hadWindow) globalThis.window = saved.win; else delete globalThis.window;
+    if (saved.he === undefined) delete globalThis.HTMLElement; else globalThis.HTMLElement = saved.he;
+    if (saved.mm === undefined) delete globalThis.matchMedia; else globalThis.matchMedia = saved.mm;
+  }
+  assert(!opened, 'am Desktop oeffnet kein Blatt mit Backdrop');
+  const pop = appended.find((el) => el.getAttribute('popover') === 'auto');
+  assert(pop, 'ein natives Popover (Light-Dismiss, Esc, Top-Layer) haengt im Dokument');
+  assert(pop.shown, 'und ist offen');
+  assert(pop.getAttribute('role') === 'dialog' && pop.getAttribute('aria-labelledby'), 'ein benannter Dialog');
+  assert(/id="cal-filters-reset"/.test(pop.html), 'das Aufheben reist mit');
+  assert(/calendar\.filters/.test(pop.html), 'der Titel steht im Popover');
+  const rules = [...eachRule(calendarCss)].filter((r) => r.selector.includes('.cal-filters-popover'));
+  assert(rules.some((r) => /position:\s*fixed/.test(r.body) && /inset:\s*auto/.test(r.body)), 'am Knopf positioniert, nicht zentriert');
+  assert(!rules.some((r) => /::backdrop/.test(r.selector) && !/transparent|none/.test(r.body)), 'kein abdunkelnder Hintergrund');
+});
+
+// --------------------------------------------------------
+// R17 Z1 (Re-Critique 2026-09-28, A1 P2-3/P3-7): der Zeitraum-Kopf
+// --------------------------------------------------------
+
+/** Das oeffnende Tag des Knopfs mit `id` aus einem Kopf-Markup. */
+function buttonTag(html, id) {
+  const at = html.indexOf(`id="${id}"`);
+  assert(at >= 0, `Knopf #${id} fehlt im Kopf`);
+  const open = html.lastIndexOf('<button', at);
+  const close = html.indexOf('</button>', at);
+  return { tag: html.slice(open, html.indexOf('>', at) + 1), whole: html.slice(open, close) };
+}
+
+test('Zeitraum-Kopf (R17 Z1): Filter, Lupe und „..." tragen EINE Icon-Knopfform - die der Kopfregel', () => {
+  const html = calendarHelpers.toolbarHtml({ filterCount: 0 });
+  const forms = ['cal-filters', 'cal-search', 'cal-views-menu'].map((id) => {
+    const cls = buttonTag(html, id).tag.match(/class="([^"]*)"/)[1].split(/\s+/);
+    // Die Form ist die Kapsel mit Ring des Werkzeugmenues (pageToolsMenuHtml,
+    // Vorbild documents-tools-btn) - nicht der nackte Kreis, den die Lupe und
+    // das Menue hier trugen, waehrend jedes andere Modul den Ring zeigt.
+    return { id, secondary: cls.includes('btn--secondary'), icon: cls.includes('btn--icon') };
+  });
+  for (const f of forms) {
+    assert(f.icon, `#${f.id}: ein Icon-Knopf`);
+    assert(f.secondary, `#${f.id}: dieselbe Kopf-Icon-Form wie „..." der Kopfregel (btn--secondary btn--icon)`);
+  }
+  // Dieselbe Form heisst auch dieselbe Tinte: eine Ruheregel, die einem der
+  // drei Knoepfe eine eigene Farbe gibt, macht aus ihm wieder einen zweiten
+  // Stil (die Lupe stand grau neben zwei getoenten Knoepfen).
+  const own = [...eachRule(calendarCss)].filter((r) => r.selector.split(',').some((s) =>
+    /^\.cal-toolbar__(?:filter|search|tools)-btn$/.test(s.trim())) && /(?:^|[;{\s])(?:color|background(?:-color)?|border(?:-color)?)\s*:/.test(r.body));
+  assert(own.length === 0, `keine eigene Ruhe-Tinte fuer einen Kopfknopf: ${own.map((r) => r.selector.trim()).join(' | ')}`);
+});
+
+test('Zeitraum-Kopf (R17 Z1): der Filterknopf traegt den geteilten Zaehler und nennt ihn', () => {
+  const two = buttonTag(calendarHelpers.toolbarHtml({ filterCount: 2 }), 'cal-filters');
+  assert(/\bpage-filter-btn\b/.test(two.tag), 'derselbe Baustein wie jeder Filterknopf (utils/filter-sheet.js)');
+  assert(/\bpage-filter-btn--active\b/.test(two.tag), 'aktiv, sobald ein Filter etwas wegnimmt');
+  const badge = two.whole.match(/<span class="page-filter-btn__count"([^>]*)>([^<]*)<\/span>/);
+  assert(badge, 'die Zahl steht als Badge am Knopf');
+  assert(badge[2] === '2' && !/(?<![-\w])hidden\b/.test(badge[1]), `Badge zeigt 2, gerendert: ${badge[2]}`);
+  const name = two.tag.match(/aria-label="([^"]*)"/)[1];
+  assert(/calendar\.filtersActive|2/.test(name), `zugaenglicher Name nennt die Zahl, gerendert: ${name}`);
+
+  const none = buttonTag(calendarHelpers.toolbarHtml({ filterCount: 0 }), 'cal-filters');
+  assert(!/\bpage-filter-btn--active\b/.test(none.tag), 'ohne Filter nicht aktiv');
+  assert(/<span class="page-filter-btn__count"[^>]*(?<![-\w])hidden\b/.test(none.whole), 'ohne Filter steht keine 0 am Knopf');
+  assert(/calendar\.filtersOpen|Filter/.test(none.tag.match(/aria-label="([^"]*)"/)[1]), 'ohne Filter heisst er „Filter oeffnen"');
+});
+
+// --------------------------------------------------------
+// R17 Z2 (Re-Critique 2026-09-28, A2 P1-1 + Frage): Anlegen im Zeitraster
+// nach Apple-Muster. Gemessen am AUFRUFER - renderWeekView()/renderDayView()
+// verdrahten die Geste, und der Test feuert Ereignisse auf genau die Knoten,
+// an die sie ihre Listener haengen. Ob angelegt wird, sagt das Formular, das
+// geoeffnet wird (globalThis.__openModal, Loader-Stub von components/modal.js).
+// --------------------------------------------------------
+
+const HOUR_PX = 60; // Raster 1440px hoch -> 60px je Stunde
+
+function gridHarness(render) {
+  const els = new Map();
+  const el = (sel) => {
+    if (!els.has(sel)) {
+      els.set(sel, {
+        sel,
+        listeners: [],
+        addEventListener(type, fn, opts) { this.listeners.push({ type, fn, capture: opts === true || Boolean(opts?.capture) }); },
+        getBoundingClientRect: () => ({ top: 0, height: 24 * HOUR_PX }),
+        scrollTop: 0,
+        dataset: {},
+        closest: () => null,
+        children: [],
+        append(node) { node.parentNode = this; this.children.push(node); },
+      });
+    }
+    return els.get(sel);
+  };
+  const container = { replaceChildren() {}, insertAdjacentHTML() {}, querySelector: (sel) => el(sel) };
+  const pending = [];
+  const opened = [];
+  const saved = { st: globalThis.setTimeout, ct: globalThis.clearTimeout, om: globalThis.__openModal, doc: globalThis.document };
+  globalThis.setTimeout = (fn, ms) => { const h = { fn, ms, done: false }; pending.push(h); return h; };
+  globalThis.clearTimeout = (h) => { if (h) h.done = true; };
+  globalThis.__openModal = (opts) => { opened.push(opts); };
+  // Eigener Knoten-Stub fuer den Druck-Platzhalter (kein Rest eines frueheren Tests).
+  globalThis.document = {
+    createElement: (tag) => {
+      const classes = new Set();
+      const node = {
+        tagName: tag.toUpperCase(), attrs: {}, textContent: '', parentNode: null,
+        style: { setProperty(k, v) { this[k] = v; } },
+        classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+        setAttribute(k, v) { this.attrs[k] = String(v); },
+        remove() { const p = this.parentNode; if (p) p.children.splice(p.children.indexOf(this), 1); this.parentNode = null; },
+      };
+      Object.defineProperty(node, 'className', {
+        get: () => [...classes].join(' '),
+        set: (v) => { classes.clear(); String(v).split(/\s+/).filter(Boolean).forEach((c) => classes.add(c)); },
+      });
+      return node;
+    },
+  };
+  const restore = () => {
+    globalThis.setTimeout = saved.st;
+    globalThis.clearTimeout = saved.ct;
+    if (saved.om === undefined) delete globalThis.__openModal; else globalThis.__openModal = saved.om;
+    if (saved.doc === undefined) delete globalThis.document; else globalThis.document = saved.doc;
+  };
+  try { render(container); } catch (err) { restore(); throw err; }
+
+  /** Ein leerer Punkt in der Spalte `date` auf Hoehe `y`. */
+  const cols = new Map();
+  const emptyAt = (sel, date) => {
+    if (cols.has(date)) return cols.get(date);
+    const col = {
+      dataset: { date }, children: [],
+      getBoundingClientRect: () => ({ top: 0, height: 24 * HOUR_PX }),
+      append(node) { node.parentNode = this; this.children.push(node); },
+    };
+    col.closest = (s) => (s.includes('data-date') ? col : null);
+    cols.set(date, col);
+    return col;
+  };
+  /** Ein Termin-Block: alles, was ihn sucht, findet ihn. */
+  const eventTarget = () => {
+    const ev = { dataset: { id: '999999' } };
+    ev.closest = (s) => (/week-event|day-event/.test(s) ? ev : null);
+    return ev;
+  };
+  const fire = (sel, type, props = {}) => {
+    const node = el(sel);
+    const e = {
+      type, defaultPrevented: false, stopped: false, currentTarget: node,
+      preventDefault() { this.defaultPrevented = true; },
+      stopPropagation() { this.stopped = true; },
+      stopImmediatePropagation() { this.stopped = true; },
+      ...props,
+    };
+    const ls = node.listeners.filter((l) => l.type === type);
+    for (const l of [...ls.filter((x) => x.capture), ...ls.filter((x) => !x.capture)]) {
+      if (e.stopped) break;
+      l.fn.call(node, e);
+    }
+    return e;
+  };
+  const runTimers = (upTo = Infinity) => {
+    for (const h of [...pending]) if (!h.done && h.ms <= upTo) { h.done = true; h.fn(); }
+  };
+  return { el, fire, runTimers, opened, restore, emptyAt, eventTarget };
+}
+
+function withGrid(view, fn) {
+  withOvernightState({ events: [], view }, () => {
+    const h = gridHarness((c) => (view === 'day' ? calendarHelpers.renderDayView(c) : calendarHelpers.renderWeekView(c)));
+    try { fn(h); } finally { h.restore(); }
+  });
+}
+
+const GRID = { week: '#week-cols', day: '#day-col' };
+const SCROLLER = { week: '#week-scroll', day: '#day-scroll' };
+
+for (const view of ['week', 'day']) {
+  const sel = GRID[view];
+  const touch = (h, type, y, extra = {}) => h.fire(sel, type, {
+    pointerType: 'touch', isPrimary: true, button: 0, clientX: 100, clientY: y,
+    target: h.emptyAt(sel, '2026-06-15'), ...extra,
+  });
+
+  test(`Z2 ${view}: ein Einzelklick auf leere Zeit legt NICHT an`, () => {
+    withGrid(view, (h) => {
+      h.fire(sel, 'pointerdown', { pointerType: 'mouse', isPrimary: true, button: 0, clientX: 100, clientY: 10 * HOUR_PX, target: h.emptyAt(sel, '2026-06-15') });
+      h.fire(sel, 'pointerup', { pointerType: 'mouse', clientX: 100, clientY: 10 * HOUR_PX });
+      h.fire(sel, 'click', { clientX: 100, clientY: 10 * HOUR_PX, target: h.emptyAt(sel, '2026-06-15') });
+      h.runTimers();
+      assert(h.opened.length === 0, `Einzelklick oeffnete ${h.opened.length} Formular(e)`);
+    });
+  });
+
+  test(`Z2 ${view}: ein Doppelklick mit der Maus legt an, Uhrzeit aus der Position`, () => {
+    withGrid(view, (h) => {
+      h.fire(sel, 'pointerdown', { pointerType: 'mouse', isPrimary: true, button: 0, clientX: 100, clientY: 14 * HOUR_PX, target: h.emptyAt(sel, '2026-06-15') });
+      h.fire(sel, 'dblclick', { clientX: 100, clientY: 14 * HOUR_PX + 29, target: h.emptyAt(sel, '2026-06-15') });
+      assert(h.opened.length === 1, `Doppelklick oeffnete ${h.opened.length} Formular(e)`);
+      const html = String(h.opened[0].content ?? '');
+      assert(/14:30/.test(html), 'die Startzeit kommt aus der Position (14:29 -> 14:30, 30-Minuten-Raster)');
+      assert(/2026-06-15/.test(html), 'und der Tag aus der Spalte');
+    });
+  });
+
+  test(`Z2 ${view}: ein Doppelklick auf einen Termin legt nichts an`, () => {
+    withGrid(view, (h) => {
+      h.fire(sel, 'dblclick', { clientX: 100, clientY: 9 * HOUR_PX, target: h.eventTarget() });
+      assert(h.opened.length === 0, 'der Termin gehoert dem Klick, der ihn oeffnet');
+    });
+  });
+
+  test(`Z2 ${view}: langes Druecken (Touch) legt nach dem Loslassen an, der Folgeklick verpufft`, () => {
+    withGrid(view, (h) => {
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      assert(touch(h, 'contextmenu', 8 * HOUR_PX).defaultPrevented, 'kein Systemmenue waehrend des Drucks');
+      h.runTimers(500);
+      assert(h.opened.length === 0, 'waehrend des Drucks noch kein Formular - erst beim Loslassen');
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      const end = touch(h, 'touchend', 8 * HOUR_PX);
+      assert(h.opened.length === 1, `langes Druecken oeffnete ${h.opened.length} Formular(e)`);
+      assert(/08:00/.test(String(h.opened[0].content ?? '')), 'Startzeit aus der Druckstelle');
+      assert(end.defaultPrevented, 'das touchend schluckt den Klick, der sonst auf dem neuen Blatt landete');
+      touch(h, 'click', 8 * HOUR_PX);
+      assert(h.opened.length === 1, 'kein zweites Formular aus dem Folgeklick');
+    });
+  });
+
+  test(`Z2 ${view}: ein kurzer Tipp legt nicht an, Bewegung und Scrollen brechen den Druck ab`, () => {
+    withGrid(view, (h) => {
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      touch(h, 'click', 8 * HOUR_PX);
+      h.runTimers();
+      assert(h.opened.length === 0, 'Tipp');
+
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointermove', 8 * HOUR_PX, { clientX: 111 });
+      h.runTimers(500);
+      touch(h, 'pointerup', 8 * HOUR_PX, { clientX: 111 });
+      assert(h.opened.length === 0, 'Bewegung > 10px (Wischen zwischen Zeitraeumen)');
+
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointermove', 8 * HOUR_PX + 6, { clientX: 104 });
+      h.fire(SCROLLER[view], 'scroll');
+      h.runTimers(500);
+      touch(h, 'pointerup', 8 * HOUR_PX + 6);
+      assert(h.opened.length === 0, 'Scrollen des Rasters');
+
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointercancel', 8 * HOUR_PX);
+      h.runTimers(500);
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      assert(h.opened.length === 0, 'der Browser uebernimmt die Geste (pointercancel)');
+
+      h.fire(sel, 'pointerdown', { pointerType: 'touch', isPrimary: true, clientX: 100, clientY: 9 * HOUR_PX, target: h.eventTarget() });
+      h.runTimers(500);
+      h.fire(sel, 'pointerup', { pointerType: 'touch', clientX: 100, clientY: 9 * HOUR_PX });
+      assert(h.opened.length === 0, 'ein Druck auf einen Termin legt nichts an');
+    });
+  });
+
+  test(`Z2 ${view}: waehrend des Drucks steht ein Platzhalter der Startzeit, Abbruch und Loslassen nehmen ihn weg`, () => {
+    withGrid(view, (h) => {
+      // Die Spalte, in die der Platzhalter gehoert: in der Woche die Tagesspalte
+      // unter dem Finger, im Tag die eine Spalte.
+      const col = view === 'day' ? h.el(sel) : h.emptyAt(sel, '2026-06-15');
+      const ghosts = () => col.children.filter((n) => /\bcal-press-ghost\b/.test(n.className));
+
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      assert(ghosts().length === 1, `waehrend des Drucks ${ghosts().length} Platzhalter - iOS vibriert nicht, das Auge braucht ein Signal`);
+      const g = ghosts()[0];
+      assert(g.attrs['aria-hidden'] === 'true', 'der Platzhalter ist Zierde, kein Inhalt');
+      assert(/08:00/.test(g.textContent), `er nennt die kommende Startzeit (${g.textContent})`);
+      assert(/\*\s*8\)/.test(g.style.top), `er steht an der Druckstelle (top ${g.style.top})`);
+      assert(!g.classList.contains('is-armed'), 'vor der Schwelle noch nicht scharf');
+      h.runTimers(500);
+      assert(ghosts().length === 1 && g.classList.contains('is-armed'), 'nach 500ms ist er scharf');
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      assert(ghosts().length === 0, 'nach dem Anlegen verschwindet er');
+      assert(h.opened.length === 1, 'und das Formular ist offen');
+
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointermove', 8 * HOUR_PX, { clientX: 111 });
+      assert(ghosts().length === 0, 'Bewegung > 10px nimmt ihn weg');
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      h.fire(SCROLLER[view], 'scroll');
+      assert(ghosts().length === 0, 'Scrollen nimmt ihn weg');
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointercancel', 8 * HOUR_PX);
+      assert(ghosts().length === 0, 'pointercancel nimmt ihn weg');
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      assert(ghosts().length === 0, 'ein kurzer Tipp laesst nichts stehen');
+
+      h.fire(sel, 'pointerdown', { pointerType: 'mouse', isPrimary: true, button: 0, clientX: 100, clientY: 8 * HOUR_PX, target: h.emptyAt(sel, '2026-06-15') });
+      assert(ghosts().length === 0, 'die Maus hat den Doppelklick, keinen Druck');
+      h.fire(sel, 'pointerdown', { pointerType: 'touch', isPrimary: true, clientX: 100, clientY: 9 * HOUR_PX, target: h.eventTarget() });
+      assert(ghosts().length === 0, 'ein Druck auf einen Termin zeigt keinen Platzhalter');
+      assert(h.opened.length === 1, 'kein weiteres Formular');
+    });
+  });
+
+  test(`Z2 ${view}: ein Doppeltipp (Touch) legt nicht an - dort gilt das lange Druecken`, () => {
+    withGrid(view, (h) => {
+      touch(h, 'pointerdown', 8 * HOUR_PX);
+      touch(h, 'pointerup', 8 * HOUR_PX);
+      touch(h, 'dblclick', 8 * HOUR_PX);
+      assert(h.opened.length === 0, 'Doppeltipp');
+    });
+  });
+}
+
+test('Z2: der Druck-Platzhalter blendet nur, nimmt keine Zeiger an und steht unter reduzierter Bewegung still', () => {
+  const rules = [...eachRule(calendarCss)].filter((r) => /(^|,)\s*\.cal-press-ghost\s*($|,)/.test(r.selector.trim()));
+  const base = rules.find((r) => r.at.length === 0);
+  assert(base, '.cal-press-ghost hat eine Grundregel');
+  assert(/pointer-events\s*:\s*none/.test(base.body), 'er verdeckt weder die Druckstelle noch den Klick darunter');
+  const anim = base.body.match(/animation\s*:\s*([\w-]+)/)?.[1];
+  assert(anim, 'er blendet ueber die Haltezeit ein');
+  const kf = calendarCss.match(new RegExp(`@keyframes\\s+${anim}\\s*\\{([\\s\\S]*?)\\n\\}`))?.[1] ?? '';
+  assert(kf && /opacity/.test(kf) && !/transform|translate|scale/.test(kf), `@keyframes ${anim}: nur Deckkraft, kein Versatz`);
+  const reduced = rules.find((r) => r.at.some((a) => /prefers-reduced-motion:\s*reduce/.test(a)));
+  assert(reduced && /animation\s*:\s*none/.test(reduced.body), 'unter reduzierter Bewegung ohne Einblenden');
+});
+
+test('Z2: Hinweis im leeren Tag nennt die Geste des Zeigers, nicht den Einzelklick', () => {
+  const de = JSON.parse(readFileSync(new URL('../public/locales/de.json', import.meta.url), 'utf8'));
+  for (const [key, value] of Object.entries(de.calendar)) {
+    if (!/^dayEmptyHint/.test(key)) continue;
+    assert(!/Tippe auf eine Uhrzeit|Klicke auf eine Uhrzeit/.test(value), `${key}: „${value}" verspricht den Einzeltipp`);
+  }
+  assert(de.calendar.dayEmptyHintPointer && de.calendar.dayEmptyHintTouch, 'je ein Hinweis fuer Maus (Doppelklick) und Touch (langes Druecken)');
 });
 
 // --------------------------------------------------------

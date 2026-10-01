@@ -7,9 +7,8 @@
  *
  * DIE EINE ZUSAGE, AN DER ALLES HAENGT: die Kachel rechnet NICHT selbst. Sie
  * liest dieselben Saldenzeilen wie die Ausgleichs-Ansicht des Moduls
- * (`groupBalanceRows()` + `simplifyDebts()`), damit ein spaeterer Fix an den
- * Salden (etwa #1445, Buchungszeilen geloeschter Ausgaben) beide Stellen
- * zugleich heilt - und bis dahin beide denselben Fehler zeigen, statt dass die
+ * (`groupBalanceRows()` + `simplifyDebts()`), damit ein Fehler in den Salden
+ * beide Stellen gleich trifft und ein Fix beide zugleich heilt, statt dass die
  * Uebersicht eine zweite Zahl erfindet.
  */
 import test from 'node:test';
@@ -208,10 +207,11 @@ test('dieselbe Quelle: jede Position steht genauso in der Ausgleichs-Ansicht des
   assert.deepEqual(tile, module);
 });
 
-test('#1445 (offen): eine verwaiste Buchungszeile verschiebt Kachel und Modul GLEICH', async () => {
-  // Der Bug wird hier NICHT behoben (geplant mit #1416/#1444). Zugesagt ist nur,
-  // dass die Kachel denselben Stand zeigt wie das Modul - heilt der Fix die
-  // Saldenquelle, heilt er beide. Gemessen wird die Gleichheit, nicht der Betrag.
+test('eine Buchungszeile ohne Ausgabe verschiebt Kachel und Modul GLEICH', async () => {
+  // Die Saldenquelle zaehlt jede Ledger-Zeile. Den Altbestand solcher Zeilen
+  // (#1445) hat Migration v227 einmal entfernt (test:split-orphan-ledger-
+  // migration); hier zugesagt ist nur, dass die Kachel denselben Stand zeigt
+  // wie das Modul. Gemessen wird die Gleichheit, nicht der Betrag.
   const orphan = database.prepare(`
     INSERT INTO expense_ledger_entries (group_id, source_type, source_id, user_id, counterparty_id, amount_minor, currency, memo, created_by)
     VALUES (?, 'expense', 999999, ?, ?, -500, 'EUR', 'geloeschte Ausgabe', ?)
@@ -224,7 +224,7 @@ test('#1445 (offen): eine verwaiste Buchungszeile verschiebt Kachel und Modul GL
     const tile = comparable((await splitBalanceOf(ME)).positions);
     const module = comparable(await modulePositionsOf(ME, [TRIP, FLAT]));
     assert.deepEqual(tile, module, 'die Kachel darf keine zweite Wahrheit neben dem Modul fuehren');
-    assert.equal(tile.find((p) => p.groupId === TRIP).amountMinor, 1800, 'beide zaehlen die Waise heute mit (#1445)');
+    assert.equal(tile.find((p) => p.groupId === TRIP).amountMinor, 1800, 'beide zaehlen dieselbe Zeile');
   } finally {
     database.prepare('DELETE FROM expense_ledger_entries WHERE id IN (?, ?)').run(orphan, orphanPayer);
   }
@@ -443,4 +443,77 @@ test('Kachel: Wert und Position kommen aus der Waehrung, in der wirklich etwas o
   assert.equal(tile.tone, 'balance-negative');
   assert.match(tile.note, /Cleo/, 'die genannte Position gehoert zur Waehrung des Werts');
   assert.equal(tile.route, '/budget?tab=split-expenses&group=9');
+});
+
+// --------------------------------------------------------------------------
+// Aequivalenz: Kachel-Netto == Kennzahlband des Moduls (GET /split-expenses/dashboard)
+// --------------------------------------------------------------------------
+//
+// Das Kennzahlband des Moduls ("Du bekommst" / "Du schuldest") summiert in
+// einer eigenen Abfrage ueber alle aktiven Gruppen des Betrachters, die Kachel
+// geht ueber `openBalancesForUser()` -> `groupBalanceRows()` je Gruppe. Beide
+// sind dieselbe Summe (je Waehrung die Ledger-Zeilen des Betrachters in seinen
+// aktiven Gruppen); der Test haelt fest, dass das auch auf einem Datensatz mit
+// allen bekannten Sonderfaellen gilt, damit eine Aenderung an EINER der beiden
+// Stellen hier rot wird statt still eine zweite Zahl zu zeigen.
+
+async function moduleNetOf(userId) {
+  return as(userId, async () => {
+    const { data } = await getJson('/split-expenses/dashboard');
+    const out = new Map();
+    for (const row of data.total_owed) out.set(row.currency, (out.get(row.currency) ?? 0) + row.amount_minor);
+    for (const row of data.total_owing) out.set(row.currency, (out.get(row.currency) ?? 0) - row.amount_minor);
+    return [...out.entries()].filter(([, minor]) => minor !== 0).sort(([a], [b]) => a.localeCompare(b));
+  });
+}
+
+async function tileNetOf(userId) {
+  return (await splitBalanceOf(userId)).net
+    .map(({ currency, netMinor }) => [currency, netMinor])
+    .sort(([a], [b]) => a.localeCompare(b));
+}
+
+async function deleteJson(path) {
+  const response = await fetch(`${base}${path}`, { method: 'DELETE' });
+  assert.equal(response.status, 200, `DELETE ${path}`);
+}
+
+test('Aequivalenz: Kachel-Netto und Kennzahlband des Moduls sind dieselbe Summe, fuer jeden Betrachter', async () => {
+  const CLEO = seedUser('Cleo');
+  const SWAP = seedGroup('Ausgleich ueber Gruppen', [ME, ALEX, CLEO]);
+  const USD = seedGroup('USA', [ME, BEA, CLEO], { currency: 'USD' });
+  const KWD = seedGroup('Kuwait', [ALEX, ME], { currency: 'KWD' });
+  const LEFT = seedGroup('Ausgetreten', [ALEX, CLEO]);
+
+  // Geloeschte Ausgabe: ihre Ledger-Zeilen fallen mit ihr.
+  const gone = await as(ME, () => addExpense(SWAP, ME, '90.00', [ME, ALEX, CLEO]));
+  await as(ME, () => deleteJson(`/split-expenses/expenses/${gone.data.id}`));
+  // Offene Ausgabe mit Rest-Cent (Aufteilung 100,00 / 3).
+  await as(ALEX, () => addExpense(SWAP, ALEX, '100.00', [ME, ALEX, CLEO]));
+  // Zahlung und ihr Storno (Gegenbuchung) - danach wieder offen.
+  const paid = await as(ME, () => settle(SWAP, ME, ALEX, '20.00'));
+  await as(ME, async () => {
+    const response = await fetch(`${base}/split-expenses/groups/${SWAP}/settlements/${paid.data.id}/reverse`, { method: 'POST' });
+    assert.equal(response.status, 200, 'Storno');
+  });
+  // Eine Zahlung, die stehen bleibt.
+  await as(CLEO, () => settle(SWAP, CLEO, ALEX, '10.00'));
+  // Fremdwaehrungen mit 2 und 3 Nachkommastellen.
+  await as(BEA, () => addExpense(USD, BEA, '75.50', [ME, BEA, CLEO], { currency: 'USD' }));
+  await as(ALEX, () => addExpense(KWD, ALEX, '12.345', [ME, ALEX], { currency: 'KWD' }));
+  // Ein Mitglied, das mit offenem Saldo aus der Gruppe entfernt wurde: seine
+  // Zeilen bleiben im Ledger, zaehlen fuer ihn aber an keiner der beiden Stellen.
+  await as(CLEO, () => addExpense(LEFT, CLEO, '40.00', [ALEX, CLEO]));
+  await as(ALEX, () => deleteJson(`/split-expenses/groups/${LEFT}/members/${CLEO}`));
+  // Archivierte Gruppe mit offenem Saldo (ARCHIVED aus dem Test oben) bleibt aussen vor.
+
+  for (const [name, uid] of [['Linda', ME], ['Alex', ALEX], ['Bea', BEA], ['Cleo', CLEO]]) {
+    const tile = await tileNetOf(uid);
+    const module = await moduleNetOf(uid);
+    assert.deepEqual(tile, module, `${name}: Kachel ${JSON.stringify(tile)} vs Modul ${JSON.stringify(module)}`);
+  }
+  // Der Datensatz darf nicht trivial ausgeglichen sein - sonst misst die
+  // Gleichheit nur zwei leere Listen.
+  assert.ok((await tileNetOf(ME)).length >= 2, 'Linda hat in mehreren Waehrungen etwas offen');
+  assert.ok((await tileNetOf(CLEO)).length >= 1, 'Cleo hat etwas offen');
 });

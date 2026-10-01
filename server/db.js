@@ -23,6 +23,7 @@ import os from 'node:os';
 import fs from 'node:fs/promises';
 import { mkdirSync, existsSync, renameSync, linkSync, rmSync, copyFileSync, openSync, readSync, closeSync, statSync, readdirSync, constants as fsConstants } from 'node:fs';
 import { createLogger } from './logger.js';
+import { acquireInstanceLock } from './utils/instance-lock.js';
 import { RESTORE_IN_PROGRESS_MESSAGE, RESTORE_IN_PROGRESS_REASON } from './utils/restore-messages.js';
 import { setRestoreRunning, activeWriters, restoreWaitTimeoutMs, waitUntilIdle } from './utils/restore-state.js';
 import { decodeHtmlEntities } from './utils/html-entities.js';
@@ -386,6 +387,14 @@ const EMPTY_DATABASE_FILE = 'YUVOMI_EMPTY_DATABASE_FILE';
 const RESTORE_TARGET_HANDSHAKE = Symbol.for('yuvomi.db.restoreTarget');
 
 /**
+ * Handschlag fuer die Instanzsperre (#1530), gesetzt VOR dem Import dieser
+ * Datei: `'wait'` vom Server (server/utils/claim-instance-lock.js), `'refuse'`
+ * vom CLI-Restore. Wie beim Restore-Handschlag ein Symbol und keine
+ * Env-Variable - ein Kindprozess soll ihn nicht erben.
+ */
+const INSTANCE_LOCK_HANDSHAKE = Symbol.for('yuvomi.db.instanceLock');
+
+/**
  * Bricht den Start ab, wenn die Datei, die gleich geöffnet wird, existiert und
  * leer ist. Läuft VOR allem, was die Datei anfasst - auch vor
  * `migrateLegacyDbFile()`, die eine leere `oikos.db` samt Journal sonst schon
@@ -417,6 +426,18 @@ function init({ plaintextBackup = true } = {}) {
       `"${path.resolve(DB_PATH)}", which is NOT the mounted volume. ` +
       `Data will be lost on container restart. Use an absolute path, e.g. DB_PATH=/data/yuvomi.db`
     );
+  }
+  // Instanzsperre (#1530) als ERSTES, vor allem, was neben DB_PATH etwas
+  // anfasst: ein Server, der waehrend eines CLI-Restores startet, wartet hier,
+  // statt Reste wegzuraeumen oder die Datei mitten im Tausch zu oeffnen. Nur
+  // Server und Restore-CLI setzen den Handschlag; andere Importeure (das
+  // Backup per `node -e` aus docs/installation.md, Skripte) bleiben frei.
+  // Der Restore aus der Einstellungsseite laeuft erneut hier durch und haelt
+  // die Sperre schon.
+  const instanceLockMode = globalThis[INSTANCE_LOCK_HANDSHAKE];
+  if ((instanceLockMode === 'wait' || instanceLockMode === 'refuse') && DB_PATH !== ':memory:') {
+    mkdirSync(path.dirname(DB_PATH), { recursive: true });
+    acquireInstanceLock(DB_PATH, { onBusy: instanceLockMode, log });
   }
   // Reste eines abgebrochenen Restores zuerst: auch vor der Leer-Pruefung,
   // denn ein CLI-Restore auf eine leere Datei (#1282), der mittendrin stirbt,
@@ -9719,6 +9740,203 @@ const MIGRATIONS = [
       }
     },
   },
+  {
+    version: 227,
+    description: 'Split: remove ledger rows of expenses that no longer exist',
+    // Das Gegenstueck zu v226 (#1445): bis v225 stempelte PUT /expenses/:id
+    // die Ledger-Zeilen mit der BEARBEITENDEN Person. Wurde danach das Konto
+    // geloescht, das die Ausgabe angelegt hatte, nahm expenses.created_by
+    // ON DELETE CASCADE Ausgabe und Anteile, die Zeilen (am Bearbeiter)
+    // blieben. Die Salden summieren das Ledger ohne Blick auf expenses - die
+    // Zeilen verschoben sie weiter, und keine Liste zeigte eine Ausgabe, die
+    // das erklaert. v225 hat sie bewusst liegen lassen (kein Autor, den man
+    // eintragen koennte), v226 baut nur fuer existierende Ausgaben auf.
+    //
+    // Seit v225 tragen die Zeilen expenses.created_by und fallen mit der
+    // Ausgabe; neue Waisen entstehen nicht mehr, es ist ein endlicher
+    // Altbestand. Darum hier einmal entfernt statt dauerhaft in jeder
+    // Saldenabfrage herausgefiltert. Nebenbei haelt eine Waise ueber
+    // user_id ON DELETE RESTRICT kein Konto mehr fest.
+    //
+    // Massstab ist "die expenses-Zeile EXISTIERT", nicht "sie ist aktiv": eine
+    // geloeschte Ausgabe behaelt ihre Zeile in expenses, und wer ihre
+    // Buchung samt Gegenbuchung (expense_reversal, #1382) haelt, verliert sie
+    // hier nicht. source_type gehoert in jede Abfrage - Zahlungen zaehlen ihre
+    // source_id in einem anderen Namensraum.
+    //
+    // Die Spur bleibt: je entfernter Ausgabe ein Log (Ausgabe, Gruppe) und
+    // genau ein Verlaufseintrag 'ledger_removed' in ihrer Gruppe, gleiche Form
+    // wie 'ledger_restored' in v226 (actor_id NULL, metadata {title,
+    // amount_minor, currency}; die Dezimalform ergaenzt GET
+    // /groups/:id/activity). Titel und Betrag kommen aus der Zahler-Zeile
+    // (counterparty_id NULL): memo ist der Titel, amount_minor der gebuchte
+    // (umgerechnete) Gesamtbetrag. Fehlt sie, nennt der Eintrag nur den Titel
+    // irgendeiner Zeile. Ein zweiter Lauf findet nichts mehr.
+    up(db) {
+      db.exec(`
+        DROP TABLE IF EXISTS temp._v227_orphans;
+        CREATE TEMP TABLE _v227_orphans AS
+          SELECT DISTINCT l.group_id, l.source_id AS id
+          FROM expense_ledger_entries l
+          WHERE l.source_type IN ('expense', 'expense_reversal')
+            AND NOT EXISTS (SELECT 1 FROM expenses e WHERE e.id = l.source_id);
+      `);
+      const removed = db.prepare('SELECT id, group_id FROM _v227_orphans ORDER BY id, group_id').all();
+      db.exec(`
+        INSERT INTO expense_activity (group_id, actor_id, type, entity_type, entity_id, metadata)
+        SELECT o.group_id, NULL, 'ledger_removed', 'expense', o.id,
+               CASE WHEN p.id IS NULL
+                 THEN json_object('title', (
+                   SELECT x.memo FROM expense_ledger_entries x
+                   WHERE x.source_type IN ('expense', 'expense_reversal')
+                     AND x.source_id = o.id AND x.group_id = o.group_id
+                   ORDER BY x.id LIMIT 1))
+                 ELSE json_object('title', p.memo, 'amount_minor', p.amount_minor, 'currency', p.currency)
+               END
+        FROM _v227_orphans o
+        LEFT JOIN expense_ledger_entries p ON p.id = (
+          SELECT MIN(y.id) FROM expense_ledger_entries y
+          WHERE y.source_type = 'expense' AND y.source_id = o.id AND y.group_id = o.group_id
+            AND y.counterparty_id IS NULL)
+        ORDER BY o.id, o.group_id;
+        DELETE FROM expense_ledger_entries
+        WHERE source_type IN ('expense', 'expense_reversal')
+          AND NOT EXISTS (SELECT 1 FROM expenses e WHERE e.id = expense_ledger_entries.source_id);
+        DROP TABLE _v227_orphans;
+      `);
+      for (const row of removed) {
+        log.info(`Removed the ledger rows of shared expense ${row.id} in group ${row.group_id}: the expense no longer exists, and the group's balances change accordingly.`);
+      }
+    },
+  },
+  {
+    version: 228,
+    description: 'Budget: a series keeps its own definition, the first booking is an ordinary entry (#1035)',
+    // DIE ERSTE ZEILE EINER SERIE WAR ZWEIERLEI (#1035): die Vorlage, aus der
+    // generateRecurringInstances() jedes kuenftige Vorkommen baut, UND die
+    // erste, von Hand erfasste Buchung. "Alle kuenftigen aendern" schrieb
+    // deshalb Titel, Betrag, Kategorie, Unterkategorie, Konto und Zustaendige
+    // auf eine Buchung, die Jahre zurueckliegen konnte - gemessen: die Miete
+    // vom Januar 2020 zog beim Kontowechsel auf das neue Konto um, beide Salden
+    // waren danach falsch. Umgekehrt schrieb eine Korrektur NUR der ersten
+    // Buchung in jedes kuenftige Vorkommen weiter.
+    //
+    // Entschieden in #1035 (Option 1): die Serie bekommt eine Definition fuer
+    // sich, das Original wird eine gewoehnliche Buchung, die Anker ihrer Serie
+    // ist. Hier liegen die WERTE der Vorlage - genau die Felder, die zugleich
+    // Tatsachen ueber eine Buchung sind. Der Rhythmus (recurrence_interval,
+    // _interval_count, _virtual, _confirm, recurrence_rule) und der Starttag
+    // (date) bleiben am Anker: sie haben nur eine Bedeutung, und das Frontend
+    // liest sie dort.
+    //
+    // WAS `recurrence_parent_id IS NULL` DANACH HEISST: nur noch "diese Zeile
+    // wurde nicht von einer Serie erzeugt" - eine von Hand erfasste Buchung.
+    // Ob sie eine Serie traegt, sagt allein diese Tabelle (eine Zeile je
+    // laufender Serie, Schluessel = id des Ankers); ihre Werte sind die der
+    // Buchung, nie die der Vorlage. Der einzige Leser, der die Spalte als "das
+    // ist die Serie" las, war generateRecurringInstances(); er liest jetzt hier.
+    //
+    // Schluessel ist die id des Ankers, keine eigene: an ihr haengen schon die
+    // Instanzen (recurrence_parent_id), die Ausnahmen
+    // (budget_recurrence_skipped.parent_id) und jede API-Adresse einer Serie
+    // (/budget/:id/series). Eine zweite id haette all das umziehen muessen,
+    // ohne dass eine Frage anders beantwortet waere. Der Preis: die Definition
+    // lebt nicht laenger als ihr Anker (ON DELETE CASCADE) - wie bisher.
+    //
+    // Sichtbarkeit steht mit darin, obwohl eine Serien-Aenderung sie bewusst
+    // RUECKWIRKEND auf alle Buchungen der Serie legt: sonst machte eine Einzel-
+    // Aenderung der ersten Buchung ("nur dieser Eintrag") jedes kuenftige
+    // Vorkommen mit oeffentlich oder privat.
+    //
+    // DIE TRIGGER halten die Definition fuer JEDEN Schreiber vollstaendig, auch
+    // fuer die, die am Router vorbei einfuegen (Demo-Seed, Tests): wird eine
+    // Buchung zur Serie, entsteht ihre Definition aus ihren Werten; wird die
+    // Serie beendet, faellt sie weg. Ohne Trigger haette eine Serie ohne
+    // Definition still keine Vorkommen mehr erzeugt. Nur UPDATE OF
+    // is_recurring - der updated_at-Trigger schreibt eine andere Spalte und
+    // loest sie nicht aus. EIN KUENFTIGER REBUILD von budget_entries (wie v156)
+    // verliert Trigger mit der Tabelle und muss diese drei neu anlegen.
+    //
+    // Zeitstempel wie jede Entitaetstabelle (CONTRIBUTING.md); updated_at
+    // fuehrt PUT /budget/:id/series nach, der einzige Schreiber danach.
+    //
+    // Die Zustaendigen des Ankers wandern als Vorlage mit; ihre Zeilen am Anker
+    // bleiben, sie beschreiben die erste Buchung. Idempotent: IF NOT EXISTS,
+    // und gefuellt wird nur fuer Anker ohne Definition - ein zweiter Lauf
+    // ueberschreibt keine Definition, die inzwischen von der Buchung abweicht.
+    up: `
+      CREATE TABLE IF NOT EXISTS budget_series (
+        anchor_id   INTEGER PRIMARY KEY REFERENCES budget_entries(id) ON DELETE CASCADE,
+        title       TEXT    NOT NULL,
+        amount      REAL    NOT NULL,
+        full_amount REAL,
+        category    TEXT    NOT NULL,
+        subcategory TEXT    NOT NULL DEFAULT '',
+        account_id  INTEGER REFERENCES budget_accounts(id) ON DELETE SET NULL,
+        visibility  TEXT    NOT NULL DEFAULT 'shared'
+                            CHECK (visibility IN ('private', 'shared', 'shared_amount')),
+        created_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at  TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      );
+      CREATE INDEX IF NOT EXISTS idx_budget_series_account ON budget_series(account_id);
+
+      CREATE TABLE IF NOT EXISTS budget_series_responsibles (
+        anchor_id INTEGER NOT NULL REFERENCES budget_series(anchor_id) ON DELETE CASCADE,
+        user_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        PRIMARY KEY (anchor_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_budget_series_responsibles_user
+        ON budget_series_responsibles(user_id);
+
+      -- Nur Anker, die noch KEINE Definition haben: ein zweiter Lauf fasst
+      -- weder eine inzwischen abweichende Definition noch ihre (vielleicht
+      -- bewusst geleerte) Zustaendigkeit an.
+      DROP TABLE IF EXISTS temp._v228_anchors;
+      CREATE TEMP TABLE _v228_anchors AS
+        SELECT id FROM budget_entries
+         WHERE is_recurring = 1 AND recurrence_parent_id IS NULL
+           AND id NOT IN (SELECT anchor_id FROM budget_series);
+
+      INSERT INTO budget_series
+        (anchor_id, title, amount, full_amount, category, subcategory, account_id, visibility)
+      SELECT e.id, e.title, e.amount, e.recurrence_full_amount, e.category, e.subcategory,
+             e.account_id, e.visibility
+        FROM budget_entries e JOIN _v228_anchors n ON n.id = e.id;
+
+      INSERT OR IGNORE INTO budget_series_responsibles (anchor_id, user_id)
+      SELECT r.entry_id, r.user_id
+        FROM budget_entry_responsibles r JOIN _v228_anchors n ON n.id = r.entry_id;
+
+      DROP TABLE _v228_anchors;
+
+      CREATE TRIGGER IF NOT EXISTS trg_budget_series_on_insert
+        AFTER INSERT ON budget_entries
+        WHEN NEW.is_recurring = 1 AND NEW.recurrence_parent_id IS NULL
+      BEGIN
+        INSERT OR IGNORE INTO budget_series
+          (anchor_id, title, amount, full_amount, category, subcategory, account_id, visibility)
+        VALUES (NEW.id, NEW.title, NEW.amount, NEW.recurrence_full_amount, NEW.category,
+                NEW.subcategory, NEW.account_id, NEW.visibility);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_budget_series_on_start
+        AFTER UPDATE OF is_recurring ON budget_entries
+        WHEN OLD.is_recurring = 0 AND NEW.is_recurring = 1 AND NEW.recurrence_parent_id IS NULL
+      BEGIN
+        INSERT OR IGNORE INTO budget_series
+          (anchor_id, title, amount, full_amount, category, subcategory, account_id, visibility)
+        VALUES (NEW.id, NEW.title, NEW.amount, NEW.recurrence_full_amount, NEW.category,
+                NEW.subcategory, NEW.account_id, NEW.visibility);
+      END;
+
+      CREATE TRIGGER IF NOT EXISTS trg_budget_series_on_stop
+        AFTER UPDATE OF is_recurring ON budget_entries
+        WHEN OLD.is_recurring = 1 AND NEW.is_recurring = 0
+      BEGIN
+        DELETE FROM budget_series WHERE anchor_id = NEW.id;
+      END;
+    `,
+  },
 ];
 
 /**
@@ -10713,9 +10931,18 @@ async function stageDatabaseCopy(from, stagingPath) {
   await unlinkIfExists(stagingPath);
   await fs.copyFile(from, stagingPath);
   await adoptDatabaseAttributes(stagingPath);
-  // Lesend genuegt fuer fsync - und klappt auch, wenn die Datei keine
-  // Schreibrechte traegt.
-  const handle = await fs.open(stagingPath, 'r');
+  // Schreibend oeffnen, wo es geht: Windows (FlushFileBuffers) verlangt fuer
+  // fsync einen Handle mit Schreibrecht und antwortet sonst mit EPERM - ein
+  // Restore unter Node nativ auf Windows blieb daran stehen (#1441). Traegt
+  // die Datei keine Schreibrechte, genuegt ausserhalb von Windows ein lesender
+  // Handle wie bisher.
+  let handle;
+  try {
+    handle = await fs.open(stagingPath, 'r+');
+  } catch (err) {
+    if (err?.code !== 'EACCES' && err?.code !== 'EPERM') throw err;
+    handle = await fs.open(stagingPath, 'r');
+  }
   try {
     await handle.sync();
   } finally {

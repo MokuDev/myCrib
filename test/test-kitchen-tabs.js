@@ -300,3 +300,99 @@ test('Seitenleiste: Pille <= 300ms aus Tokens, Hover-Absicht 150-250ms aus einem
   assert.match(layout, /\.nav-sidebar:hover:not\(:focus-within\)\s*\{\s*transition:\s*width var\(--duration-xl\) var\(--ease-out\) var\(--sidebar-hover-intent\)/,
     'das Ausklappen per Zeiger wartet die Absicht ab, mit der Kurve der Shell');
 });
+
+// --------------------------------------------------------
+// EINE REGEL FUER DEN KUECHENKOPF MOBIL (Re-Critique 2026-09-28, P7 / A4 P2-3).
+// R9 M10 hatte Lupe und "..." von Rezepte/Vorrat IN die Kuechen-Leiste gelegt;
+// dafuer schrumpften dort die Zaehler zu Punkten, waehrend Mahlzeiten und
+// Einkauf ihre Werkzeuge in einer eigenen Kontextzeile trugen. Vier Tabs, vier
+// Kopfbauarten: die Leiste sprang beim Tabwechsel. Jetzt traegt die Leiste nur
+// Tabs mit Zahlen, und jedes Werkzeug steht in der Kontextzeile seines Tabs.
+// --------------------------------------------------------
+test('Kueche mobil: die Leiste traegt nur Tabs mit Zahlen, Werkzeuge stehen in der Kontextzeile', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const rules = [...eachRule(readSrc('../public/styles/kitchen-tabs.css'))];
+  const narrow = rules.filter((r) => r.at.some((a) => /\(max-width:\s*639px\)/.test(a)));
+  assert.ok(narrow.some((r) => /\.kitchen-tabs-bar \.module-seal/.test(r.selector) && /display:\s*none/.test(r.body)),
+    'mobil kostet das Siegel 26px, und die untere Leiste fuehrt dasselbe Besteck als aktiven Eintrag');
+  assert.deepEqual(narrow.filter((r) => /--kitchen-tools/.test(r.body) || /--kitchen-tools/.test(r.selector)).map((r) => r.selector), [],
+    'keine Werkzeuge mehr in der Leiste');
+  assert.deepEqual(narrow.filter((r) => /margin-block-start:\s*calc\(-1 \* var\(--kitchen-tabs-height\)\)/.test(r.body)).map((r) => r.selector), [],
+    'keine Seite rueckt mehr in die Zeile der Leiste - ihr Kopf ist die Kontextzeile darunter');
+  assert.deepEqual(narrow.filter((r) => /\.sub-tab__badge/.test(r.selector) && /color:\s*transparent/.test(r.body)).map((r) => r.selector), [],
+    'kein Zaehler schrumpft je Tab zum Punkt - die Zahl bleibt in allen vier Tabs');
+});
+
+// --------------------------------------------------------
+// R9 (Hauptsession-Entscheid nach k9): die Leiste passt auch bei 375px ohne
+// Scrollen. Gemessen vorher (375x812, de): Rezepte 3px, Vorrat 9px Ueberlauf.
+// Die Rechnung liest jede Laenge aus den Stylesheets und tokens.css; nur die
+// Wortbreiten sind gemessen (de, --text-sm, Pane 2026-09-27) - Deutsch ist
+// die laengste Locale, fuer die die Leiste ausgelegt ist (siehe Kopf von
+// kitchen-tabs.css). Werkzeuge mit --target-lg (Finger), wie auf dem Telefon.
+// --------------------------------------------------------
+test('Kueche mobil: die Leiste passt bei 375px in allen vier Tabs ohne Scrollen (R9)', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const tokens = readSrc('../public/styles/tokens.css');
+  const tok = (name) => {
+    const m = tokens.match(new RegExp(`--${name}:\\s*([\\d.]+)px`));
+    assert.ok(m, `Token --${name} nicht gefunden`);
+    return Number(m[1]);
+  };
+  const px = (v) => {
+    const s = String(v ?? '').trim();
+    if (s === '0') return 0;
+    const m = s.match(/^var\(--([\w-]+)\)$/);
+    assert.ok(m, `Laenge nicht lesbar: "${s}"`);
+    return tok(m[1]);
+  };
+  const narrow = (r) => r.at.some((a) => /\(max-width:\s*639px\)/.test(a));
+  const kitchen = [...eachRule(readSrc('../public/styles/kitchen-tabs.css'))].filter(narrow);
+  const base = [...eachRule(readSrc('../public/styles/sub-tabs.css'))].filter((r) => !r.at.length);
+  // Komma nur auf oberster Ebene trennen - `:is(a, b)` ist EIN Selektor.
+  const topLevel = (sel) => {
+    const out = []; let depth = 0; let cur = '';
+    for (const ch of sel) {
+      if (ch === '(') depth += 1;
+      if (ch === ')') depth -= 1;
+      if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+    }
+    return [...out, cur].map((x) => x.trim().replace(/\s+/g, ' '));
+  };
+  const decl = (rules, sel, prop) => {
+    let out;
+    for (const r of rules) {
+      if (!topLevel(r.selector).includes(sel)) continue;
+      const m = r.body.match(new RegExp(`(?:^|;)\\s*${prop}:\\s*([^;]+)`));
+      if (m) out = m[1].trim();
+    }
+    return out;
+  };
+  const barGap = px(decl(kitchen, '.kitchen-tabs-bar', 'gap'));
+  const tabPad = px(decl(kitchen, '.kitchen-tabs-bar .sub-tab', 'padding-inline'));
+  const tabGap = px(decl(kitchen, '.kitchen-tabs-bar .sub-tab', 'gap'));
+  const badgeMargin = px(decl(kitchen, '.kitchen-tabs-bar .sub-tab__badge', 'margin-inline-start') ?? decl(base, '.sub-tab__badge', 'margin-inline-start'));
+  const badgePad = px(decl(kitchen, '.kitchen-tabs-bar .sub-tab__badge', 'padding-inline') ?? decl(base, '.sub-tab__badge', 'padding').split(/\s+/)[1]);
+  const badgeMin = px(decl(base, '.sub-tab__badge', 'min-width'));
+  // Seit der Re-Critique 2026-09-28 (P7) stehen keine Werkzeuge mehr in der
+  // Leiste und kein Zaehler wird zum Punkt - die Rechnung hat vier Tabs mit
+  // Zahlen und das Seitenpolster an beiden Enden.
+  // Gemessene Wortbreiten (inaktiv / aktiv, der aktive Tab ist fetter) und die Zahl im Zaehler.
+  const WORD = { meals: [72, 73.7], recipes: [53.9, 55], shopping: [48.8, 50.2], pantry: [40.9, 42] };
+  const DIGITS = 15.8;
+  const PAGE_PAD = tok('space-4');
+  const W = 375;
+  const numeric = Math.max(badgeMin, DIGITS + 2 * badgePad);
+  const width = ({ active, badges }) => {
+    const tabs = Object.keys(WORD).map((id) => WORD[id][id === active ? 1 : 0] + 2 * tabPad
+      + (badges.includes(id) && id !== active ? tabGap + badgeMargin + numeric : 0));
+    return PAGE_PAD + tabs.reduce((a, b) => a + b, 0) + (tabs.length - 1) * barGap + PAGE_PAD;
+  };
+  // Einkauf und Vorrat tragen Zaehler; der aktive Tab zeigt seinen nicht.
+  for (const tab of Object.keys(WORD)) {
+    const need = width({ active: tab, badges: ['shopping', 'pantry'] });
+    assert.ok(need <= W, `${tab}: die Leiste braucht ${need.toFixed(1)}px von ${W} - sie scrollt fuer vier Tabs`);
+  }
+  assert.ok(numeric >= badgeMin, 'der Zaehler bleibt eine Pille');
+  assert.ok(tabPad >= tok('space-1'), 'die Kapsel des aktiven Tabs laesst dem Wort weiter 4px je Seite');
+});

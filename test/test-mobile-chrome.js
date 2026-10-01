@@ -167,6 +167,27 @@ test('(3) nichts im Inhalt klebt mit bottom: 0 an der Unterkante - dort liegt di
     'eine klebende Fusszeile im Inhalt nimmt `bottom: var(--nav-tail)` - mit 0 klebt sie hinter dem Glas');
 });
 
+test('(3) unter der Kapsel liegt keine feste Flaeche im Home-Indicator-Bereich', () => {
+  // Die Zone unter der Kapsel gehoert dem Inhalt, bis zum Displayrand. In pwa.css
+  // stand fuer installierte Apps ein `body::after` (fixed, bottom: 0, Hoehe der
+  // unteren Safe-Area, Surface-Grund), gebaut als Fortsetzung einer deckenden
+  // Tab-Leiste. Seit der Inhalt unter der Kapsel laeuft (#1475), schnitt es ihn
+  // 34px ueber dem Rand ab: auf dem iPhone ein dunkler Streifen unter der
+  // Navigation, und Tipps in dem Streifen gingen an body statt an die Zeile.
+  const offenders = [];
+  for (const { file, css } of sheets) {
+    for (const r of rules(css)) {
+      if (decl(r.body, 'position') !== 'fixed') continue;
+      const bottom = decl(r.body, 'bottom');
+      if (bottom === null || !/^0(px)?$/.test(bottom)) continue;
+      const height = decl(r.body, 'height') ?? '';
+      if (/safe-area-inset-bottom/.test(height)) offenders.push(`${file}: ${r.selector}`);
+    }
+  }
+  assert.deepEqual(offenders, [],
+    'die untere Safe-Area traegt die Kapselzone als padding (.nav-bottom), keine eigene Flaeche am Rand');
+});
+
 test('(4) die Suche nimmt mobil ihre Icon-Form auch in einem Wrapper-Slot', () => {
   const iconForm = rules(layoutCss).filter((r) => /\.page-search:not\(:focus-within\):not\(:has\(input:not\(:placeholder-shown\)\)\)$/.test(r.selector)
     && decl(r.body, 'width') === 'var(--target-base)');
@@ -198,4 +219,62 @@ test('(5) die geteilten Bausteine existieren an einer Stelle', async () => {
   for (const cls of ['.page-filter-btn', '.page-filter-btn__count', '.filter-sheet__heading', '.page-chip-row']) {
     assert.equal(topLevel(layoutCss, cls).length >= 1, true, `${cls} gehoert in layout.css (global geladen)`);
   }
+});
+
+// R14 P12 (Re-Critique 2026-09-28, A1 P3-2): im Desktop-Kopf standen zwei
+// Hoehen - Suche und "..." 44px, Segment, Filter und angedockte Pille 40px,
+// gemessen in 12 Modulen bei 1440. Am Zeiger ist 40px die Regel (ignore.md,
+// Hit-Test); die zwei Ausreisser folgen ihr jetzt im Kopf.
+test('R14: der Desktop-Kopf hat EINE Steuerhoehe', () => {
+  const desk = [...eachRule(layoutCss)].filter((r) => r.at.some((a) => /\(min-width:\s*1024px\)/.test(a)));
+  const body = (sel) => desk.filter((r) => r.selector.split(',').some((s) => s.trim() === sel)).map((r) => r.body).join(';');
+  for (const sel of ['.page-toolbar .btn--icon', '.page-toolbar .page-search__input']) {
+    assert.match(body(sel), /min-height:\s*var\(--target-md\)/, `${sel}: dieselbe Hoehe wie .btn am Desktop`);
+  }
+  assert.match(body('.page-toolbar .btn--icon'), /min-width:\s*var\(--target-md\)/, 'das Werkzeugmenue bleibt quadratisch');
+});
+
+// R17 Z1 (Re-Critique 2026-09-28, A1 P2-3): die benannte Variante „Zeitraum-Kopf"
+// (DESIGN.md, Kopfregel mobil). Ein Modul, dessen Titel ein navigierbarer
+// Zeitraum ist, darf seine Werkzeuge in Zeile 1 neben den Titel stellen - der
+// Kalender tut das, indem er seine Bar-Zeile mobil aufloest (`display:
+// contents`), und die Werkzeuge ruecken ans Ende der Titelzeile. Das ist die
+// EINE Stelle, an der die Regel „Zeile 1 traegt allein den Titel" bricht; sie
+// gilt nur, wo der Kopf die Variante im Markup traegt, und das Markup nur dort,
+// wo DESIGN.md sie nennt. Regel statt Schreibweise: gesucht wird jede Regel,
+// die eine Bar- oder Werkzeugzeile eines Kopfs aufloest, egal wie sie heisst.
+const PERIOD_TITLE = 'page-toolbar--period-title';
+const PERIOD_TITLE_MODULES = ['pages/calendar.js'];
+
+test('R17 Z1: nur der markierte Zeitraum-Kopf loest seine Bar-Zeile in die Titelzeile auf', () => {
+  const dissolving = [];
+  for (const { file, css } of sheets) {
+    for (const r of rules(css)) {
+      if (decl(r.body, 'display') !== 'contents') continue;
+      for (const part of r.selector.split(',').map((s) => s.trim())) {
+        // Die Bar-Zeile (`*__bar`) oder ihre Werkzeuggruppe (`*__tools`) eines Kopfs.
+        if (!/(?:toolbar|head|header)[\w-]*__(?:bar|tools)\b/.test(part)) continue;
+        dissolving.push({ file, part });
+      }
+    }
+  }
+  assert.ok(dissolving.length >= 1, 'der Kalender loest seine Bar-Zeile mobil auf - findet der Guard ihn nicht, ist er blind');
+  const unmarked = dissolving.filter((d) => !d.part.includes(`.${PERIOD_TITLE}`));
+  assert.deepEqual(unmarked, [],
+    `Werkzeuge in Zeile 1 nur im markierten Zeitraum-Kopf (.${PERIOD_TITLE}, DESIGN.md „Variante: Zeitraum-Kopf")`);
+});
+
+test('R17 Z1: die Variante steht nur im Markup der Module, die DESIGN.md nennt', () => {
+  const pub = new URL('../public/', import.meta.url);
+  const carriers = [];
+  for (const dir of ['pages', 'utils', 'components']) {
+    for (const f of readdirSync(new URL(`${dir}/`, pub)).filter((n) => n.endsWith('.js'))) {
+      if (readFileSync(new URL(`${dir}/${f}`, pub), 'utf8').includes(PERIOD_TITLE)) carriers.push(`${dir}/${f}`);
+    }
+  }
+  assert.deepEqual(carriers.sort(), [...PERIOD_TITLE_MODULES].sort(),
+    'wer den Zeitraum-Kopf traegt, steht in DESIGN.md und in PERIOD_TITLE_MODULES');
+  const design = read('../DESIGN.md');
+  assert.match(design, /\*\*Variante: Zeitraum-Kopf \(Kalender\)\.\*\*/, 'DESIGN.md benennt die Variante');
+  assert.ok(design.includes(PERIOD_TITLE), 'und nennt ihre Kennklasse');
 });

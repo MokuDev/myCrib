@@ -17,6 +17,7 @@ import { prefersInkText } from '/utils/contrast.js';
 import { confirmModal } from '/components/modal.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { createRetryState } from '/settings/components.js';
+import { syncLeafEdits, trackLeafEdits } from '/settings/dirty-guard.js';
 import { resolveExtensionLabel } from '/utils/extension-i18n.js';
 import {
   effectiveCapabilityAccess as resolveCapabilityAccess,
@@ -462,6 +463,8 @@ function renderMatrix(container) {
     : '';
 
   panel.replaceChildren();
+  // Die Matrix-Ueberschrift ist die erste unter dem h1 des Blatts, also h2 -
+  // als h3 stand sie seit dem Blatt je Modul (R10) ohne sichtbares h2 davor.
   panel.insertAdjacentHTML('beforeend', `
     <div class="perm-matrix__head">
       <h2 class="perm-matrix__subject">${esc(subjectTitle())}</h2>
@@ -493,6 +496,11 @@ function updateSaveState(panel) {
   if (save) save.disabled = !state.dirty;
   const dirty = panel.querySelector('#perm-dirty');
   if (dirty) dirty.hidden = !state.dirty;
+  // Am Telefon klebt der Fuss nur mit ungespeicherten Aenderungen (settings.css).
+  panel.querySelector('.perm-actions')?.classList?.toggle('is-dirty', state.dirty);
+  // Offener Entwurf = Rueckfrage vor jedem Verlassen des Blatts (R15 A7 P1-1):
+  // die Matrix ist kein Formular, der Guard erfaehrt ihren Stand von hier.
+  syncLeafEdits();
 }
 
 // Widgets eines Moduls neu rendern (nach Modul-Änderung: Sperr-Zustände hängen daran).
@@ -677,7 +685,7 @@ async function save(container) {
 function bindEvents(container) {
   // Geteilte gleitende Kapsel (Re-Critique 2026-09-27, D8): sie folgt dem
   // Klassenwechsel unten von selbst.
-  const modeSwitch = container.querySelector('.perm-modeswitch');
+  const modeSwitch = container.querySelector('.perm-mode');
   if (modeSwitch) attachSegmentIndicator(modeSwitch);
   // Modus umschalten
   container.querySelectorAll('[data-mode]').forEach((btn) => {
@@ -780,11 +788,13 @@ function renderShell(container) {
 
       <!-- Trug bis zum Copy-Durchgang den Seitentitel als Label: der beschreibt
            die Seite, nicht die Umschaltung (Critique 2026-07-27). -->
-      <div class="perm-modeswitch" role="tablist" aria-label="${esc(t('settings.permModeLabel'))}">
-        <button type="button" class="perm-modeswitch__btn is-active" role="tab" aria-selected="true" data-mode="role">
+      <!-- DER KANON-UMSCHALTER (R14, A7 P2-4/Konsistenz): segmented wie Design
+           und Wochenstart, statt einer eigenen Pille mit eigenem Daumen. -->
+      <div class="segmented settings-segmented perm-mode" role="tablist" aria-label="${esc(t('settings.permModeLabel'))}">
+        <button type="button" class="segmented__item is-active" role="tab" aria-selected="true" data-mode="role">
           <i data-lucide="users-round" aria-hidden="true"></i>${esc(t('settings.permByRole'))}
         </button>
-        <button type="button" class="perm-modeswitch__btn" role="tab" aria-selected="false" data-mode="user">
+        <button type="button" class="segmented__item" role="tab" aria-selected="false" data-mode="user">
           <i data-lucide="user" aria-hidden="true"></i>${esc(t('settings.permByMember'))}
         </button>
       </div>
@@ -816,6 +826,9 @@ export async function render(container, { user } = {}) {
   state.draft = { modules: {}, widgets: {}, capabilities: {} };
   state.inherited = { modules: {}, widgets: {}, capabilities: {} };
   state.dirty = false;
+  // Die Matrix hat keinen <form>: sie meldet ihren Entwurf selbst beim
+  // Verlassen-Schutz der Einstellungen an (settings/dirty-guard.js).
+  trackLeafEdits(container, () => state.dirty);
 
   bindEvents(container);
   await selectSubject(container, 'role', initialSubject('role', catalog));

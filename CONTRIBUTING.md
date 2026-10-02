@@ -331,6 +331,33 @@ without this repository's private tooling.
 
 ---
 
+## The name: myCrib, and what keeps the old one on purpose
+
+myCrib is a fork of [`ulsklyc/yuvomi`](https://github.com/ulsklyc/yuvomi). **Only what people read was renamed.** Everything technical kept the old name on purpose, because renaming it would break installations that already exist: the database file, the browser storage keys and the Google Drive folder would suddenly be looked for somewhere else, and the data would appear to be gone.
+
+So when you add or change a string:
+
+**Use myCrib** for anything a person reads - locale values in `public/locales/` and `tools/installer/locales/`, error messages, the READMEs, the docs, the headings of this repository's own documents.
+
+**Leave `yuvomi` alone** where it is a technical value an installation already depends on:
+
+| What | Where |
+|---|---|
+| `yuvomi.db` and its `-wal`, `-shm`, `.lock` and backup siblings | `server/db.js`, the docs, the Compose files |
+| `APP_FOLDER_NAME = 'Yuvomi'` | the Google Drive folder of existing households |
+| the `yuvomi-*` browser storage keys, the cookie names, `window.yuvomi` | frontend |
+| the Web Component prefix `yuvomi-` and the source file names | `public/components/` |
+| `/yuvomi/backups/` and `yuvomi-documents` | the two defaults inside locale files |
+| the service and container name `yuvomi` | Compose examples and log lines in the docs |
+
+**Leave it alone** where changing it would make the sentence false: references to the upstream project (`ulsklyc/yuvomi`, `ghcr.io/ulsklyc/yuvomi`, `yuvomi.cloud`, issues and discussions over there) and the entries in `CHANGELOG.md` that record history.
+
+`npm run test:fork-brand` holds the part a machine can hold: the 78 locale files and the headings of this repository's own documents. It also catches misspellings, which is why it exists - Norwegian arrived from upstream with `Yuvimi` instead of `Yuvomi` in one line, and a search for the correct spelling walks straight past that. A translation pack has thousands of lines nobody reads in a diff.
+
+It deliberately does **not** check the prose of the README and the docs. The foreign name belongs there in plenty of places - as the service name in `docker compose exec yuvomi`, as a path, as a link to the upstream project - and whether a new occurrence is technical or a leftover is decided by the sentence, not by the character in front of it. That part stays manual, and it is worth a look after every upstream merge.
+
+---
+
 ## Code Conventions
 
 ### General

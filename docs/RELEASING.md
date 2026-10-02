@@ -1,4 +1,4 @@
-# Releasing Yuvomi
+# Releasing myCrib
 
 This is the public version of the release procedure. It exists for two readers: a contributor who
 wants to know what happens between "merged" and "the image updated on my NAS", and whoever cuts the

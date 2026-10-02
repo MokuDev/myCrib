@@ -36,7 +36,7 @@
     <img src="docs/screenshots/de/dashboard-light-web.webp" alt="Das myCrib-Dashboard: Aufgaben, Termine, Mahlzeiten und Einkaufsliste des Tages auf einem Bildschirm" width="820">
   </picture>
 
-  <sub><b>20</b> Module&nbsp;&nbsp;·&nbsp; <b>25</b> Sprachen&nbsp;&nbsp;·&nbsp; <b>0</b> Tracker&nbsp;&nbsp;·&nbsp; optionale&nbsp;<b>AES&#8209;256</b>&#8209;Datenbankverschlüsselung&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
+  <sub><b>20</b> Module&nbsp;&nbsp;·&nbsp; <b>26</b> Sprachen&nbsp;&nbsp;·&nbsp; <b>0</b> Tracker&nbsp;&nbsp;·&nbsp; optionale&nbsp;<b>AES&#8209;256</b>&#8209;Datenbankverschlüsselung&nbsp;&nbsp;·&nbsp; <b>MIT</b></sub>
 </div>
 
 Die meisten Haushalte kleben ihren Alltag aus einem Dutzend Bezahl-Apps zusammen, jede mit eigenem
@@ -166,8 +166,9 @@ meist den Grund, und die
 
 ### Geführte Einrichtung
 
-Ein Einrichtungsassistent im Browser, in 25 Sprachen. Er erkennt Docker oder Podman, richtet HTTPS,
-Single Sign-on und geplante Backups ein, startet dann den Container und legt dein Admin-Konto an.
+Ein Einrichtungsassistent im Browser, in 26 Sprachen. Er erkennt Docker oder Podman, richtet Single
+Sign-on und geplante Backups ein, bereitet myCrib auf einen HTTPS-Reverse-Proxy vor (das
+Zertifikat bleibt Sache des Proxys), startet dann den Container und legt dein Admin-Konto an.
 
 ```bash
 git clone https://github.com/MokuDev/myCrib.git && cd myCrib
@@ -218,7 +219,7 @@ Yuvomi wurde von **Oikos** umbenannt, um einen Markenkonflikt mit einem unabhän
 - **Apple HIG in der Liquid-Glass-Sprache** - Systemschrift und Apples Typoskala, Kapsel-Bedienelemente, eingerückte Listengruppen und federnde Bewegung, in Hell und Dunkel gegen WCAG AA geprüft.
 - **Privatsphäre zuerst** - vollständig selbstgehostet, optionale SQLCipher-AES-256-Datenbankverschlüsselung, keine Telemetrie.
 - **Anmeldung für einen ganzen Haushalt** - optionale Zwei-Faktor-Anmeldung (TOTP mit Wiederherstellungscodes, auf Wunsch für alle verpflichtend), Einladungslinks statt weitergereichter Passwörter und optionaler Self-Service-Passwort-Reset per E-Mail. Optionales Single Sign-on klappt mit jedem OIDC-Anbieter. Ein Schalter entscheidet, ob eine unbekannte Identität ein Konto bekommt, damit ein über deinen Haushalt hinaus geteilter Anbieter keine Tür öffnet, und ein zweiter macht SSO zum einzigen Weg hinein.
-- **25 Sprachen** mit automatischer Erkennung. Eine eigene Haushaltseinstellung bestimmt die Sprache der Einträge, die myCrib selbst anlegt - so spricht ein exportierter Kalender die Sprache deines Haushalts statt Englisch.
+- **26 Sprachen** mit automatischer Erkennung. Eine eigene Haushaltseinstellung bestimmt die Sprache der Einträge, die myCrib selbst anlegt - so spricht ein exportierter Kalender die Sprache deines Haushalts statt Englisch.
 
 <p align="center">
   <img src="https://img.shields.io/badge/Express-000000?style=flat-square&logo=express&logoColor=white" alt="Express">

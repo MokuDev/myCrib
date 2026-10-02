@@ -283,7 +283,7 @@
     "subtitle": "Etterpå kjører din private familieplanlegger på din egen server.",
     "simpleTitle": "Enkel oppsett",
     "simpleBadge": "Anbefalt",
-    "simpleDesc": "Vi håndterer de tekniske detaljene for deg. Perfekt for å kjøre Yuvimi hjemme.",
+    "simpleDesc": "Vi håndterer de tekniske detaljene for deg. Perfekt for å kjøre myCrib hjemme.",
     "simpleTime": "Omtrent 2 minutter",
     "advancedTitle": "Avansert oppsett",
     "advancedDesc": "Full kontroll: reverse proxy, kalendersynkronisering, e-post, single sign-on og sikkerhetskopier.",

@@ -2420,6 +2420,7 @@ test('wer an der Frische haengt UND offline gecacht wird, liest ueber getWithSou
     /const pending[A-Z]\w*\s*=\s*new Map\(/, // aeltere Schreibweise desselben
     /const settledAt\s*=\s*new Map\(/,       // Bestaetigungszeit je Eintrag
     /^\s*\w*[sS]tale:\s/m,                   // Referenzlisten mit Frische-Flag
+    /\{\s*fresh:\s/,                         // Ladeergebnis mit Frische-Flag
   ];
 
   const sw = read('../public/sw.js');
@@ -17848,7 +17849,10 @@ test('dashboard: Timer und Listener haengen am Signal des eigenen Aufbaus, nicht
   // ueberholter Aufbau registrierte sich sonst am Controller des neueren.
   assert.doesNotMatch(render, /_fabController\.signal/,
     'render() verdrahtet ueber `signal` (lokal), nicht ueber `_fabController.signal`');
-  assert.match(render, /const rerender = \(\) => render\(container, \{ user, signal: routeSignal \}\);/,
+  // Der Neuaufbau ist seit #1588 ein Block: nach dem synchronen Teil holt er
+  // den FAB in die Shell-Ebene (window.yuvomi.replacePageFab, gemessen in
+  // test:dashboard-surface-browser). Das Signal reicht er unveraendert weiter.
+  assert.match(render, /const rerender = \(\) => \{\s*const done = render\(container, \{ user, signal: routeSignal \}\);/,
     'ein Neuaufbau reicht das Router-Signal weiter, sonst ueberlebt er das Verlassen der Seite');
   // Der Engpass fuer verspaetete Antworten (#977) und die Pruefungen hinter den
   // awaits, die selbst zeichnen.

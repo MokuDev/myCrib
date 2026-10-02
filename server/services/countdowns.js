@@ -40,7 +40,7 @@ import { hasAnyOccurrence, nextOccurrenceAfter, seriesStartFor } from './recurre
 import { loadEventExceptions } from './calendar-events.js';
 import { householdDisabledModules } from './household-modules.js';
 import { eventProjectionSql, resolveProjectedEventRows } from './calendar-event-reader.js';
-import { visibilityWhere } from './visibility.js';
+import { icsSubscriptionVisibleWhere, visibilityWhere } from './visibility.js';
 import { householdTimeZone, utcToWall } from '../utils/timezone.js';
 // Dieselbe Rangfolge wie im Kalender und auf der Uebersicht - eine Regel, eine
 // Datei. Der Server importiert oefter aus `public/utils/` (date, folder-tree,
@@ -304,8 +304,9 @@ function eventCountdowns(d, userId, todayKey, graceDays) {
     LEFT JOIN external_calendars ec ON ec.id = e.calendar_ref_id
     LEFT JOIN ics_subscriptions isub ON isub.id = e.subscription_id
     WHERE e.countdown = 1
+      AND ${icsSubscriptionVisibleWhere('e')}
       AND ${visibilityWhere('e', 'event_assignments', 'event_id')}
-  `).all(userId, userId);
+  `).all(userId, userId, userId);
 
   const exceptionsByEvent = loadEventExceptions(
     d,

@@ -1,6 +1,6 @@
-# Contributing to Yuvomi
+# Contributing to myCrib
 
-Thanks for your interest in contributing! Yuvomi is a small, opinionated project with deliberate architectural constraints. This guide covers what you need to know before submitting code.
+Thanks for your interest in contributing! myCrib is a small, opinionated project with deliberate architectural constraints. This guide covers what you need to know before submitting code.
 
 Have a question before diving in? Start a thread in [Discussions](https://github.com/ulsklyc/yuvomi/discussions).
 
@@ -8,7 +8,7 @@ Have a question before diving in? Start a thread in [Discussions](https://github
 
 ## Hard Constraints
 
-**Yuvomi enforces a strict "no frameworks, no build tools" policy.** This is a permanent architectural decision, not a temporary limitation.
+**myCrib enforces a strict "no frameworks, no build tools" policy.** This is a permanent architectural decision, not a temporary limitation.
 
 Specifically - the following will **not** be merged:
 
@@ -31,8 +31,8 @@ Backend dependencies are evaluated case-by-case but must remain minimal. When in
 ### Getting started
 
 ```bash
-git clone https://github.com/ulsklyc/yuvomi.git
-cd yuvomi
+git clone https://github.com/MokuDev/myCrib.git
+cd myCrib
 npm install
 cp .env.example .env
 # Set SESSION_SECRET - and CLEAR the prefilled DB_ENCRYPTION_KEY line
@@ -160,9 +160,9 @@ Before starting work, check the [existing issues](https://github.com/ulsklyc/yuv
 
 ```bash
 # Fork on GitHub, then:
-git clone https://github.com/YOUR-USERNAME/yuvomi.git
-cd yuvomi
-git remote add upstream https://github.com/ulsklyc/yuvomi.git
+git clone https://github.com/YOUR-USERNAME/myCrib.git
+cd myCrib
+git remote add upstream https://github.com/MokuDev/myCrib.git
 git checkout -b feat/your-feature-name
 ```
 
@@ -324,7 +324,7 @@ unless it finds that the push was reviewed some other way - also when that push 
 acquires rights to this repository automatically, and none are needed, because the MIT
 licence already allows any fork at any time. What this paragraph adds is the name. If this
 repository goes a full year without a release, a commit or a reply from the maintainer,
-treat it as unmaintained, fork it, and carry the Yuvomi name with you. Your own installation
+treat it as unmaintained, fork it, and carry the myCrib name with you. Your own installation
 is not affected either way; the README's "Before you commit" says why. The release steps are
 written down in [docs/RELEASING.md](docs/RELEASING.md), so a fork can cut its first release
 without this repository's private tooling.
@@ -444,7 +444,7 @@ Otherwise: user-oriented language, and `-` rather than `—` or `–`. An entry 
 
 ## Release cadence
 
-Yuvomi releases on two tracks. The rule exists because of [#496](https://github.com/ulsklyc/yuvomi/discussions/496): between 13 August and 2 September 2026 there were 92 releases across 19 active days, and **75 of them changed the interface** - roughly three and a half times a day. The complaint was never "too many tags". It was that somebody learning the app watched it move while they were still learning it.
+myCrib releases on two tracks. The rule exists because of [#496](https://github.com/ulsklyc/yuvomi/discussions/496): between 13 August and 2 September 2026 there were 92 releases across 19 active days, and **75 of them changed the interface** - roughly three and a half times a day. The complaint was never "too many tags". It was that somebody learning the app watched it move while they were still learning it.
 
 So the limit is on the interface, not on the release count:
 
@@ -483,7 +483,7 @@ A `| tail` reports the status of `tail`, not of the run. That is not a hypotheti
 
 ## AI Assistance
 
-Asked for in [#687](https://github.com/ulsklyc/yuvomi/discussions/687). Yuvomi holds a household's calendar, health notes, documents and finances, so it is fair to ask who - or what - wrote the code that handles them.
+Asked for in [#687](https://github.com/ulsklyc/yuvomi/discussions/687). myCrib holds a household's calendar, health notes, documents and finances, so it is fair to ask who - or what - wrote the code that handles them.
 
 ### How this project is built
 
@@ -528,7 +528,7 @@ What is expected of the contribution itself does not change: you understand what
 
 Describe the **use case** before proposing a solution. There might be a simpler approach that fits the existing architecture.
 
-Features that conflict with the project's [hard constraints](#hard-constraints) or significantly expand scope will likely be declined. Some of those boundaries come up often enough to be written down rather than re-argued - read [what Yuvomi will not become](docs/SCOPE.md) before proposing an integration with an external service, and [the decisions made once](docs/DECISIONS.md) before proposing a change to how privacy or permissions work. When in doubt, ask first.
+Features that conflict with the project's [hard constraints](#hard-constraints) or significantly expand scope will likely be declined. Some of those boundaries come up often enough to be written down rather than re-argued - read [what myCrib will not become](docs/SCOPE.md) before proposing an integration with an external service, and [the decisions made once](docs/DECISIONS.md) before proposing a change to how privacy or permissions work. When in doubt, ask first.
 
 ### Security vulnerabilities
 

@@ -74,7 +74,8 @@
             "assignees": "Apenas atribuídos",
             "private": "Apenas eu",
             "hint": "Controla quem pode ver esta entrada no Yuvomi.",
-            "assigneesNobodyHint": "Sem ninguém atribuído, só você vê esta entrada."
+            "assigneesNobodyHint": "Sem ninguém atribuído, só você vê esta entrada.",
+            "privateAssignedHint": "Só quem criou esta entrada a vê - as outras pessoas atribuídas não. Escolha \"Apenas atribuídos\" se elas devem vê-la."
         },
         "toShoppingListNamed": "Adicionar {{title}} à lista de compras",
         "emailInUse": "Este endereço de e-mail já está em uso.",
@@ -2799,6 +2800,9 @@
         "timezoneAuto": "Automático ({{zone}})",
         "timezoneAdminOnly": "Só os administradores podem alterar o fuso horário.",
         "timezoneSaved": "Fuso horário salvo.",
+        "timezoneMismatch": "Seu navegador está em {{browser}}, a casa calcula em {{household}}.",
+        "timezoneMismatchAdopt": "Usar o do navegador",
+        "timezoneMismatchKeep": "Deixar assim",
         "twoFactorTitle": "Autenticação de dois fatores",
         "twoFactorHint": "Um código de um aplicativo de autenticação além da senha. Recomendado se o Yuvomi estiver acessível a partir da internet.",
         "twoFactorSetUp": "Configurar",

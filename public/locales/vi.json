@@ -75,7 +75,8 @@
             "assignees": "Chỉ người được giao",
             "private": "Chỉ mình tôi",
             "hint": "Kiểm soát ai có thể xem mục này trong Yuvomi.",
-            "assigneesNobodyHint": "Nếu không giao cho ai, chỉ bạn thấy mục này."
+            "assigneesNobodyHint": "Nếu không giao cho ai, chỉ bạn thấy mục này.",
+            "privateAssignedHint": "Chỉ người tạo mục này mới thấy nó - những người được giao khác thì không. Chọn \"Chỉ người được giao\" nếu muốn họ thấy."
         },
         "toShoppingListNamed": "Thêm {{title}} vào danh sách mua sắm",
         "emailInUse": "Địa chỉ email này đã thuộc về một tài khoản khác."
@@ -2800,6 +2801,9 @@
         "timezoneAuto": "Tự động ({{zone}})",
         "timezoneAdminOnly": "Chỉ quản trị viên mới có thể thay đổi múi giờ.",
         "timezoneSaved": "Đã lưu múi giờ.",
+        "timezoneMismatch": "Trình duyệt của bạn ở {{browser}}, gia đình tính theo {{household}}.",
+        "timezoneMismatchAdopt": "Dùng múi giờ trình duyệt",
+        "timezoneMismatchKeep": "Giữ nguyên",
         "twoFactorTitle": "Xác thực hai bước",
         "twoFactorHint": "Ngoài mật khẩu còn có mã từ ứng dụng xác thực. Nên bật nếu Yuvomi truy cập được từ internet.",
         "twoFactorSetUp": "Thiết lập",

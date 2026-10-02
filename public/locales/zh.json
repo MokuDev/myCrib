@@ -75,7 +75,8 @@
             "assignees": "仅限被分配者",
             "private": "仅自己",
             "hint": "控制谁可以在 Yuvomi 中看到此条目。",
-            "assigneesNobodyHint": "未指定任何人时，只有你能看到此条目。"
+            "assigneesNobodyHint": "未指定任何人时，只有你能看到此条目。",
+            "privateAssignedHint": "只有创建者能看到此条目，其他被分配的人看不到。如果希望他们看到，请选择“仅限被分配者”。"
         },
         "toShoppingListNamed": "将{{title}}加入购物清单",
         "emailInUse": "此电子邮件地址已属于另一个账户。"
@@ -2800,6 +2801,9 @@
         "timezoneAuto": "自动 ({{zone}})",
         "timezoneAdminOnly": "只有管理员可以更改时区。",
         "timezoneSaved": "已保存时区。",
+        "timezoneMismatch": "你的浏览器位于 {{browser}}，家庭按 {{household}} 计算。",
+        "timezoneMismatchAdopt": "使用浏览器时区",
+        "timezoneMismatchKeep": "保持不变",
         "twoFactorTitle": "两步验证",
         "twoFactorHint": "除密码外再加一个验证器应用中的验证码。如果 Yuvomi 可从互联网访问，建议启用。",
         "twoFactorSetUp": "设置",

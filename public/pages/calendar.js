@@ -7119,20 +7119,32 @@ function applyDefaultSyncTarget(selectElement) {
 // Event-Modal (Erstellen / Bearbeiten)
 // --------------------------------------------------------
 
-// Blendet einen Hinweis ein, wenn „Nur Zugewiesene" gewählt ist, aber niemand
-// zugewiesen wurde - dann sieht faktisch nur der Ersteller den Termin (#474 Guard).
-function wireVisibilityWarning(panel, selectSel, msName, warnSel) {
+// Zwei Hinweise an der Sichtbarkeit, beide warnen nur und aendern nichts:
+// - „Nur Zugewiesene" ohne Person: dann sieht faktisch nur der Ersteller den
+//   Termin (#474 Guard).
+// - „Nur ich" mit mindestens einer anderen Person als dem Ersteller: die Zugewiesenen sehen den Termin
+//   nicht. Die Kombination bleibt erlaubt und die
+//   Zuweisung stehen - Bestandsdaten und API-Clients fuehren sie.
+function wireVisibilityWarning(panel, selectSel, msName, warnSel, privateWarnSel, creatorId = null) {
   const select = panel.querySelector(selectSel);
   const warn   = panel.querySelector(warnSel);
   if (!select || !warn) return;
+  const privateWarn = privateWarnSel ? panel.querySelector(privateWarnSel) : null;
   const ms = panel.querySelector(`.user-ms[data-ms-name="${msName}"]`);
   const update = () => {
-    const count = getSelectedUserIds(panel, msName).length;
-    warn.hidden = !(select.value === 'assignees' && count === 0);
+    const ids = getSelectedUserIds(panel, msName).map(Number);
+    warn.hidden = !(select.value === 'assignees' && ids.length === 0);
+    // Wer den Eintrag angelegt hat, sieht ihn auch als „Nur ich": gezaehlt
+    // werden nur die anderen. Massgeblich ist `created_by` des Eintrags, nicht
+    // wer ihn gerade bearbeitet; ein neuer gehoert dem angemeldeten Konto.
+    const others = creatorId == null ? ids : ids.filter((id) => id !== Number(creatorId));
+    if (privateWarn) privateWarn.hidden = !(select.value === 'private' && others.length > 0);
     // Die Sichtbarkeit steht unter „Weitere Einstellungen". Wer oben die
-    // letzte Person abwaehlt, bekommt die Warnung sonst in einem geschlossenen
-    // <details> - aufklappen, nie zuklappen (wie die Hinweise der Zielwahl).
-    if (!warn.hidden) warn.closest('details')?.setAttribute('open', '');
+    // letzte Person abwaehlt oder die erste zuweist, bekommt die Warnung sonst
+    // in einem geschlossenen <details> - aufklappen, nie zuklappen (wie die
+    // Hinweise der Zielwahl).
+    const shown = [warn, privateWarn].find((el) => el && !el.hidden);
+    shown?.closest('details')?.setAttribute('open', '');
   };
   select.addEventListener('change', update);
   ms?.addEventListener('click', () => setTimeout(update, 0));
@@ -7193,7 +7205,8 @@ function wireEventForm(panel, { mode, event = null, reminder = null }) {
     ),
   });
   bindUserMultiSelect(panel, 'cal_assigned');
-  wireVisibilityWarning(panel, '#modal-visibility', 'cal_assigned', '#modal-visibility-warning');
+  wireVisibilityWarning(panel, '#modal-visibility', 'cal_assigned', '#modal-visibility-warning', '#modal-visibility-private-warning',
+    event?.created_by ?? state.currentUserId);
 
   // Der Farbwaehler war bis v2.35.0 ausgegraut, sobald jemand zugewiesen war,
   // mit dem Hinweis, die Farbe der Person schlage sie ohnehin. Seit #815 steht
@@ -7763,6 +7776,7 @@ function buildEventModalContent({ mode, event, date, reminder = null, time = nul
       </select>
       <p class="form-hint">${t('common.visibility.hint')}</p>
       <p class="form-hint field-hint--warn" id="modal-visibility-warning" role="status" hidden><i data-lucide="alert-triangle" aria-hidden="true"></i><span>${t('common.visibility.assigneesNobodyHint')}</span></p>
+      <p class="form-hint field-hint--warn" id="modal-visibility-private-warning" role="status" hidden><i data-lucide="alert-triangle" aria-hidden="true"></i><span>${t('common.visibility.privateAssignedHint')}</span></p>
     </div>
 
     <!-- #647: der Schalter, den @Kyrodan beschrieben hat - „einen Termin als

@@ -75,7 +75,8 @@
             "assignees": "Yalnızca atananlar",
             "private": "Yalnızca ben",
             "hint": "Bu kaydı Yuvomi’de kimin görebileceğini belirler.",
-            "assigneesNobodyHint": "Kimse atanmazsa bu kaydı yalnızca sen görürsün."
+            "assigneesNobodyHint": "Kimse atanmazsa bu kaydı yalnızca sen görürsün.",
+            "privateAssignedHint": "Bu kaydı yalnızca oluşturan kişi görür - atanan diğer kişiler görmez. Görmeleri gerekiyorsa \"Yalnızca atananlar\" seçeneğini seç."
         },
         "toShoppingListNamed": "{{title}} yemeğini alışveriş listesine ekle",
         "emailInUse": "Bu e-posta adresi zaten başka bir hesaba ait."
@@ -2800,6 +2801,9 @@
         "timezoneAuto": "Otomatik ({{zone}})",
         "timezoneAdminOnly": "Saat dilimini yalnızca yöneticiler değiştirebilir.",
         "timezoneSaved": "Saat dilimi kaydedildi.",
+        "timezoneMismatch": "Tarayıcınız {{browser}} diliminde, hane {{household}} ile hesaplıyor.",
+        "timezoneMismatchAdopt": "Tarayıcınınkini kullan",
+        "timezoneMismatchKeep": "Böyle kalsın",
         "twoFactorTitle": "İki adımlı doğrulama",
         "twoFactorHint": "Parolanın yanı sıra kimlik doğrulama uygulamasından bir kod. Yuvomi internetten erişilebiliyorsa önerilir.",
         "twoFactorSetUp": "Kur",

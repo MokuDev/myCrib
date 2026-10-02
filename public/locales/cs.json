@@ -76,7 +76,8 @@
             "assignees": "Pouze přiřazení",
             "private": "Pouze já",
             "hint": "Určuje, kdo vidí tuto položku v Yuvomi.",
-            "assigneesNobodyHint": "Bez přiřazení vidíš tuto položku jen ty."
+            "assigneesNobodyHint": "Bez přiřazení vidíš tuto položku jen ty.",
+            "privateAssignedHint": "Tuto položku vidí jen ten, kdo ji vytvořil - ostatní přiřazené osoby ne. Zvol „Pouze přiřazení“, pokud ji mají vidět."
         },
         "toShoppingListNamed": "Přidat {{title}} na nákupní seznam",
         "emailInUse": "Tato e-mailová adresa již patří jinému účtu."
@@ -2892,6 +2893,9 @@
         "timezoneAuto": "Automaticky ({{zone}})",
         "timezoneAdminOnly": "Časové pásmo mohou měnit pouze správci.",
         "timezoneSaved": "Časové pásmo uloženo.",
+        "timezoneMismatch": "Váš prohlížeč je v pásmu {{browser}}, domácnost počítá v pásmu {{household}}.",
+        "timezoneMismatchAdopt": "Převzít z prohlížeče",
+        "timezoneMismatchKeep": "Ponechat",
         "twoFactorTitle": "Dvoufázové ověření",
         "twoFactorHint": "Kromě hesla i kód z autentizační aplikace. Doporučeno, pokud je Yuvomi dostupné z internetu.",
         "twoFactorSetUp": "Nastavit",

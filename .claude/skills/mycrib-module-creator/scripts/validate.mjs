@@ -67,6 +67,11 @@ const files = [];
 for (const f of files) {
   const rel = f.slice(dir.length + 1);
   if (/\.(js|mjs|css|html)$/.test(f) === false) continue;
+  // sidecar/ ist Backend-Code: Hostnamen/Ursprungs-Beispiele sind dort legitim, die Browser-Regeln gelten nicht.
+  if (rel.startsWith('sidecar/')) {
+    if (/\beval\s*\(|new Function\s*\(/.test(readFileSync(f, 'utf8'))) err(`${rel}: eval/new Function forbidden`);
+    continue;
+  }
   const s = readFileSync(f, 'utf8');
   if (/\.js$/.test(f)) {
     if (/\binnerHTML\b/.test(s)) err(`${rel}: innerHTML is forbidden (use replaceChildren + insertAdjacentHTML)`);

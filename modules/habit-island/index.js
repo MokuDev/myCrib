@@ -21,6 +21,9 @@ export async function render(container, context) {
   let state = null;
   let body = null;
 
+  let toastTimer = 0;
+  signal.addEventListener('abort', () => clearTimeout(toastTimer), { once: true });
+
   const ctx = {
     get state() { return state; },
     signal,
@@ -31,7 +34,8 @@ export async function render(container, context) {
       const live = container.querySelector('[data-live]');
       if (!live) return;
       live.textContent = msg; live.classList.add('is-on');
-      setTimeout(() => { if (!signal.aborted) live.classList.remove('is-on'); }, 2500);
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => live.classList.remove('is-on'), 2500);
     },
     fail(err) { showError(err); },
   };
@@ -66,11 +70,16 @@ export async function render(container, context) {
     next.id = `hi-panel-${tab}`;
     next.setAttribute('role', 'tabpanel');
     body.replaceChildren(next);
+    next.setAttribute('aria-busy', 'true');
+    next.insertAdjacentHTML('beforeend', `<p class="hi-muted hi-loading" role="status">${esc(L('loading'))}</p>`);
     const renderer = TABS.find(([id]) => id === tab)[2];
-    Promise.resolve(renderer(next, ctx)).catch((err) => { if (err?.name !== 'AbortError' && !signal.aborted) showError(err); });
+    Promise.resolve(renderer(next, ctx)).then(() => next.removeAttribute('aria-busy')).catch((err) => { if (err?.name !== 'AbortError' && !signal.aborted) showError(err); });
   }
 
   async function start() {
+    container.replaceChildren();
+    container.insertAdjacentHTML('beforeend', renderPageHeader({ title: renderPageTitle(L('title')) })
+      + renderPageBody({ content: `<p class="hi-muted hi-loading" role="status">${esc(L('loading'))}</p>` }));
     await loadState();
     if (!state || signal.aborted) return;
     container.replaceChildren();

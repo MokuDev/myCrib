@@ -109,5 +109,6 @@
   "items.rabbit": "Rabbit",
   "items.duck": "Duck",
   "items.fox": "Fox",
-  "items.deer": "Deer"
+  "items.deer": "Deer",
+  "loading": "Loading …"
 }

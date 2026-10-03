@@ -1,6 +1,10 @@
 # Dependencies
 node_modules/
 
+# External/customized modules
+modules/*
+!modules/.gitkeep
+
 # Environment variables (NEVER commit)
 .env
 
@@ -28,11 +32,68 @@ data/
 # Personal local Docker overrides (container name/port remaps for parallel worktrees)
 docker-compose.override.yml
 
+# Local design references (mockups, spec drafts) - not for contributors
+mockups/
+
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+
+# AI dev tooling — local only, never published (Claude Code, Codex, agent skills)
+.claude/
+.codex/
+.agents/
+.github/skills/
+# Hook descriptor for the local Impeccable skill. It points into .github/skills/,
+# which is ignored above, so published it would only be a broken path for cloners.
+.github/hooks/
+AGENTS.md
+CLAUDE.md
+PRODUCT.md
+# DESIGN.md steht bewusst NICHT hier: 42 Kommentare in 30 versionierten Dateien
+# verweisen darauf als verbindliche Quelle ("DESIGN.md §6", "Canonical Page
+# Head"). Ignoriert war es ein Paragraphenverweis auf ein Dokument, das niemand
+# ausser dem Autor hat. Es beschreibt das Produkt, nicht die Arbeitsweise mit
+# einem Werkzeug - im Unterschied zu den Eintraegen darueber.
+
+# graphify knowledge graph — the generated artifact plus the tooling that only
+# ever runs against it. Regenerated locally, never published.
+graphify-out/
+.graphifyignore
+scripts/graphify-labels.json
+scripts/graphify-labels.mjs
+
+# Git worktrees
+.worktrees/
+
+# Local tooling (session state, design context — not for contributors)
+.superpowers/
+.interface-design/
+.impeccable/
+
+# Claude Code work documents (internal plans/specs, not for contributors)
+docs/superpowers/
+docs/archive/superpowers/
+docs/plans/
+docs/integrations/
+docs/design/
+docs/health-module-plan.md
+REBRANDING.md
+
+# Audit reports (generated per-session, not for version control)
+docs/audit-report-*.md
+docs/claude-md-audit.md
+docs/repo-audit-*.md
+docs/legal-audit/
+docs/ux-audit/
+SECURITY_RESEARCH.md
+
+# Installer modernization working docs (internal audit/plan/prompts, not for contributors)
+docs/installer-audit.md
+docs/installer-modernization-plan.md
+docs/installer-phase-prompts.md
 
 # Text files with tokens/keys (safety net)
 *.txt

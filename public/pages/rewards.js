@@ -9,6 +9,7 @@
 import { api } from '/api.js';
 import { t, formatDate, getLocale, getNumberFormat } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import { openModal, closeModal, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { createPageFab, setPageFabAction } from '/utils/fab.js';
@@ -143,10 +144,6 @@ function pointsLabel(n) {
   return `${fmtPoints(n)} ${t('rewards.pointsUnit')}`;
 }
 
-function initials(name = '') {
-  return name.split(' ').filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '?';
-}
-
 function avatar(member, size = 40) {
   const dim = `width:${size}px;height:${size}px`;
   if (member?.avatar_data || member?.user_avatar) {
@@ -159,7 +156,7 @@ function avatar(member, size = 40) {
   // in dashboard.js, calendar.js, notes.js und user-multi-select.js.
   const color = member?.avatar_color || member?.user_color || AVATAR_FALLBACK_COLOR;
   const name = member?.display_name || member?.user_name || '';
-  return `<span class="rw-avatar rw-avatar--initials" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}">${esc(initials(name))}</span>`;
+  return `<span class="rw-avatar rw-avatar--initials" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}">${esc(initials(name, '?'))}</span>`;
 }
 
 /**
@@ -461,8 +458,14 @@ function renderPendingPanel() {
    * sie nicht blind treffen. Der Satz steht nur bei wem er zutrifft und nur
    * fuer die, die entscheiden; das Kind liest denselben Stand in seiner
    * eigenen Zeile darunter. */
+  /* DER SALDO KOMMT MIT DER ANFRAGE (#1623). `overview.balances` fuehrt nur,
+   * wer gerade teilnimmt; wer mit offener Anfrage ausgetragen wurde, fiel dort
+   * heraus, `balanceOf()` sagte 0 und der Hinweis fehlte genau dann. Der
+   * Rueckgriff bleibt fuer eine Antwort ohne das Feld (aelterer Server hinter
+   * einer frischen Oberflaeche). */
   const belowZero = (r) => {
-    const bal = balanceOf(r.user_id);
+    const bal = r.user_balance != null && Number.isFinite(Number(r.user_balance))
+      ? Number(r.user_balance) : balanceOf(r.user_id);
     return isAdmin() && bal < 0
       ? `<p class="rw-pending__meta">${esc(t('rewards.pendingBalanceBelowZero', { points: fmtPoints(bal) }))}</p>`
       : '';
@@ -510,8 +513,14 @@ function renderOverview(el) {
     const action = isAdmin() && !readOnly()
       ? { label: t('rewards.manageParticipants'), icon: 'user-plus', className: 'rw-manage-participants' }
       : null;
+    /* DAS ANFRAGEN-PANEL HAENGT NICHT AN DEN PUNKTESTAENDEN (#1623). Wird die
+     * letzte Teilnehmende mit offener Anfrage ausgetragen, ist `balances` leer -
+     * und die Anfrage trotzdem da. Ohne das Panel hier konnte niemand sie
+     * sehen oder entscheiden. Es steht VOR dem Leerzustand: das Dringende
+     * zuerst, wie in der gefuellten Uebersicht. Nur-lesen regelt das Panel
+     * selbst (Liste bleibt, Knoepfe gehen). */
     el.insertAdjacentHTML('beforeend',
-      `<div class="rewards-content__inner">${emptyState('trophy', t('rewards.emptyOverviewTitle'), isAdmin() ? t('rewards.emptyOverviewAdmin') : t('rewards.emptyOverviewMember'), action)}</div>`);
+      `<div class="rewards-content__inner">${renderPendingPanel()}${emptyState('trophy', t('rewards.emptyOverviewTitle'), isAdmin() ? t('rewards.emptyOverviewAdmin') : t('rewards.emptyOverviewMember'), action)}</div>`);
     wireOverview(el);
     icons(el);
     return;

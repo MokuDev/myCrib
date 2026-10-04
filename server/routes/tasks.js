@@ -347,7 +347,7 @@ function mayEditTaskDefinition(task, req) {
   return lock.created_by === (req.authUserId || req.session?.userId);
 }
 
-const LOCKED_ERROR = { error: 'This task is locked; only its creator and administrators can change it.', code: 403 };
+const LOCKED_ERROR = { error: 'This task is locked; only its creator and administrators can change it.', code: 403, reason: 'task_locked' };
 
 /**
  * Aufgaben-IDs, deren Definition diese Person anfassen darf - fuer die
@@ -474,7 +474,7 @@ router.get('/sync-targets', (req, res) => {
     // Server-URLs" - `listUrl` ist eine. Wer nicht schreiben darf, sieht den
     // Dialog nie; ein Wandtablett mit `tasks:read` hatte die Liste trotzdem.
     if (!mayWriteModule(req, 'tasks')) {
-      return res.status(403).json({ error: 'Write access to tasks is required.', code: 403 });
+      return res.status(403).json({ error: 'Write access to tasks is required.', code: 403, reason: 'cross_module_access' });
     }
     const caldav = db.get().prepare(`
       SELECT s.account_id AS accountId, a.name AS accountName,
@@ -1079,9 +1079,12 @@ router.post('/', (req, res) => {
 
     // Tiefe begrenzen: Subtasks dürfen keine eigenen Subtasks haben (max. 2 Ebenen)
     if (parent_task_id) {
-      const parent = db.get().prepare('SELECT id, parent_task_id, locked, created_by FROM tasks WHERE id = ?')
+      const parent = db.get().prepare('SELECT id, parent_task_id, locked, created_by, visibility FROM tasks WHERE id = ?')
         .get(parent_task_id);
-      if (!parent) return res.status(404).json({ error: 'Parent task not found.', code: 404 });
+      // Unsichtbar heisst hier dasselbe wie nicht vorhanden: sonst verriete 201
+      // gegen 404 die Kennung, und der Punkt stuende in einer fremden Checkliste.
+      if (!parent || !mayAccessTask(parent, req.authUserId || req.session.userId))
+        return res.status(404).json({ error: 'Parent task not found.', code: 404 });
       if (parent.parent_task_id)
         return res.status(400).json({ error: 'Maximal 2 Verschachtelungsebenen erlaubt.', code: 400 });
       // Einen Punkt an eine gesperrte Checkliste zu haengen aendert, was die
@@ -1734,6 +1737,16 @@ router.patch('/:id/status', (req, res) => {
     const prev = db.get().prepare('SELECT * FROM tasks WHERE id = ?').get(req.params.id);
     if (!prev)
       return res.status(404).json({ error: 'Task not found.', code: 404 });
+    // 404 statt 403: ob es die Aufgabe gibt, ist selbst schon eine Auskunft.
+    // Dieser Weg hat die Sichtbarkeit fuer Mitglieder nie gefragt - nur der
+    // Display-Zweig darunter tat es. Eine geratene id genuegte, um eine fremde
+    // private Aufgabe abzuhaken, zurueckzunehmen oder abzulegen, mit allem, was
+    // am Uebergang haengt: Punkte, Verlauf, Folgeinstanz. Die Pruefung steht
+    // VOR dem Display-Block und vor der Ablage-Abkuerzung, weil beide selbst
+    // antworten; dieselbe Regel wie PUT, /archive, /check und DELETE.
+    if (!mayAccessTask(prev, req.authUserId || req.session.userId)) {
+      return res.status(404).json({ error: 'Task not found.', code: 404 });
+    }
 
     // EIN WANDTABLETT HAKT AB, UND ZWAR NUR DAS (#1209).
     //
@@ -1781,11 +1794,12 @@ router.patch('/:id/status', (req, res) => {
         return res.status(403).json({
           error: 'A paired display can only tick a task off.',
           code: 403,
+          reason: 'display_action',
         });
       }
       const actor = displayActingPerson(req, req.body.done_by_user_id, 'tasks', { db: db.get() });
       if (!actor.ok) {
-        return res.status(actor.status).json({ error: actor.error, code: actor.status });
+        return res.status(actor.status).json({ error: actor.error, code: actor.status, ...(actor.reason ? { reason: actor.reason } : {}) });
       }
       displayDoneBy = actor.userId;
     }
@@ -2109,7 +2123,7 @@ router.get('/:id/documents', (req, res) => {
     // gefragt, damit eine unsichtbare Aufgabe weiter 404 bleibt.
     const viewer = documentViewer(req);
     if (!viewer.readsDocuments) {
-      return res.status(403).json({ error: 'Reading linked documents requires access to documents.', code: 403 });
+      return res.status(403).json({ error: 'Reading linked documents requires access to documents.', code: 403, reason: 'cross_module_access' });
     }
     res.json({ data: loadTaskDocuments(task.id, viewer) });
   } catch (err) {

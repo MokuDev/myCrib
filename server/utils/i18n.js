@@ -15,14 +15,17 @@
  *
  * Die Übersetzungen kommen aus denselben `public/locales/*.json`, die auch der
  * Client lädt - sie werden als Daten gelesen (readFileSync), nicht importiert.
- * Die Schichtgrenze aus `test/test-layer-boundary.js` bleibt damit gewahrt: es
- * gibt keinen Modul-Import über `public/` hinweg, und die Übersetzungen können
- * nicht auseinanderlaufen.
+ * Die Schichtgrenze aus `test/test-layer-boundary.js` bleibt damit gewahrt, und
+ * die Übersetzungen können nicht auseinanderlaufen. Der eine Modul-Import über
+ * `public/` hinweg ist der Partikel-Auflöser fürs Koreanische: eine reine
+ * Funktion, die dort in der Liste der geteilten Module steht, damit die Regel
+ * nicht zweimal formuliert ist.
  */
 
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolveKoreanParticles } from '../../public/utils/korean-particles.js';
 
 const LOCALES_DIR = fileURLToPath(new URL('../../public/locales/', import.meta.url));
 
@@ -132,6 +135,38 @@ export function isSupportedLocale(locale) {
 }
 
 /**
+ * Die spezifischste unterstuetzte Locale eines frei eingegebenen Sprach-Tags,
+ * oder null. Fuer Werte, die von aussen kommen (`?lang=` der API): Gross- und
+ * Kleinschreibung und `_` statt `-` werden in BCP-47-Form gebracht, dann faellt
+ * wie bei regionLocale() Subtag fuer Subtag weg - `pt_br` -> `pt-BR`,
+ * `pt-PT` -> `pt`, `DE-de` -> `de`.
+ *
+ * #1523: Vorher hielt jede Stelle, die so einen Wert annimmt, ihre eigene Liste
+ * (Budget-Kategorien, die OpenAPI-Beschreibung), und keine wuchs mit, als
+ * Sprachen dazukamen. Diese Funktion liest dieselben Dateien wie
+ * getSupportedLocales() und hat keine Liste, die zurueckbleiben koennte.
+ */
+export function supportedLocaleFor(tag) {
+  if (typeof tag !== 'string') return null;
+  const teile = tag.trim().replace(/_/g, '-').split('-');
+  // Sprache aus Buchstaben, danach Schrift oder Region - auch numerisch (`es-419`).
+  if (!/^[A-Za-z]{2,8}$/.test(teile[0]) || teile.slice(1).some((teil) => !/^[A-Za-z0-9]{1,8}$/.test(teil))) return null;
+  teile[0] = teile[0].toLowerCase();
+  for (let i = 1; i < teile.length; i++) {
+    const teil = teile[i];
+    teile[i] = teil.length === 4
+      ? teil[0].toUpperCase() + teil.slice(1).toLowerCase()
+      : teil.toUpperCase();
+  }
+  while (teile.length) {
+    const kandidat = teile.join('-');
+    if (isSupportedLocale(kandidat)) return kandidat;
+    teile.pop();
+  }
+  return null;
+}
+
+/**
  * Übersetzungsobjekt einer Sprache, gecacht. Liefert bei fehlender oder
  * kaputter Datei `null` statt zu werfen - eine Übersetzung darf nie der Grund
  * sein, warum ein Route-Handler 500 wirft.
@@ -178,12 +213,13 @@ export function translate(locale, key, params = {}) {
   const chain = [isSupportedLocale(locale) ? locale : DEFAULT_LOCALE, DEFAULT_LOCALE, REFERENCE_LOCALE];
 
   let str;
+  let strLocale;
   for (const candidate of chain) {
     const hit = resolveKey(loadLocale(candidate), key);
     // Ein Key, der auf einen Teilbaum zeigt, ist ein Aufruffehler und kein Text.
     // Ohne diese Prüfung würde das replaceAll unten mit einem TypeError brechen -
     // ausgerechnet in einer Funktion, die nie werfen soll.
-    if (typeof hit === 'string') { str = hit; break; }
+    if (typeof hit === 'string') { str = hit; strLocale = candidate; break; }
   }
   if (str === undefined) return key;
 
@@ -197,9 +233,17 @@ export function translate(locale, key, params = {}) {
   //     date-Durchgang in das Datum.
   // Unbekannte Platzhalter bleiben stehen, statt zu verschwinden - so ist ein
   // fehlender Parameter im Ergebnis sichtbar und nicht still weggekürzt.
-  return str.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
+  const fill = (text) => text.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
     Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : placeholder
   ));
+  // Koreanisch schreibt hinter einen Platzhalter beide Formen der Partikel
+  // (`{{name}}이(가)`), weil die richtige am eingesetzten Wort hängt (#1607).
+  // Dieselbe Regel wie in t() (public/i18n.js), aus derselben Datei: aufgelöst
+  // wird an der Vorlage, der eingesetzte Wert bleibt, wie er ist.
+  // Es entscheidet die Sprache des GELIEFERTEN Texts, nicht die angefragte:
+  // fällt ein koreanischer Key auf en oder de zurück, ist der Text kein
+  // Koreanisch. Jede andere Sprache zahlt genau diesen einen Vergleich.
+  return strLocale === 'ko' ? resolveKoreanParticles(str, fill) : fill(str);
 }
 
 const VALID_DATE_FORMATS = ['mdy', 'dmy', 'ymd', 'mdy_dot', 'dmy_dot', 'dmy_slash', 'ymd_dot', 'ymd_slash'];

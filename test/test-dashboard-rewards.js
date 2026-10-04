@@ -415,3 +415,244 @@ test('Belohnungen mobil: Punktestand als Zeile mit Trailing-Kapsel, Anfrage mit 
   assert.match(mobil('.rw-pending'), /grid-template-columns:\s*auto\s+minmax\(0,\s*1fr\)/, 'Avatar und Titel in einer Zeile');
   assert.match(mobil('.rw-pending__actions'), /grid-column:\s*2/, 'die Knoepfe stehen unter dem Titel, nicht unter dem Avatar');
 });
+
+// --------------------------------------------------------
+// Negativer Punktestand (#1607)
+//
+// Seit das Wiederoeffnen einer Aufgabe gegenbucht statt die Gutschrift zu
+// loeschen, ist ein Saldo unter null ein gewoehnlicher Zustand: die Punkte der
+// wieder geoeffneten Aufgabe stecken schon in einer Praemie. Drei Dinge duerfen
+// dann nicht passieren - kein NaN, kein Balken unter null, kein Minus ohne
+// einen Satz, der es erklaert.
+// --------------------------------------------------------
+
+const lesbar = (html) => html.replace(/&quot;/g, '"').replace(/&amp;/g, '&');
+
+test('Server: eine zurueckgenommene Gutschrift steht nicht mehr unter "zuletzt verdient" (#1607)', async () => {
+  // Gebucht wird ueber den Dienst: die Gegenbuchung zeigt auf ihre Gutschrift
+  // (`reverses_id`), und eine von Hand eingefuegte Zeile truege den Bezug nicht.
+  const { syncTaskRewards } = await import('../server/services/rewards.js');
+  const kid = user('rw-mia', 'Mia', 'member');
+  d.prepare('INSERT INTO reward_participants (user_id, enabled) VALUES (?, 1)').run(kid);
+  const task = d.prepare("INSERT INTO tasks (title, status, created_by, points) VALUES ('Muell', 'open', ?, 60)").run(PARENT).lastInsertRowid;
+  d.prepare('INSERT INTO task_assignments (task_id, user_id) VALUES (?, ?)').run(task, kid);
+  syncTaskRewards(d, task, 'open', 'done', PARENT, null, { now: new Date('2026-09-22T08:00:00Z') });
+  d.prepare("INSERT INTO reward_ledger (user_id, delta, type, reason, created_at) VALUES (?, -50, 'redeem', 'Eis', '2026-09-22T09:00:00Z')").run(kid);
+  syncTaskRewards(d, task, 'done', 'open', PARENT);
+
+  const zurueckgenommen = (await dashboardAs(kid, 'member')).rewards;
+  assert.equal(zurueckgenommen.standings[0].balance, -50, 'der Saldo geht unveraendert als Zahl hinaus');
+  assert.deepEqual(zurueckgenommen.recent, [], 'die Aufgabe ist wieder offen - verdient ist hier nichts');
+
+  // Erneut erledigt: die NEUE Gutschrift gilt, die alte bleibt zurueckgenommen.
+  syncTaskRewards(d, task, 'open', 'done', PARENT, null, { now: new Date('2026-09-22T11:00:00Z') });
+  const neu = (await dashboardAs(kid, 'member')).rewards;
+  assert.deepEqual(neu.recent.map((r) => r.created_at), ['2026-09-22T11:00:00Z']);
+
+  d.prepare('DELETE FROM reward_participants WHERE user_id = ?').run(kid);
+});
+
+test('Server: auch nach dem Loeschen der Aufgabe bleibt die zurueckgenommene Gutschrift draussen (#1607)', async () => {
+  // Das Loeschen setzt task_id an BEIDEN Zeilen auf NULL (ON DELETE SET NULL).
+  // Ein Bezug ueber die Aufgabe traefe danach nie mehr, und die zurueckgenommene
+  // Gutschrift stuende wieder unter "zuletzt verdient". Gebucht wird hier ueber
+  // den Dienst, damit die Zeilen so entstehen wie im Betrieb.
+  const { syncTaskRewards } = await import('../server/services/rewards.js');
+  const kid = user('rw-noa', 'Noa', 'member');
+  d.prepare('INSERT INTO reward_participants (user_id, enabled) VALUES (?, 1)').run(kid);
+  const task = d.prepare("INSERT INTO tasks (title, status, created_by, points) VALUES ('Flur', 'open', ?, 15)").run(PARENT).lastInsertRowid;
+  d.prepare('INSERT INTO task_assignments (task_id, user_id) VALUES (?, ?)').run(task, kid);
+  syncTaskRewards(d, task, 'open', 'done', PARENT);
+  syncTaskRewards(d, task, 'done', 'open', PARENT);
+  d.prepare('DELETE FROM tasks WHERE id = ?').run(task);
+  assert.deepEqual(
+    d.prepare('SELECT delta, task_id FROM reward_ledger WHERE user_id = ? ORDER BY id').all(kid),
+    [{ delta: 15, task_id: null }, { delta: -15, task_id: null }],
+    'Vorbedingung: beide Zeilen haben die Aufgabe verloren',
+  );
+
+  assert.deepEqual((await dashboardAs(kid, 'member')).rewards.recent, []);
+  d.prepare('DELETE FROM reward_participants WHERE user_id = ?').run(kid);
+});
+
+test('Widget: ein Minus traegt seinen Satz, der Balken steht bei null (#1607)', () => {
+  for (const [view, size] of [['self', '1x2'], ['approver', '2x2'], ['family', '2x2']]) {
+    const html = renderRewardsWidget({
+      view, me: 7, standings: [emma(-50)], participantCount: 1, pending: 0, catalog: [KINO], recent: [],
+    }, size);
+    assert.doesNotMatch(html, /NaN|undefined/, `${view}: keine kaputte Zahl`);
+    assert.equal(progressValue(html), 0, `${view}: der Balken steht bei null`);
+    assert.match(html, /--rewards-progress:0[;"]/, `${view}: keine negative Breite`);
+    assert.match(html, /aria-valuetext="rewards\.balanceBelowZero"/, `${view}: die Ansage erklaert das Minus`);
+    assert.doesNotMatch(html, /remainingToReward/, `${view}: "noch 110 bis Kinoabend" erklaerte die Zahl nicht`);
+  }
+  // Auch ohne eine einzige Praemie: der Satz haengt nicht am Katalog.
+  const ohne = renderRewardsWidget({ view: 'self', me: 7, standings: [emma(-50)], catalog: [], recent: [] }, '1x2');
+  assert.match(ohne, /rewards\.balanceBelowZero/);
+  assert.doesNotMatch(ohne, /rewards\.noRewardsYet/);
+});
+
+test('Belohnungsseite: Punktestandzeile, Anfrage und Verlauf erklaeren das Minus (#1607)', () => {
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, catalog: s.catalog, redemptions: s.redemptions, prevBalances: s.prevBalances };
+  const mia = { id: 3, display_name: 'Mia', avatar_color: '#34C759', balance: -50 };
+  const tom = { id: 4, display_name: 'Tom', avatar_color: '#FF9500', balance: 20 };
+  try {
+    s.user = { role: 'admin' };
+    s.overview = { me: 1, balances: [mia, tom] };
+    s.catalog = [{ id: 11, name: 'Kinoabend', cost: 60, is_active: 1, remaining: null }];
+    s.prevBalances = new Map();
+    s.redemptions = [
+      { id: 1, user_id: 3, user_name: 'Mia', reward_name: 'Eis', cost: 50 },
+      { id: 2, user_id: 4, user_name: 'Tom', reward_name: 'Eis', cost: 50 },
+    ];
+
+    const zeile = lesbar(rewardsPage.renderStandingRow(mia));
+    assert.doesNotMatch(zeile, /NaN|undefined/);
+    assert.match(zeile, /aria-valuenow="0"/);
+    assert.match(zeile, /--rw-progress:0"/, 'keine negative Balkenbreite');
+    assert.match(zeile, /rw-progress__label[^>]*>rewards\.balanceBelowZero</, 'der sichtbare Satz erklaert das Minus');
+    assert.match(lesbar(rewardsPage.renderStandingRow(tom)), /rewards\.remainingToReward/, 'ein Saldo ueber null bleibt unveraendert');
+
+    // Ohne Katalog stand dort "noch keine Praemien" - neben einer -50.
+    s.catalog = [];
+    assert.match(lesbar(rewardsPage.renderStandingRow(mia)), /rewards\.balanceBelowZero/);
+
+    // Der Hinweis neben der offenen Anfrage: nur fuer Entscheidende, nur bei wem er zutrifft.
+    const anfragen = lesbar(rewardsPage.renderPendingPanel());
+    const hinweise = anfragen.match(/rewards\.pendingBalanceBelowZero\{[^}]*\}/g) || [];
+    assert.equal(hinweise.length, 1, 'Mia ist im Minus, Tom nicht');
+    assert.match(hinweise[0], /"points":"-50"/);
+    assert.match(anfragen, /data-decide="fulfill" data-id="1"/, 'ein Hinweis, keine Sperre: freigeben bleibt moeglich');
+    s.user = { role: 'member' };
+    assert.doesNotMatch(lesbar(rewardsPage.renderPendingPanel()), /pendingBalanceBelowZero/, 'das Kind liest seinen Stand in der eigenen Zeile');
+
+    // Verlauf: die Gegenbuchung sagt, was geschah - die Einloese-Rueckbuchung bleibt, wie sie war.
+    assert.equal(lesbar(rewardsPage.ledgerReason({ type: 'reversal', delta: -60, reason: 'Muell' })), 'rewards.ledgerTaskReopenedNamed{"task":"Muell"}');
+    assert.equal(rewardsPage.ledgerReason({ type: 'reversal', delta: -60, reason: null }), 'rewards.ledgerTaskReopened');
+    assert.equal(rewardsPage.ledgerReason({ type: 'reversal', delta: 50, reason: 'Eis' }), 'Eis');
+    assert.equal(rewardsPage.ledgerReason({ type: 'earn', delta: 60, reason: 'Muell' }), 'Muell');
+  } finally {
+    Object.assign(s, vorher);
+  }
+});
+
+test('Kachel, eine Rasterzeile hoch: das Minus steht sichtbar da, nicht nur in der Ansage (#1623)', () => {
+  const kids = [emma(-50), leo(15)];
+  for (const size of ['1x1', '2x1']) {
+    for (const view of ['approver', 'family']) {
+      const html = renderRewardsWidget({ view, me: 1, standings: kids, participantCount: 2, pending: 0, catalog: [KINO] }, size);
+      const sichtbar = html.match(/<p class="rewards-goal__label[^"]*"[^>]*>([^<]*)<\/p>/g) || [];
+      assert.equal(sichtbar.length, 1, `${view} ${size}: genau eine sichtbare Zeile - Emmas, nicht Leos`);
+      assert.match(sichtbar[0], /rewards-goal__label--compact/, `${view} ${size}: die kompakte Zeile`);
+      assert.match(sichtbar[0], />rewards\.balanceBelowZeroShort</, `${view} ${size}: die Kurzform`);
+      assert.match(sichtbar[0], /aria-hidden="true"/, 'die Ansage traegt den ganzen Satz schon');
+      assert.match(html, /aria-valuetext="rewards\.balanceBelowZero"/, 'der ganze Satz bleibt in der Ansage');
+      assert.equal(progressValue(html), 0);
+      // Der leere Balken weicht der Kurzzeile sichtbar, bleibt aber fuer die Ansage im DOM.
+      const balken = html.match(/<div class="rewards-goal__track[^"]*"[^>]*>/g) || [];
+      assert.equal(balken.length, 2, `${view} ${size}: beide Balken stehen im DOM`);
+      const emmas = balken.find((b) => /aria-valuetext="rewards\.balanceBelowZero"/.test(b));
+      assert.match(emmas, /class="rewards-goal__track sr-only"/, `${view} ${size}: im Minus nicht sichtbar`);
+      assert.match(emmas, /role="progressbar"/);
+      assert.match(emmas, /aria-valuenow="0"/);
+      const leos = balken.find((b) => b !== emmas);
+      assert.match(leos, /class="rewards-goal__track"/, `${view} ${size}: ein Saldo ueber null behaelt seinen Balken`);
+    }
+  }
+  // Hoch bleibt, wie es war: der ganze Satz, keine Kurzform.
+  const tall = renderRewardsWidget({ view: 'approver', me: 1, standings: kids, participantCount: 2, pending: 0, catalog: [KINO] }, '1x2');
+  assert.match(tall, /class="rewards-goal__label"[^>]*>rewards\.balanceBelowZero</);
+  assert.doesNotMatch(tall, /balanceBelowZeroShort/);
+  assert.doesNotMatch(tall, /sr-only/, 'hoch bleibt der Balken sichtbar');
+});
+
+test('Kachel: die Kurzform bricht um, hoechstens zwei Zeilen (#1623)', async () => {
+  // Zwei Mitglieder nebeneinander (Viewports um 500 und um 1000px) lassen dem
+  // Satz nur 165-197px: einzeilig mit Ellipse schnitt de, fr und el ab.
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const rule = [...eachRule(css)].find((r) => r.selector.trim() === '.rewards-goal__label--compact');
+  assert.ok(rule, 'die Regel gibt es');
+  assert.doesNotMatch(rule.body, /white-space:\s*nowrap/, 'kein Einzeiler');
+  assert.match(rule.body, /(?:^|[;\s])line-clamp:\s*2\b/, 'Standard-Eigenschaft');
+  assert.match(rule.body, /-webkit-line-clamp:\s*2\b/);
+  assert.match(rule.body, /display:\s*-webkit-box/);
+  assert.match(rule.body, /-webkit-box-orient:\s*vertical/);
+  assert.match(rule.body, /overflow:\s*hidden/, 'ohne overflow klemmt line-clamp nichts ab');
+});
+
+test('Genehmigungsliste: der Saldo kommt mit der Anfrage, nicht aus der Teilnehmerliste (#1623)', () => {
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, redemptions: s.redemptions };
+  try {
+    s.user = { role: 'admin' };
+    // Mia ist ausgetragen: `balances` fuehrt sie nicht mehr.
+    s.overview = { me: 1, balances: [{ id: 4, display_name: 'Tom', balance: 20 }] };
+    s.redemptions = [
+      { id: 1, user_id: 3, user_name: 'Mia', reward_name: 'Eis', cost: 50, user_balance: -50 },
+      { id: 2, user_id: 4, user_name: 'Tom', reward_name: 'Eis', cost: 50, user_balance: 20 },
+    ];
+    const hinweise = lesbar(rewardsPage.renderPendingPanel()).match(/rewards\.pendingBalanceBelowZero\{[^}]*\}/g) || [];
+    assert.equal(hinweise.length, 1, 'Mia ist im Minus, auch ohne Zeile in balances');
+    assert.match(hinweise[0], /"points":"-50"/);
+    // Die Anfrage gewinnt gegen die Teilnehmerliste, wenn beide etwas sagen.
+    s.redemptions = [{ id: 2, user_id: 4, user_name: 'Tom', reward_name: 'Eis', cost: 50, user_balance: -5 }];
+    assert.match(lesbar(rewardsPage.renderPendingPanel()), /pendingBalanceBelowZero\{"points":"-5"\}/);
+    s.user = { role: 'member' };
+    assert.doesNotMatch(lesbar(rewardsPage.renderPendingPanel()), /pendingBalanceBelowZero/);
+  } finally {
+    Object.assign(s, vorher);
+  }
+});
+
+test('Uebersicht ohne Teilnehmende: die offene Anfrage steht trotzdem da und ist entscheidbar (#1623)', async () => {
+  // Der haerteste Fall: die Anfragende war die LETZTE Teilnehmende und wurde
+  // ausgetragen. `balances` ist leer, die Uebersicht kehrte mit dem
+  // Leerzustand zurueck - vor dem Anfragen-Panel.
+  const { setPermissions, clearPermissions } = await import('../public/permissions.js');
+  // Der Leerzustand BAUT Knoten (emptyStateHTML): dafuer das Mini-DOM, nur hier.
+  const { installMiniDom } = await import('./mini-dom.js');
+  const domZurueck = installMiniDom();
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, catalog: s.catalog, redemptions: s.redemptions };
+  try {
+    s.user = { id: 1, role: 'admin' };
+    s.overview = { me: 1, balances: [], setup: { participantCount: 0, catalogCount: 1, pointedTaskCount: 1 } };
+    s.catalog = [];
+    s.redemptions = [{ id: 9, user_id: 3, user_name: 'Mia', reward_name: 'Eis', cost: 50, user_balance: -50 }];
+    const el = markupEl();
+    rewardsPage.renderOverview(el);
+    const html = lesbar(el.html);
+    assert.doesNotMatch(html, /NaN|undefined/);
+    assert.match(html, /rw-pending-panel/, 'das Panel steht ohne Punktestaende');
+    assert.match(html, /Mia/);
+    assert.match(html, /pendingBalanceBelowZero\{"points":"-50"\}/, 'samt Hinweis auf das Minus');
+    assert.match(html, /data-decide="fulfill" data-id="9"/, 'genehmigen ist erreichbar');
+    assert.match(html, /data-decide="reject" data-id="9"/, 'ablehnen auch');
+    assert.match(html, /rewards\.emptyOverviewTitle/, 'der Leerzustand bleibt daneben stehen');
+    assert.ok(html.indexOf('rw-pending-panel') < html.indexOf('rewards.emptyOverviewTitle'), 'das Dringende zuerst');
+
+    // Nur lesen: der Zustand bleibt als Zeichen, die Handlung geht.
+    setPermissions({ admin: false, modules: { rewards: 'read' }, widgets: {}, capabilities: {} });
+    try {
+      const ro = markupEl();
+      rewardsPage.renderOverview(ro);
+      assert.match(ro.html, /rw-pending-panel/);
+      assert.doesNotMatch(ro.html, /data-decide=/);
+      assert.doesNotMatch(ro.html, /rw-manage-participants/);
+    } finally {
+      clearPermissions();
+    }
+
+    // Ohne offene Anfrage bleibt es beim blossen Leerzustand.
+    s.redemptions = [];
+    const leer = markupEl();
+    rewardsPage.renderOverview(leer);
+    assert.doesNotMatch(leer.html, /rw-pending/);
+    assert.match(leer.html, /rewards\.emptyOverviewTitle/);
+  } finally {
+    Object.assign(s, vorher);
+    domZurueck();
+  }
+});

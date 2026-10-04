@@ -7,7 +7,7 @@
 import { api } from '/api.js';
 import { renderRRuleFields, bindRRuleEvents, getRRuleValues } from '/rrule-ui.js';
 import { openModal as openSharedModal, closeModal, wireBlurValidation, validateAll, btnSuccess, btnError, btnLoading, promptModal, confirmModal, advancedSection, refocusAfterRender } from '/components/modal.js';
-import { stagger, vibrate, scheduleUndoableDelete, animationSettled, collapseOut, expandIn } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, animationSettled, collapseOut, expandIn, wireScrollFade } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { t, getLocale, formatDate, formatTime, timeSuffix, formatDateInput, parseDateInput, isDateInputValid, formatTimeInput, parseTimeInput } from '/i18n.js';
 import { esc } from '/utils/html.js';
@@ -35,11 +35,11 @@ import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { todayKey, parseLocalDateKey } from '/utils/date.js';
 import { makeSortable } from '/utils/sortable.js';
 import { mountMasterDetail, splitViewDetailHtml } from '/utils/master-detail.js';
-import { zonedDateKey } from '/utils/timezone.js';
+import { zonedDateKey, zonedTimeKey } from '/utils/timezone.js';
 import { historyDayLabel } from '/utils/day-label.js';
 import {
   PRIORITIES, PRIO_ORDER, STATUSES, FILTER_STATUSES, PRIORITY_LABELS, STATUS_LABELS, statusLabel,
-  FALLBACK_CATEGORY, isArchived, formatDueDate, normalizeTagList,
+  FALLBACK_CATEGORY, isArchived, formatDueDate, normalizeTagList, seriesDoneText,
   catLabel as catLabelOf, catSortIndex as catSortIndexOf,
   canEditTaskDefinition as canEditTaskDefinitionFor,
 } from '/utils/task-fields.js';
@@ -135,10 +135,6 @@ let taskDocuments = null;
 // --------------------------------------------------------
 // Hilfsfunktionen
 // --------------------------------------------------------
-
-function initials(name = '') {
-  return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-}
 
 // Sichtbarkeits-Indikator (#474): nur für eingeschränkte Elemente ein dezentes
 // Icon — „Alle" bleibt icon-los (keine visuelle Flut, „Kraft ohne Lärm").
@@ -319,14 +315,20 @@ function renderDueDate(dateStr, timeStr, isDone = false) {
   </span>`;
 }
 
+/* Der Start-Badge vergleicht KEYS, und "heute" ist der Tag des Haushalts.
+ *
+ * Hier stand `new Date(); setHours(0, 0, 0, 0)` gegen `new Date(key + 'T00:00:00')`:
+ * beides Mitternacht der GERAETE-Zone. Mit Haushalt in Berlin und Telefon in
+ * New York stand kurz nach Berliner Mitternacht an einer ab heute laufenden
+ * Aufgabe noch "Beginnt am ...". Und `formatDate` bekam das Date statt des Keys
+ * und rechnete es in die Anzeigezone um - mit Geraet in Berlin und Haushalt auf
+ * Honolulu zeigte der Badge den Vortag. */
 function renderStartDateBadge(startDateStr) {
   if (!startDateStr) return '';
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const startDay = new Date(`${startDateStr}T00:00:00`);
-  if (startDay <= today) return '';
+  const startKey = String(startDateStr).slice(0, 10);
+  if (startKey <= todayKey()) return '';
   return `<span class="due-date">
-    <i data-lucide="calendar-clock" class="icon-sm" aria-hidden="true"></i> <span class="due-date__label">${t('tasks.startsOn', { date: formatDate(startDay) })}</span>
+    <i data-lucide="calendar-clock" class="icon-sm" aria-hidden="true"></i> <span class="due-date__label">${t('tasks.startsOn', { date: formatDate(startKey) })}</span>
   </span>`;
 }
 
@@ -444,6 +446,17 @@ async function wireSyncTarget(panel, task) {
   if (wanted && Array.from(select.options).some((o) => o.value === wanted)) {
     select.value = wanted;
   }
+}
+
+/**
+ * Das Schloss einer gesperrten Aufgabe - EINE Bauart fuer Liste und Brett
+ * (#1607: das Brett liess es weg, wer die Ansicht wechselte, erfuhr die Sperre
+ * erst am abgelehnten Zug). `role="img"`, damit das `aria-label` gilt.
+ */
+function renderLockedBadge(task) {
+  if (!task.locked) return '';
+  const label = esc(t('tasks.lockedBadge'));
+  return `<span class="due-date" role="img" aria-label="${label}" title="${label}"><i data-lucide="lock" class="icon-sm" aria-hidden="true"></i></span>`;
 }
 
 /**
@@ -611,7 +624,7 @@ function renderTaskCard(task, opts = {}) {
                 hier standen zwei Kopien ohne Rolle (PR-Review #754). */ ''}
             ${task.is_recurring ? `<span class="due-date" role="img" aria-label="${esc(t('tasks.recurring'))}"><i data-lucide="repeat" class="icon-sm" aria-hidden="true"></i></span>` : ''}
             ${task.document_count > 0 ? `<span class="due-date task-card__docs" role="img" aria-label="${esc(t('tasks.documentsCount', { count: task.document_count }))}"><i data-lucide="paperclip" class="icon-sm" aria-hidden="true"></i></span>` : ''}
-            ${task.locked ? `<span class="due-date" role="img" aria-label="${esc(t('tasks.lockedBadge'))}" title="${esc(t('tasks.lockedBadge'))}"><i data-lucide="lock" class="icon-sm" aria-hidden="true"></i></span>` : ''}
+            ${renderLockedBadge(task)}
             ${renderVisibilityBadge(task.visibility)}
             ${showCategory && task.category !== FALLBACK_CATEGORY ? `<span class="due-date task-card__category">${esc(catLabel(task.category))}</span>` : ''}
             ${renderTagBadges(task.tags, ROW_TAG_BADGES_VISIBLE, task.priority)}
@@ -666,25 +679,41 @@ function renderTaskCard(task, opts = {}) {
     </div>`;
 }
 
-// Effektive Fälligkeit: mit due_time wenn vorhanden, sonst 23:59:59 des Tages
+/* Effektive Faelligkeit als Wanduhr-Stempel des Haushalts ('YYYY-MM-DDTHH:MM'),
+ * ohne due_time das Tagesende ('T23:59:59').
+ *
+ * `due_date`/`due_time` sind zonenlose Wanduhrzeit - dieselbe Regel wie in
+ * `formatDueDate` (utils/task-fields.js). Hier stand ein Umweg ueber
+ * `new Date(`${due_date}T${due_time}`)`, und der las die Ziffern in der Zone des
+ * GERAETS: in dessen Zeitumstellungs-Luecke rueckte eine Uhrzeit um eine Stunde
+ * vor und ueberholte eine spaetere Aufgabe desselben Tages, und "jetzt" war die
+ * Uhr des Geraets statt die des Haushalts. Als Stempel derselben Zone sind beide
+ * Seiten als Text vergleichbar. */
 function effectiveDue(task) {
   if (!task.due_date) return null;
-  return task.due_time
-    ? new Date(`${task.due_date}T${task.due_time}`)
-    : new Date(`${task.due_date}T23:59:59`);
+  const day = String(task.due_date).slice(0, 10);
+  // Ohne Uhrzeit das Tagesende 23:59:59: als Text hinter einem ausdruecklichen
+  // 23:59, sonst fiele der Vergleich bei Gleichstand auf die Prioritaet.
+  const time = task.due_time ? String(task.due_time).slice(0, 5) : '23:59:59';
+  return `${day}T${time}`;
+}
+
+/** Jetzt als Wanduhr-Stempel des Haushalts - einmal je Sortierlauf, nicht je Vergleich. */
+function taskSortNow(now = new Date()) {
+  return `${zonedDateKey(now)}T${zonedTimeKey(now)}`;
 }
 
 // Einheitliche Sortierung: überfällig zuerst → Datum/Zeit ASC → Prio als Tiebreaker
-function sortTasks(a, b, now) {
-  const aDate = effectiveDue(a);
-  const bDate = effectiveDue(b);
-  const aOver = aDate && aDate < now ? 1 : 0;
-  const bOver = bDate && bDate < now ? 1 : 0;
+function sortTasks(a, b, nowStamp) {
+  const aDue = effectiveDue(a);
+  const bDue = effectiveDue(b);
+  const aOver = aDue && aDue < nowStamp ? 1 : 0;
+  const bOver = bDue && bDue < nowStamp ? 1 : 0;
   if (bOver !== aOver) return bOver - aOver;
-  if (!aDate && !bDate) return (PRIO_ORDER[a.priority] ?? 4) - (PRIO_ORDER[b.priority] ?? 4);
-  if (!aDate) return 1;
-  if (!bDate) return -1;
-  if (aDate.getTime() !== bDate.getTime()) return aDate < bDate ? -1 : 1;
+  if (!aDue && !bDue) return (PRIO_ORDER[a.priority] ?? 4) - (PRIO_ORDER[b.priority] ?? 4);
+  if (!aDue) return 1;
+  if (!bDue) return -1;
+  if (aDue !== bDue) return aDue < bDue ? -1 : 1;
   return (PRIO_ORDER[a.priority] ?? 4) - (PRIO_ORDER[b.priority] ?? 4);
 }
 
@@ -715,7 +744,7 @@ function renderTaskGroups(tasks, groupMode) {
       });
   }
 
-  const now = new Date();
+  const now = taskSortNow();
   const groups = groupBy(tasks, groupMode);
   return groups.map(({ id, label, tasks: groupTasks }) => {
     const sorted = [...groupTasks].sort((a, b) => sortTasks(a, b, now));
@@ -1138,6 +1167,7 @@ ${syncTargetFieldHtml(task)}
         </select>
         <p class="task-field-hint">${t('common.visibility.hint')}</p>
         <p class="task-field-hint field-hint--warn" id="task-visibility-warning" role="status" hidden><i data-lucide="alert-triangle" aria-hidden="true"></i><span>${t('common.visibility.assigneesNobodyHint')}</span></p>
+        <p class="task-field-hint field-hint--warn" id="task-visibility-private-warning" role="status" hidden><i data-lucide="alert-triangle" aria-hidden="true"></i><span>${t('common.visibility.privateAssignedHint')}</span></p>
       </div>
 
       <!-- #830: Die Sperre steht neben der Sichtbarkeit, weil beide dieselbe
@@ -1588,12 +1618,53 @@ async function refreshTags() {
  *        Uebergang nach „erledigt" sinnvoll; der Server verwirft die Angabe an
  *        jedem anderen Wechsel still, damit eine Sammelaktion nicht an einem
  *        mitgeschickten Feld scheitert.
+ * @returns {Promise<object>} die Antwort des Servers. Sie traegt bei einer
+ *        erledigten Serie `next_due_date` (#1603) - wer abhakt, reicht sie an
+ *        die Quittung weiter (`seriesDoneText`).
  */
 async function toggleTaskStatus(id, currentStatus, doneByUserId = null) {
   const next = currentStatus === 'done' ? 'open' : 'done';
-  await api.patch(`/tasks/${id}/status`, doneByUserId == null
+  return api.patch(`/tasks/${id}/status`, doneByUserId == null
     ? { status: next }
     : { status: next, done_by_user_id: doneByUserId });
+}
+
+/**
+ * Die Quittung nach Haken oder Wisch in der Liste - EINE fuer beide Gesten.
+ *
+ * Derselbe Rueckweg an beiden: die Geste hatte zwei Endpunkte mit zwei
+ * Antworten, der Wisch bot Undo an, der Tipp - die haeufigere Bedienung - liess
+ * den Eintrag kommentarlos aus dem gefilterten Bild verschwinden.
+ *
+ * BEI EINER SERIE NENNT SIE DAS NAECHSTE MAL (#1603): dort verschwindet nichts,
+ * die Folgeinstanz steht nach dem Neuladen an derselben Stelle, und „Als
+ * erledigt markiert." neben einer offenen Zeile las sich wie ein Fehler.
+ *
+ * Die Schluessel heissen weiter `swiped*`: ihr TEXT ist gestenneutral ("Als
+ * erledigt markiert."), nur der Name nennt die Wischgeste. Ein Rename kostet
+ * jede Locale-Datei fuer eine Namensschuld, die kein Nutzer sieht - vermerkt
+ * statt bezahlt.
+ *
+ * @param {HTMLElement|null} container
+ * @param {number|string} taskId
+ * @param {string} nextStatus der Status NACH dem Wechsel
+ * @param {object} response die Antwort von `toggleTaskStatus`
+ */
+function acknowledgeStatusToggle(container, taskId, nextStatus, response) {
+  window.yuvomi.showToast(
+    seriesDoneText(response)
+      ?? t(nextStatus === 'done' ? 'tasks.swipedDoneToast' : 'tasks.swipedOpenToast'),
+    'default',
+    5000,
+    async () => {
+      try {
+        await toggleTaskStatus(taskId, nextStatus);
+        await reloadWithRowMotion(container, taskId);
+      } catch (err) {
+        window.yuvomi.showToast(err.message, 'danger');
+      }
+    },
+  );
 }
 
 async function loadTaskForEdit(id) {
@@ -1849,16 +1920,31 @@ function reminderRemindAtFromForm(form, { dueDate, dueTime = null } = {}) {
 // Modal-Verwaltung (delegiert an Shared Modal-System)
 // --------------------------------------------------------
 
-// Blendet einen Hinweis ein, wenn „Nur Zugewiesene" gewählt ist, aber niemand
-// zugewiesen wurde — dann sieht faktisch nur der Ersteller den Eintrag (#474 Guard).
-function wireVisibilityWarning(panel, selectSel, msName, warnSel) {
+// Zwei Hinweise an der Sichtbarkeit, beide warnen nur und aendern nichts
+// (dieselbe Regel wie im Termin-Dialog, pages/calendar.js):
+// - „Nur Zugewiesene" ohne Person: dann sieht faktisch nur der Ersteller den
+//   Eintrag (#474 Guard).
+// - „Nur ich" mit mindestens einer anderen Person als dem Ersteller: die Zugewiesenen sehen den Eintrag
+//   nicht. Die Kombination bleibt erlaubt und die
+//   Zuweisung stehen - Bestandsdaten und API-Clients fuehren sie.
+function wireVisibilityWarning(panel, selectSel, msName, warnSel, privateWarnSel, creatorId = null) {
   const select = panel.querySelector(selectSel);
   const warn   = panel.querySelector(warnSel);
   if (!select || !warn) return;
+  const privateWarn = privateWarnSel ? panel.querySelector(privateWarnSel) : null;
   const ms = panel.querySelector(`.user-ms[data-ms-name="${msName}"]`);
   const update = () => {
-    const count = getSelectedUserIds(panel, msName).length;
-    warn.hidden = !(select.value === 'assignees' && count === 0);
+    const ids = getSelectedUserIds(panel, msName).map(Number);
+    warn.hidden = !(select.value === 'assignees' && ids.length === 0);
+    // Wer den Eintrag angelegt hat, sieht ihn auch als „Nur ich": gezaehlt
+    // werden nur die anderen. Massgeblich ist `created_by` des Eintrags, nicht
+    // wer ihn gerade bearbeitet; ein neuer gehoert dem angemeldeten Konto.
+    const others = creatorId == null ? ids : ids.filter((id) => id !== Number(creatorId));
+    if (privateWarn) privateWarn.hidden = !(select.value === 'private' && others.length > 0);
+    // Die Sichtbarkeit steht unter „Weitere Einstellungen", die Personen
+    // darueber: aufklappen, nie zuklappen.
+    const shown = [warn, privateWarn].find((el) => el && !el.hidden);
+    shown?.closest('details')?.setAttribute('open', '');
   };
   select.addEventListener('change', update);
   ms?.addEventListener('click', () => setTimeout(update, 0));
@@ -2028,7 +2114,8 @@ function wireTaskForm(panel, { task = null, container = null, onChanged = () => 
   // RRULE-Events binden
   bindRRuleEvents(document, 'task');
   bindUserMultiSelect(panel, 'task_assigned');
-  wireVisibilityWarning(panel, '#task-visibility', 'task_assigned', '#task-visibility-warning');
+  wireVisibilityWarning(panel, '#task-visibility', 'task_assigned', '#task-visibility-warning', '#task-visibility-private-warning',
+    task?.created_by ?? state.currentUserId);
   wireCountdownGate(panel);
 
   // Tag-Editor (#586)
@@ -2426,8 +2513,15 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
   try {
     let savedTaskId = taskId;
     if (taskId) {
-      await api.put(`/tasks/${taskId}`, body);
-      window.yuvomi.showToast(t('tasks.savedToast'), 'success');
+      // Das Status-Feld hakt genauso ab wie die Checkbox, und der Server legt
+      // dabei genauso die Folgeinstanz an (#1620). Ohne den Hinweis schloss das
+      // Formular mit „gespeichert" ueber einer offenen Zeile, die aussieht wie
+      // die eben erledigte. Derselbe Helfer wie auf jedem anderen Abhak-Weg,
+      // und wie in der Detailansicht haengt der Hinweis am Erledigen selbst:
+      // PUT liefert `next_due_date` nur beim Uebergang nach „erledigt".
+      const response = await api.put(`/tasks/${taskId}`, body);
+      const seriesText = body.status === 'done' ? seriesDoneText(response) : null;
+      window.yuvomi.showToast(seriesText ?? t('tasks.savedToast'), 'success');
     } else {
       const res = await api.post('/tasks', body);
       savedTaskId = res.data?.id;
@@ -2497,7 +2591,8 @@ async function handleFormSubmit(e, { container = null, onChanged = () => loadTas
 async function handleRenameSubtask(id, currentTitle, container) {
   const title = await promptModal(t('tasks.subtaskRenamePrompt'), currentTitle);
   // Abbruch (null) und "unverändert" gehen beide ohne Request weiter; ein
-  // leergeräumtes Feld ist kein gültiger Titel und wird wie Abbruch behandelt.
+  // leergeräumtes Feld ist kein gültiger Titel, das meldet promptModal selbst
+  // am Feld und bleibt offen (#1607).
   if (!title || title.trim() === currentTitle) return;
   try {
     await api.put(`/tasks/${id}`, { title: title.trim() });
@@ -2565,10 +2660,13 @@ async function moveTaskToColumn(before, column) {
   // Statuswechsel nötig ist, muss sich auf den alten Stand beziehen.
   if (column === 'archived') {
     await setTaskArchived(before.id, true);
-    return;
+    return null;
   }
   if (before.archived_at) await setTaskArchived(before.id, false);
-  if (before.status !== column) await api.patch(`/tasks/${before.id}/status`, { status: column });
+  // Die Antwort des Statuswechsels geht zurueck: an ihr haengt die Quittung
+  // einer erledigten Serie (#1603). Ohne Statuswechsel gibt es keine.
+  if (before.status !== column) return api.patch(`/tasks/${before.id}/status`, { status: column });
+  return null;
 }
 
 /** Optimistisches Spiegelbild von moveTaskToColumn auf dem State-Objekt. */
@@ -2590,12 +2688,19 @@ async function runColumnMove(task, column, container) {
   const before = { id: task.id, status: task.status, archived_at: task.archived_at };
   applyColumnLocally(task, column);
   renderKanban(container);
+  let seriesText = null;
   try {
-    await moveTaskToColumn(before, column);
+    const response = await moveTaskToColumn(before, column);
+    if (column === 'done') seriesText = seriesDoneText(response);
   } catch (err) {
     window.yuvomi.showToast(err.message, 'danger');
   }
   await loadTasks(container);
+  // NACH dem Neuladen, wie in der Liste: die Karte liegt in „Erledigt", und in
+  // „Offen" ist im selben Moment eine gleich aussehende aufgetaucht. Der Satz
+  // sagt, dass das die naechste ist und nicht dieselbe (#1603). Ohne Serie
+  // bleibt das Brett still - die gewanderte Karte ist dort die Quittung.
+  if (seriesText) window.yuvomi.showToast(seriesText, 'default', 5000);
 }
 
 function renderKanbanCard(task) {
@@ -2613,6 +2718,17 @@ function renderKanbanCard(task) {
       : next === 'in_progress'
         ? t('tasks.kanbanMoveToInProgress')
         : t('tasks.kanbanMoveToOpen');
+  // DER NAME NENNT DIE AUFGABE (#1607). Der Knopf ist ein Icon ohne Text; mit
+  // dem Verb allein hiessen alle Knoepfe einer Spalte gleich, und ein
+  // Screenreader konnte sie nicht auseinanderhalten. Der Tooltip bleibt beim
+  // Verb - die Karte, ueber der er steht, zeigt ihren Titel selbst.
+  const nextName = archived
+    ? t('tasks.unarchiveNamed', { title: task.title })
+    : next === 'done'
+      ? t('tasks.kanbanMoveToDoneNamed', { title: task.title })
+      : next === 'in_progress'
+        ? t('tasks.kanbanMoveToInProgressNamed', { title: task.title })
+        : t('tasks.kanbanMoveToOpenNamed', { title: task.title });
   return `
     <!-- KEIN draggable-Attribut, obwohl die Karte ziehbar ist: SortableJS zieht
          ueber seine draggable-OPTION (einen Selektor), und ein echtes
@@ -2629,6 +2745,7 @@ function renderKanbanCard(task) {
       <div class="kanban-card__meta">
         ${renderPriorityBadge(task.priority)}
         ${due ? `<span class="due-date ${due.cls}"><i data-lucide="clock" class="icon-sm" aria-hidden="true"></i> ${due.label}</span>` : ''}
+        ${renderLockedBadge(task)}
         ${renderTagBadges(task.tags, TAG_BADGES_VISIBLE, task.priority)}
       </div>
       <div class="kanban-card__footer">
@@ -2638,7 +2755,7 @@ function renderKanbanCard(task) {
               weg - zusammen mit dem Ziehen, das dieselbe Bewegung macht. */ ''}
         ${readOnly() ? '' : `
         <button class="kanban-card__status-btn" type="button"
-                data-next-status="${next}" title="${nextLabel}" aria-label="${nextLabel}">
+                data-next-status="${next}" title="${esc(nextLabel)}" aria-label="${esc(nextName)}">
           <i data-lucide="${icon}" aria-hidden="true"></i>
         </button>`}
       </div>
@@ -2658,7 +2775,7 @@ function renderKanban(container) {
     else grouped['open'].push(t);
   }
 
-  const now = new Date();
+  const now = taskSortNow();
   for (const col of cols) {
     grouped[col.status].sort((a, b) => sortTasks(a, b, now));
   }
@@ -3169,8 +3286,17 @@ function renderHistoryEntry(entry) {
   // Der Avatar traegt hier NICHTS bei, was nicht daneben stuende: der Name
   // steht als Text in der Metazeile. Ohne aria-hidden liest die Sprachausgabe
   // „AJ ... Alex Johnson" - derselbe Mensch zweimal, einmal als Kuerzel.
+  //
+  // LISTE + DETAIL (#1550): die Zeile ist eine Zeile des Bausteins wie eine
+  // Aufgabe in der Liste. `data-md-id` ist die AUFGABE, nicht der Vorgang -
+  // `?open=` nennt in der ganzen App eine Aufgabe, und eine Aufgabe ist
+  // hoechstens einmal erledigt (uniq_task_completion), also traegt keine
+  // zweite Zeile dieselbe ID. `data-task-id` laesst das Loeschen aus der
+  // Spalte die Zeile sofort ausblenden (taskRowsIn in task-detail.js), wie in
+  // der Liste. Die Zeile ist selbst der Knopf, also braucht sie kein
+  // `data-md-focus`: Pfeile, Enter und Esc landen auf ihr.
   return `
-    <button type="button" class="list-row history-row" data-history-task="${entry.task_id}">
+    <button type="button" class="list-row history-row" data-history-task="${entry.task_id}" data-md-id="${entry.task_id}" data-task-id="${entry.task_id}">
       <span class="history-row__avatar" aria-hidden="true">${avatar}</span>
       <span class="list-row__main history-row__main">
         <span class="list-row__name">${esc(entry.title)}</span>
@@ -3253,6 +3379,10 @@ function wireHistoryPeople(root, container) {
   // Kapsel von der Stelle der alten gleiten.
   const people = root.querySelector('.history-people');
   if (people) attachSegmentIndicator(people, { key: 'tasks-history-people' });
+  // Die Reihe scrollt, sobald sie nicht passt - in der Listenbahn neben dem
+  // Detail (#1550, 420-520px) schon mit vier Mitgliedern. Ohne Anriss saehe
+  // sie dort vollstaendig aus (DESIGN.md, Scroll-Affordanz).
+  wireScrollFade(people);
   root.querySelectorAll('[data-history-user]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const raw = btn.dataset.historyUser;
@@ -3262,9 +3392,12 @@ function wireHistoryPeople(root, container) {
   });
 }
 
-function renderHistory(container) {
+function renderHistory(container, { afterWrite = false, quiet = false } = {}) {
   const listEl = container.querySelector('#task-list');
   if (!listEl) return;
+  // Die Reihenfolge VOR dem Neuzeichnen - fuer das Weiterruecken der Spalte,
+  // wie in der Liste (syncHistoryPane).
+  const orderBefore = mdRowIds(listEl);
 
   if (state.history.error) {
     // Die Personenauswahl bleibt STEHEN. Ohne sie war ein Fehler unter einem
@@ -3284,6 +3417,7 @@ function renderHistory(container) {
     });
     wireHistoryPeople(listEl, container);
     if (window.lucide) window.lucide.createIcons({ el: listEl });
+    syncHistoryPane(listEl, orderBefore, { afterWrite, quiet });
     return;
   }
 
@@ -3331,25 +3465,34 @@ function renderHistory(container) {
     loadHistory(container, { append: true });
   });
   listEl.querySelectorAll('[data-history-task]').forEach((row) => {
-    row.addEventListener('click', () => openTaskFromHistory(row.dataset.historyTask, container));
+    row.addEventListener('click', () => openHistoryEntry(row.dataset.historyTask, row, container));
   });
+  syncHistoryPane(listEl, orderBefore, { afterWrite, quiet });
 }
 
-/** Ein Verlaufseintrag führt zu seiner Aufgabe - der einzige Weg von hier weg. */
-async function openTaskFromHistory(id, container) {
-  try {
-    const [task, reminder] = await Promise.all([loadTaskForEdit(id), loadReminderForTask(id)]);
-    openTaskView(task, reminder, container);
-  } catch (err) {
-    window.yuvomi.showToast(err.message ?? t('common.errorGeneric'), 'danger');
-  }
+/**
+ * Ein Verlaufseintrag fuehrt zu seiner Aufgabe - der einzige Weg von hier weg.
+ *
+ * DERSELBE WEG WIE DER TITEL EINER AUFGABE IN DER LISTE (#1550): ab der
+ * Schwelle waehlt der Klick die Zeile aus und die Aufgabe steht rechts in der
+ * Spalte, darunter geht ihr Blatt auf (openTaskSheet ueber `openNarrow`).
+ * Bis dahin oeffnete der Verlauf das Blatt auf jeder Breite selbst, und neben
+ * der 720px-Bahn blieb die rechte Haelfte leer.
+ */
+function openHistoryEntry(id, trigger, container) {
+  if (taskMd) taskMd.open(id, trigger);
+  else openTaskSheet(id, container);
 }
 
 /**
  * Verlauf laden. `append` hängt die nächste Seite an, alles andere fängt vorn
  * an - ein Personenwechsel darf keine Mischung aus zwei Abfragen stehen lassen.
+ *
+ * `afterWrite`: nachgeladen, weil etwas geschrieben wurde (renderTaskList) -
+ * die Spalte zieht dann nach (syncHistoryPane); `quiet`: die Aenderung kam
+ * aus der Spalte selbst, sie zeigt sie schon.
  */
-async function loadHistory(container, { append = false } = {}) {
+async function loadHistory(container, { append = false, afterWrite = false, quiet = false } = {}) {
   // Ein zweiter Aufruf, waehrend einer laeuft, WARTET auf den ersten und faehrt
   // dann selbst - er wird nicht verworfen. Ein blosses `return` hier hatte den
   // Klick auf ein Personen-Chip stillschweigend geschluckt: `userId` war schon
@@ -3380,7 +3523,7 @@ async function loadHistory(container, { append = false } = {}) {
   } finally {
     state.history.loading = null;
     release();
-    renderHistory(container);
+    renderHistory(container, { afterWrite, quiet });
   }
 }
 
@@ -3399,8 +3542,9 @@ function renderTaskList(container, { paneQuiet = false } = {}) {
     // dort aendert sich der Verlauf mit: ein wieder geoeffneter Haken loescht
     // seinen Eintrag serverseitig. Ohne das Nachladen blieb die zurueckgenommene
     // Erledigung stehen, bis jemand die Ansicht verliess.
-    loadHistory(container);
-    return;
+    // Das Versprechen geht zurueck: render() wartet beim Einstieg darauf, bevor
+    // es Liste + Detail einhaengt (der Deep-Link braucht die Zeilen).
+    return loadHistory(container, { afterWrite: true, quiet: paneQuiet });
   }
   // VOR der Kanban-Weiche: nach einem Ladefehler ist `state.tasks` ebenfalls
   // leer, und beide Ansichten haengen an demselben `#task-list`. Nur die
@@ -4030,21 +4174,9 @@ function wireSwipeGestures(container) {
         const card = row.querySelector('.task-card');
         if (card) card.style.visibility = 'hidden';
         try {
-          await toggleTaskStatus(taskId, capturedStatus);
+          const response = await toggleTaskStatus(taskId, capturedStatus);
           await reloadWithRowMotion(container, taskId);
-          window.yuvomi.showToast(
-            t(nextStatus === 'done' ? 'tasks.swipedDoneToast' : 'tasks.swipedOpenToast'),
-            'default',
-            5000,
-            async () => {
-              try {
-                await toggleTaskStatus(taskId, nextStatus);
-                await reloadWithRowMotion(container, taskId);
-              } catch (err) {
-                window.yuvomi.showToast(err.message, 'danger');
-              }
-            },
-          );
+          acknowledgeStatusToggle(container, taskId, nextStatus, response);
         } catch (err) {
           window.yuvomi.showToast(err.message, 'danger');
           await loadTasks(container);
@@ -4131,13 +4263,17 @@ function syncViewChrome(container) {
   // Die Gegenrichtung - Seite auf Lesemass, Kopf freigeben - gibt es nicht:
   // PAGE-016 verlangt, dass ein Mass, das etwas kappt, im Kopf sichtbar ist.
   container.querySelector('.tasks-page')?.classList.toggle('is-reading-measure', !isKanbanMode());
-  // LISTE + DETAIL NUR IN DER LISTE. Das Brett ist Flaeche, der Verlauf zeigt
-  // Vorgaenge - dort gibt es keine Zeile, deren Detail rechts stehen koennte.
-  // Ohne die Klasse ist die Wurzel auch kein Container: die Detailspalte
-  // bleibt verborgen, und nichts im Brett bezieht sich auf einen neuen
-  // Containing Block (Drag-Ghosts, fixierte Ebenen).
-  container.querySelector('.tasks-page')?.classList.toggle('app-page--list-detail', isList);
-  if (!isList && taskMd?.selectedId() != null) taskMd.clear({ history: 'replace' });
+  // LISTE + DETAIL IN LISTE UND VERLAUF (#1550, Entscheidung 2026-09-29). Ab
+  // der Schwelle steht neben einem Verlaufseintrag seine Aufgabe, so wie neben
+  // einer Zeile der Liste - damit enden Liste, Brett und Verlauf an derselben
+  // Aussenkante. Unter der Schwelle behaelt der Verlauf wie die Liste die
+  // Lesebahn (`is-reading-measure` oben). Bis dahin endete er bei 1440 436px
+  // vor dem Kopf: die leere rechte Haelfte, die die Breitenregel nicht mehr
+  // zulaesst. Das Brett bleibt Flaeche; ohne die Klasse ist die Wurzel dort
+  // auch kein Container: die Detailspalte bleibt verborgen, und nichts im
+  // Brett bezieht sich auf einen neuen Containing Block (Drag-Ghosts,
+  // fixierte Ebenen). Die Auswahl raeumt setViewMode bei jedem Wechsel ab.
+  container.querySelector('.tasks-page')?.classList.toggle('app-page--list-detail', !isKanbanMode());
   syncSplitHeight(container);
 
   // Suche, Filter und Sammelauswahl fragen alle nach AUFGABEN. Der Verlauf
@@ -4194,6 +4330,14 @@ function setViewMode(container, mode) {
   if (mode === 'history') state.viewBeforeHistory = state.viewMode;
   state.viewMode = mode;
   localStorage.setItem('yuvomi-tasks-view', state.viewMode);
+  // DIE AUSWAHL GEHOERT ZU DEN ZEILEN DER ANSICHT, DIE GEHT. Liste und Verlauf
+  // teilen sich EINE Spalte (#1550), aber nicht ihre Zeilen: eine Aufgabe aus
+  // der Liste stuende rechts neben einem Verlauf ohne ihre Zeile. Ein Wechsel
+  // ist ein neuer Zusammenhang wie ein Ordnerwechsel in Mail - die neue
+  // Ansicht waehlt ihre erste Zeile vor, sobald sie steht (`repick`), das
+  // Brett gar keine (dort steht keine Spalte). Ersetzt, nicht gestapelt: der
+  // Wechsel selbst schreibt keinen Zurueck-Schritt.
+  taskMd?.clear({ history: 'replace', repick: true });
   renderFilters(container);
   syncViewChrome(container);
 
@@ -4554,10 +4698,14 @@ async function completeTaskFor(container, taskId, userId) {
   const quelle = actingAsDisplay() ? (state.displayPeople ?? []) : (state.users ?? []);
   const person = quelle.find((u) => u.id === userId);
   try {
-    await toggleTaskStatus(taskId, 'open', userId);
+    const response = await toggleTaskStatus(taskId, 'open', userId);
     await reloadWithRowMotion(container, taskId);
+    // EIN Toast, nie zwei: bei einer Serie sagt derselbe Satz, wer es war UND
+    // wann es weitergeht (#1603) - auch am Wandtablett, wo die neue Zeile sonst
+    // wie ein Haken aussieht, der nicht gehalten hat.
+    const name = person?.display_name ?? '';
     window.yuvomi.showToast(
-      t('tasks.doneByToast', { name: person?.display_name ?? '' }),
+      seriesDoneText(response, { name }) ?? t('tasks.doneByToast', { name }),
       'default',
       5000,
       actingAsDisplay() ? null : async () => {
@@ -4735,31 +4883,11 @@ function wireTaskList(container) {
       // Netz verlaengert sie nicht noch einmal (EXIT_HOLD_MS).
       const holdUntil = performance.now() + EXIT_HOLD_MS;
       try {
-        await toggleTaskStatus(id, status);
+        const response = await toggleTaskStatus(id, status);
         await settled;
         await reloadWithRowMotion(container, id, { holdUntil });
-        // Derselbe Rückweg wie beim Wischen. Die Geste hatte hier zwei
-        // Endpunkte mit zwei Antworten: der Wisch bot Undo an, der Tipp - die
-        // häufigere Bedienung - liess den Eintrag kommentarlos aus dem
-        // gefilterten Bild verschwinden.
-        //
-        // Die Schlüssel heissen weiter `swiped*`: ihr TEXT ist gestenneutral
-        // ("Als erledigt markiert."), nur der Name nennt die Wischgeste. Ein
-        // Rename kostet 24 Locale-Dateien für eine Namensschuld, die kein
-        // Nutzer sieht - vermerkt statt bezahlt.
-        window.yuvomi.showToast(
-          t(nextStatus === 'done' ? 'tasks.swipedDoneToast' : 'tasks.swipedOpenToast'),
-          'default',
-          5000,
-          async () => {
-            try {
-              await toggleTaskStatus(id, nextStatus);
-              await reloadWithRowMotion(container, id);
-            } catch (err) {
-              window.yuvomi.showToast(err.message, 'danger');
-            }
-          },
-        );
+        // Derselbe Rückweg wie beim Wischen - und dieselbe Quittung.
+        acknowledgeStatusToggle(container, id, nextStatus, response);
       } catch (err) {
         window.yuvomi.showToast(err.message, 'danger');
         await loadTasks(container);
@@ -4912,10 +5040,12 @@ function openTaskView(task, reminder, container, { pane = null } = {}) {
 // Liste + Detail (Breitenregel, DESIGN.md; utils/master-detail.js)
 //
 // Ab der Schwelle steht rechts neben der Liste das Detail der AUSGEWAEHLTEN
-// Aufgabe - wie in Erinnerungen auf dem Mac. Nur in der Listenansicht: das
-// Brett braucht die ganze Flaeche, und der Verlauf zeigt Vorgaenge, keine
-// Aufgaben. Die Wurzel traegt `.app-page--list-detail` deshalb nur dort
-// (syncViewChrome), darunter und im Brett bleibt alles, wie es war.
+// Aufgabe - wie in Erinnerungen auf dem Mac. In der Liste und im Verlauf
+// (#1550: neben einem Eintrag steht seine Aufgabe), nicht im Brett: das
+// braucht die ganze Flaeche. Die Wurzel traegt `.app-page--list-detail`
+// deshalb nur dort (syncViewChrome), darunter und im Brett bleibt alles, wie
+// es war. Beide Ansichten zeichnen in dasselbe `#task-list` und teilen sich
+// EINE Instanz des Bausteins (es gibt je Seite hoechstens eine).
 //
 // Die Adresse ist `?open=<id>` und nicht `?id=`: diesen Deep-Link gibt es seit
 // der globalen Suche (router.js), und EIN Parameter fuer beide Regime heisst,
@@ -4992,6 +5122,37 @@ function syncPaneAfterRender(listEl, orderBefore, { quiet = false } = {}) {
   }
   if (filteredTasks().some((task) => String(task.id) === selected)) return;
   moveSelectionOn(listEl, orderBefore, selected);
+}
+
+/**
+ * Dasselbe fuer den Verlauf (#1550) - nach jedem Neuzeichnen seiner Eintraege.
+ *
+ * Der Verlauf hat keinen eigenen Bestand an Aufgaben, an dem sich ein
+ * Fingerabdruck messen liesse (`taskSig` liest `state.tasks`, und dort steht
+ * eine erledigte Aufgabe unter dem Statusfilter gar nicht). Die Frage ist
+ * deshalb, WARUM neu gezeichnet wurde:
+ *
+ * - Nach einem Schreibvorgang (`afterWrite`, renderTaskList): die Zeile steht
+ *   noch, dann malt das Detail neu - ausser die Aenderung kam aus ihm selbst
+ *   (`quiet`). Ist sie weg (Haken zurueckgenommen, geloescht), rueckt die
+ *   Auswahl auf die Nachbarin wie in der Liste.
+ * - Sonst (Person gewechselt, Erneut versuchen, „Mehr anzeigen"): ein neuer
+ *   Zusammenhang oder nur mehr Zeilen. Das entscheidet der Baustein selbst
+ *   (refresh): bleibt die Zeile, bleibt die Auswahl; fiel eine gezeigte weg,
+ *   steht die erste rechts.
+ */
+function syncHistoryPane(listEl, orderBefore, { afterWrite = false, quiet = false } = {}) {
+  if (!taskMd) return;
+  const selected = taskMd.selectedId();
+  if (selected == null) { taskMd.refresh(); return; }
+  if (listEl.querySelector(`[data-md-id="${CSS.escape(selected)}"]`)) {
+    const repaint = paneRepaintDue || (afterWrite && !quiet);
+    paneRepaintDue = false;
+    taskMd.refresh({ repaint });
+    return;
+  }
+  if (afterWrite) moveSelectionOn(listEl, orderBefore, selected);
+  else taskMd.refresh();
 }
 
 /** Die ausgewaehlte Zeile ist weg: auf die Nachbarin oder in den Leerzustand. */
@@ -5356,7 +5517,7 @@ export async function render(container, { user, signal } = {}) {
   // Initiales Skeleton (all values are from i18n keys or hardcoded constants, no user data)
   container.replaceChildren();
   container.insertAdjacentHTML('beforeend', `
-    <div class="tasks-page app-page app-page--full${state.viewMode === 'list' ? ' app-page--list-detail' : ''}" data-composition="full">
+    <div class="tasks-page app-page app-page--full${state.viewMode !== 'kanban' ? ' app-page--list-detail' : ''}" data-composition="full">
       <div class="page-toolbar page-toolbar--wrap tasks-toolbar">
         <h1 class="page-toolbar__title">${t('tasks.title')}</h1>
         ${renderPageSearch({
@@ -5503,7 +5664,7 @@ export async function render(container, { user, signal } = {}) {
   renderFilters(container);
   // Im Verlauf holt renderTaskList den Bestand selbst nach - er steckt nicht in
   // `/tasks`, und sein Ladefehler ist ein eigener.
-  renderTaskList(container);
+  const firstPaint = renderTaskList(container);
 
   wirePageSearch(container, {
     id: 'tasks-search',
@@ -5515,13 +5676,24 @@ export async function render(container, { user, signal } = {}) {
 
   // Liste + Detail einhaengen - erst jetzt, weil die Zeilen stehen muessen:
   // der Deep-Link `?open=<id>` waehlt ab der Schwelle seine Zeile aus und
-  // oeffnet darunter (und im Brett) die Detailansicht wie bisher.
+  // oeffnet darunter (und im Brett) die Detailansicht wie bisher. Der Verlauf
+  // zeichnet seine Zeilen erst nach einer eigenen Anfrage (#1550): ohne das
+  // Warten fehlte die Zeile beim Einhaengen, und ein `?open=` auf einen
+  // Eintrag ginge als Blatt ueber der Spalte auf statt ihn auszuwaehlen.
+  // `loadHistory` faengt seinen Fehler selbst ab und wirft nie.
+  if (state.viewMode === 'history') await firstPaint;
   mountTaskSplit(container, signal);
 }
 
 // Testfläche: nur reine Funktionen, deren Vertrag außerhalb dieser Datei zählt.
 export const __test = {
   groupBy, groupKey, formatDueDate, normalizeFilterSet, taskQuery, state,
+  // Die Quittung nach dem Abhaken (#1603), je Weg am laufenden Aufruf: Haken
+  // und Wisch teilen sich eine, die Personenwahl und das Brett haben je ihre.
+  acknowledgeStatusToggle, completeTaskFor, runColumnMove,
+  // Die Reihenfolge innerhalb einer Gruppe (ihr Aufrufer `renderTaskGroups`
+  // steht weiter unten): Wanduhr des Haushalts, nicht die des Geraets.
+  sortTasks, taskSortNow,
   // `?due=today` (Re-Critique 2026-09-27): was die Adresse setzt, was die
   // Liste daraus zeigt, und dass das Blatt es wieder nimmt - samt Adresse.
   dueTodayFromSearch, isDueByToday, applyDueTodayFromAddress,
@@ -5608,6 +5780,11 @@ export const __test = {
   mountTaskSplit,
   // Sammel-Loeschen: was die Spalte tut, waehrend das Rueckgaengig-Fenster laeuft.
   handleBulkDelete,
+  // Der Verlauf in Liste + Detail (#1550): welche Ansicht die Spalte bekommt
+  // (Klassen an der Wurzel), dass ein Wechsel die Auswahl der alten Ansicht
+  // abraeumt und die Vorwahl wieder scharf stellt, was eine Zeile traegt, wohin
+  // ihr Klick fuehrt und was nach dem Neuzeichnen mit der Auswahl geschieht.
+  syncViewChrome, setViewMode, renderHistoryEntry, openHistoryEntry, syncHistoryPane, renderTaskList,
   // Der Lader steht hier, weil die PRAEMISSE des gesperrten Zweigs an ihm
   // haengt: dass `calendar: read` die Erinnerung wirklich bekommt. War das nur
   // Prosa, liess sich das `none` still zu `!== write` verengen und der ganze

@@ -9,8 +9,9 @@
 // aus test-browser-loader.mjs, und '/utils/...' waere dort das Dateisystem-Root.
 // Im Browser loest './utils/timezone.js' von '/i18n.js' aus auf dasselbe auf.
 import { zonedFields } from './utils/timezone.js';
+import { resolveKoreanParticles } from './utils/korean-particles.js';
 
-const SUPPORTED_LOCALES = ['de', 'en', 'es', 'fr', 'it', 'sv', 'el', 'ru', 'tr', 'zh', 'ja', 'ar', 'hi', 'pt-BR', 'pt', 'uk', 'pl', 'nl', 'cs', 'vi', 'hu', 'ko', 'id', 'fa', 'fil'];
+const SUPPORTED_LOCALES = ['de', 'en', 'es', 'fr', 'it', 'sv', 'el', 'ru', 'tr', 'zh', 'ja', 'ar', 'hi', 'pt-BR', 'pt', 'uk', 'pl', 'nl', 'cs', 'vi', 'hu', 'ko', 'id', 'fa', 'fil', 'nb'];
 const RTL_LOCALES = new Set(['ar', 'fa']);
 // Form eines Regions-Tags: Sprache, optional Schrift, dann die Region -
 // `de-DE`, `fil-PH`, `zh-Hant-TW`. Eigene Konstante und kein Import aus
@@ -229,9 +230,14 @@ export function t(key, params = {}) {
       ?? resolve(fallbackTranslations, key)
       ?? key;
   }
-  return str.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
+  const fill = (text) => text.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
     Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : placeholder
   ));
+  // Koreanisch schreibt hinter einen Platzhalter beide Formen der Partikel
+  // (`{{name}}이(가)`), weil die richtige am eingesetzten Wort haengt (#1607).
+  // Die Regel steht in utils/korean-particles.js; jede andere Sprache zahlt
+  // dafuer genau diesen einen Vergleich.
+  return currentLocale === 'ko' ? resolveKoreanParticles(str, fill) : fill(str);
 }
 
 const VALID_DATE_FORMATS = ['mdy', 'dmy', 'ymd', 'mdy_dot', 'dmy_dot', 'dmy_slash', 'ymd_dot', 'ymd_slash'];
@@ -512,6 +518,45 @@ export function formatDayMonth(date) {
     case 'ymd_slash': return `${month}/${day}`;
     default: return `${month}/${day}`;
   }
+}
+
+/**
+ * Monat und Jahr als Ueberschrift, in der Reihenfolge der SPRACHE: "Oktober
+ * 2026", "October 2026", "2026년 10월", "2026. október" (#1607).
+ *
+ * Kalender und Budget klebten Monatsname und Jahr selbst zusammen, mit einem
+ * Leerzeichen und in dieser Reihenfolge - richtig fuer Deutsch und Englisch,
+ * falsch fuer jede Sprache, die das Jahr voranstellt oder eine Partikel
+ * braucht. Der Monatsname ist ein Wort, also entscheidet die UI-Sprache
+ * (`getLocale()`), nicht die Region: eine US-Region unter deutscher Sprache
+ * soll nicht "October" schreiben.
+ *
+ * GREGORIANISCH ERZWUNGEN. `fa` nimmt sonst den persischen Kalender und
+ * schriebe "Mehr 1405" ueber ein Raster, das gregorianisch zaehlt.
+ *
+ * Gerechnet wird in UTC, auf beiden Seiten (`Date.UTC` und `timeZone`): ein
+ * lokales Date am Monatsersten laege westlich von UTC im Vormonat.
+ *
+ * DER ERSTE BUCHSTABE WIRD GROSS. Das Ergebnis ist eine Ueberschrift, und Intl
+ * liefert die Form fuer den laufenden Satz ("octubre de 2026"); der
+ * Kalenderkopf stand bisher gross da, weil sein Monatsname aus der
+ * Locale-Datei kam ("Octubre").
+ *
+ * @param {number|string} year   vierstellig
+ * @param {number|string} month  1-12
+ * @returns {string} '' bei einer Eingabe, die kein Monat ist
+ */
+export function formatMonthYear(year, month) {
+  const y = Number(year);
+  const m = Number(month);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || m < 1 || m > 12) return '';
+  const options = { month: 'long', year: 'numeric', timeZone: 'UTC', calendar: 'gregory' };
+  let formatter;
+  try { formatter = new Intl.DateTimeFormat(currentLocale, options); }
+  catch { formatter = new Intl.DateTimeFormat(DEFAULT_LOCALE, options); }
+  const text = formatter.format(new Date(Date.UTC(y, m - 1, 1)));
+  const [first = ''] = text;
+  return first.toLocaleUpperCase(formatter.resolvedOptions().locale) + text.slice(first.length);
 }
 
 /**

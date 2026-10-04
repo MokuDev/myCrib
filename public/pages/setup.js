@@ -8,6 +8,7 @@
 import { auth, ApiError } from '/api.js';
 import { getLocale, t } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { browserTimeZone } from '/utils/timezone.js';
 
 const VERSION_URL = '/api/v1/version';
 const DEFAULT_APP_NAME = 'Yuvomi';
@@ -153,7 +154,27 @@ export async function render(container) {
     try {
       // Die Sprache, in der diese Seite gerade steht: der Server macht daraus
       // die Datensprache des Haushalts, statt still auf Englisch zu fallen.
-      await auth.setup(username, displayName, password, getLocale());
+      // Dazu die Zone dieses Browsers als Haushaltszone, sonst rechnet der
+      // Server "heute" in der Zone des Containers (im Container meist UTC, und
+      // "heute" liegt oestlich davon stundenlang auf gestern). Nennt der
+      // Browser keine brauchbare, fehlt das Feld ganz: `undefined` laesst
+      // JSON.stringify weg, ein `null` reiste als Wert mit.
+      const language = getLocale();
+      const timezone = browserTimeZone() ?? undefined;
+      try {
+        await auth.setup(username, displayName, password, language, timezone);
+      } catch (err) {
+        // Der Server prueft die Zone gegen SEINE ICU-Daten und lehnt eine
+        // unbekannte mit 400 und `reason: invalid_timezone` ab. Das darf kein
+        // Admin-Konto kosten: einmal ohne Zone wiederholen, sie ist in den
+        // Einstellungen nachtraeglich waehlbar. NUR an diesem Anker, nicht an
+        // jedem 400: Setup haengt am Login-Limiter, und eine Wiederholung je
+        // Fehleingabe verbrauchte die fuenf Versuche doppelt so schnell.
+        const zoneRejected = err instanceof ApiError && err.status === 400
+          && err.data?.reason === 'invalid_timezone';
+        if (!zoneRejected) throw err;
+        await auth.setup(username, displayName, password, language);
+      }
       // Setup erfolgreich -> direkt einloggen
       const result = await auth.login(username, password);
       window.yuvomi.navigate('/', result.user);

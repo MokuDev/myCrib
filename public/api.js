@@ -12,6 +12,13 @@ import { t } from '/i18n.js';
 
 const API_BASE = '/api/v1';
 
+// Grund des Modul-Gates -> Schluessel der Meldung. Eine Map, damit ein Grund
+// wie `__proto__` nichts findet.
+const MODULE_GATE_MESSAGES = new Map([
+  ['module_access_denied', 'common.errorModuleNoAccess'],
+  ['module_read_only', 'settings.permReadOnlyBanner'],
+]);
+
 /** In-Memory CSRF-Token (zuverlaessiger als document.cookie auf iOS Safari/PWA). */
 let _csrfToken = '';
 
@@ -108,9 +115,32 @@ async function apiFetch(path, options = {}, _retried = false) {
     // Waehrend ein Backup eingespielt wird, lehnt der Server Schreibzugriffe
     // mit 503 ab (#1431). Die Seiten zeigen meist `err.message` - also hier
     // uebersetzen, statt den englischen Servertext durchzureichen.
-    const message = response.status === 503 && data?.reason === 'restore_in_progress'
-      ? t('common.errorRestoreInProgress')
-      : data?.error || `HTTP ${response.status}`;
+    if (response.status === 503 && data?.reason === 'restore_in_progress') {
+      throw new ApiError(t('common.errorRestoreInProgress'), response.status, data, response.headers.get('Retry-After'));
+    }
+    // Das Modul-Gate (server/index.js) nennt seinen Grund (#1607). Manche
+    // Seiten zeigen `err.data.error` statt `err.message` (Gesundheit, deren
+    // Einstellungen) - deshalb traegt beides die Uebersetzung.
+    const gateKey = response.status === 403 ? MODULE_GATE_MESSAGES.get(data?.reason) : undefined;
+    if (gateKey) {
+      const text = t(gateKey);
+      throw new ApiError(text, response.status, { ...data, error: text }, response.headers.get('Retry-After'));
+    }
+    // Jede andere Absage OHNE Grund (#1607): "Not authorized.", "Admin access
+    // required." und rund hundert Geschwister sagen nur "das darfst du nicht",
+    // und zwar englisch - also ein uebersetzter Satz, an beiden Stellen wie
+    // beim Gate darueber. Der Server bleibt sprachfrei, sein Text unveraendert.
+    //
+    // NUR OHNE `reason`. Wer einen nennt, traegt eine Auskunft, die dieser Satz
+    // verschluckte (gesperrte Aufgabe, CSRF, Display-Konto), oder eine Seite
+    // liest ihn selbst (Anmeldung, Zwei-Faktor, Kalender-Anhang). Eine neue
+    // 403 mit eigener Auskunft bekommt am Server einen `reason` - die Liste
+    // haelt test:api. Ein Rumpf ohne `error` ist keine Absage der App (Proxy).
+    if (response.status === 403 && typeof data?.error === 'string' && !data.reason) {
+      const text = t('common.errorNoPermission');
+      throw new ApiError(text, response.status, { ...data, error: text }, response.headers.get('Retry-After'));
+    }
+    const message = data?.error || `HTTP ${response.status}`;
     throw new ApiError(message, response.status, data, response.headers.get('Retry-After'));
   }
 
@@ -285,9 +315,9 @@ const auth = {
     setOtherReaders(res?.othersCanRead);
     return res;
   },
-  // `language` ist optional: fehlt es, laesst JSON.stringify das Feld weg, und
-  // der Server verhaelt sich wie vor seiner Einfuehrung.
-  setup: (username, display_name, password, language) => api.post('/auth/setup', { username, display_name, password, language }),
+  // `language` und `timezone` sind optional: fehlt eines, laesst JSON.stringify
+  // das Feld weg, und der Server verhaelt sich wie vor seiner Einfuehrung.
+  setup: (username, display_name, password, language, timezone) => api.post('/auth/setup', { username, display_name, password, language, timezone }),
   getUsers: () => api.get('/auth/users'),
   // DER HAUSHALT KANN SICH AENDERN, UND DANN AENDERT SICH, WAS GEFRAGT WIRD.
   // `householdSize` kommt sonst nur aus /auth/me und /auth/login, wird also

@@ -9,6 +9,7 @@
 import { api } from '/api.js';
 import { t, formatDate, getLocale, getNumberFormat } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
 import { openModal, closeModal, confirmModal, confirmOverModal, refocusAfterRender } from '/components/modal.js';
 import { createPageFab, setPageFabAction } from '/utils/fab.js';
@@ -143,10 +144,6 @@ function pointsLabel(n) {
   return `${fmtPoints(n)} ${t('rewards.pointsUnit')}`;
 }
 
-function initials(name = '') {
-  return name.split(' ').filter(Boolean).map((p) => p[0]).join('').slice(0, 2).toUpperCase() || '?';
-}
-
 function avatar(member, size = 40) {
   const dim = `width:${size}px;height:${size}px`;
   if (member?.avatar_data || member?.user_avatar) {
@@ -159,7 +156,7 @@ function avatar(member, size = 40) {
   // in dashboard.js, calendar.js, notes.js und user-multi-select.js.
   const color = member?.avatar_color || member?.user_color || AVATAR_FALLBACK_COLOR;
   const name = member?.display_name || member?.user_name || '';
-  return `<span class="rw-avatar rw-avatar--initials" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}">${esc(initials(name))}</span>`;
+  return `<span class="rw-avatar rw-avatar--initials" style="${dim};--rw-avatar-bg:${esc(color)};color:${getReadableTextColor(color)}">${esc(initials(name, '?'))}</span>`;
 }
 
 /**
@@ -342,6 +339,13 @@ async function renderCurrentTab(container) {
 // Vergriffen-Regel und Zielwahl stehen in /utils/reward-goal.js - das
 // Dashboard-Widget zeichnet denselben Balken und darf kein anderes Ziel nennen.
 function nextRewardHint(balance) {
+  // EIN MINUS STEHT NIE OHNE SATZ DA (#1607). Der Saldo kann unter null
+  // fallen, wenn eine Aufgabe wieder geoeffnet wird, deren Punkte schon in
+  // einer Praemie stecken. "Noch 110 bis Kinoabend" waere dann zwar richtig
+  // gerechnet, erklaerte aber die Zahl daneben nicht. Der Satz sagt, was sie
+  // bedeutet und dass sie von selbst wieder verschwindet - auch ohne Katalog,
+  // deshalb steht er vor der Zielsuche. Der Balken bleibt bei 0.
+  if (Number(balance) < 0) return { pct: 0, label: t('rewards.balanceBelowZero') };
   const goal = nextRewardGoal(balance, state.catalog);
   if (!goal) return null;
   if (goal.reached) return { pct: 100, label: t('rewards.canRedeemNow') };
@@ -448,12 +452,31 @@ function renderSetupHints() {
 function renderPendingPanel() {
   if (!state.redemptions.length) return '';
   const heading = isAdmin() ? t('rewards.pendingApprovals') : t('rewards.yourPending');
+  /* EIN HINWEIS, KEINE SPERRE (#1607). Faellt der Saldo nach dem Stellen der
+   * Anfrage unter null (die Aufgabe dahinter wurde wieder geoeffnet), bleibt
+   * die Anfrage offen und die Entscheidung bei den Eltern - aber sie sollen
+   * sie nicht blind treffen. Der Satz steht nur bei wem er zutrifft und nur
+   * fuer die, die entscheiden; das Kind liest denselben Stand in seiner
+   * eigenen Zeile darunter. */
+  /* DER SALDO KOMMT MIT DER ANFRAGE (#1623). `overview.balances` fuehrt nur,
+   * wer gerade teilnimmt; wer mit offener Anfrage ausgetragen wurde, fiel dort
+   * heraus, `balanceOf()` sagte 0 und der Hinweis fehlte genau dann. Der
+   * Rueckgriff bleibt fuer eine Antwort ohne das Feld (aelterer Server hinter
+   * einer frischen Oberflaeche). */
+  const belowZero = (r) => {
+    const bal = r.user_balance != null && Number.isFinite(Number(r.user_balance))
+      ? Number(r.user_balance) : balanceOf(r.user_id);
+    return isAdmin() && bal < 0
+      ? `<p class="rw-pending__meta">${esc(t('rewards.pendingBalanceBelowZero', { points: fmtPoints(bal) }))}</p>`
+      : '';
+  };
   const rows = state.redemptions.map((r) => `
     <li class="rw-pending" data-redemption="${r.id}">
       ${avatar(r, 32)}
       <div class="rw-pending__text">
         <p class="rw-pending__title">${esc(r.reward_icon ? `${r.reward_icon} ` : '')}${esc(r.reward_name)}</p>
         <p class="rw-pending__meta">${esc(isAdmin() ? r.user_name : '')}${isAdmin() ? ' · ' : ''}${esc(pointsLabel(r.cost))}${r.note ? ` · „${esc(r.note)}“` : ''}</p>
+        ${belowZero(r)}
       </div>
       ${/* DIE LISTE BLEIBT, DIE KNOEPFE GEHEN. Dass eine Anfrage offen ist, ist
             eine Auskunft und gehoert auch dem, der sie nicht entscheiden darf -
@@ -490,8 +513,14 @@ function renderOverview(el) {
     const action = isAdmin() && !readOnly()
       ? { label: t('rewards.manageParticipants'), icon: 'user-plus', className: 'rw-manage-participants' }
       : null;
+    /* DAS ANFRAGEN-PANEL HAENGT NICHT AN DEN PUNKTESTAENDEN (#1623). Wird die
+     * letzte Teilnehmende mit offener Anfrage ausgetragen, ist `balances` leer -
+     * und die Anfrage trotzdem da. Ohne das Panel hier konnte niemand sie
+     * sehen oder entscheiden. Es steht VOR dem Leerzustand: das Dringende
+     * zuerst, wie in der gefuellten Uebersicht. Nur-lesen regelt das Panel
+     * selbst (Liste bleibt, Knoepfe gehen). */
     el.insertAdjacentHTML('beforeend',
-      `<div class="rewards-content__inner">${emptyState('trophy', t('rewards.emptyOverviewTitle'), isAdmin() ? t('rewards.emptyOverviewAdmin') : t('rewards.emptyOverviewMember'), action)}</div>`);
+      `<div class="rewards-content__inner">${renderPendingPanel()}${emptyState('trophy', t('rewards.emptyOverviewTitle'), isAdmin() ? t('rewards.emptyOverviewAdmin') : t('rewards.emptyOverviewMember'), action)}</div>`);
     wireOverview(el);
     icons(el);
     return;
@@ -631,7 +660,23 @@ const LEDGER_ICON = {
   earn: 'check-circle', bonus: 'sparkles', redeem: 'gift', adjust: 'sliders-horizontal', reversal: 'undo-2',
 };
 
+/* EINE GEGENBUCHUNG TRAEGT DENSELBEN TITEL WIE IHRE GUTSCHRIFT (#1607) - und
+ * ohne eigenen Satz staenden im Verlauf zwei Zeilen "Zimmer aufraeumen", eine
+ * mit Plus und eine mit Minus, ohne dass eine sagt, was geschehen ist.
+ * `reversal` allein unterscheidet sie nicht: die Rueckbuchung einer
+ * abgelehnten Einloesung ist derselbe Typ, gibt aber Punkte ZURUECK. Das
+ * Vorzeichen ist die Unterscheidung, die auch dann haelt, wenn die Aufgabe
+ * laengst geloescht ist und `task_id` leer zurueckkommt. */
+function isTaskReopened(row) {
+  return row.type === 'reversal' && row.delta < 0;
+}
+
 function ledgerReason(row) {
+  if (isTaskReopened(row)) {
+    return row.reason
+      ? t('rewards.ledgerTaskReopenedNamed', { task: row.reason })
+      : t('rewards.ledgerTaskReopened');
+  }
   if (row.reason) return row.reason;
   return t(`rewards.ledgerType.${row.type}`);
 }
@@ -1107,6 +1152,8 @@ export const __test = {
   readOnly, state,
   // R10 L7: Kopf und Inhalt teilen je Reiter eine Kante (test-dashboard-rewards.js).
   syncToolbarMeasure, renderCatalog, renderLedger, renderOverview, handleSetupStep,
+  // #1607: der Verlaufssatz einer Gegenbuchung.
+  ledgerReason,
 };
 
 export async function render(container, { user } = {}) {

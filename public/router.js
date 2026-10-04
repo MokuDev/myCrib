@@ -12,17 +12,20 @@ import { clearApiCache } from '/sw-register.js';
 import { forgetLayoutHint } from '/utils/dashboard-layout-hint.js';
 import { initI18n, getLocale, t, formatDate, formatTime } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 import { emptyHintEl, emptyStateEl } from '/utils/empty-state.js';
 import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight } from '/utils/ux.js';
 import { TOAST_SURFACES } from '/utils/toast-surface.js';
 import { showToast } from '/utils/toast-show.js';
+import { unknownPathDetour, detourPaths } from '/utils/unknown-route.js';
 import { BULK_PILL_LAYER, clearBulkPill } from '/utils/bulk-pill.js';
 import { watchToastPlacement } from '/utils/toast-placement.js';
 import { COMPOSITION_MODES } from '/utils/page-layout.js';
 import { init as initReminders, stop as stopReminders } from '/reminders.js';
 import { initPush, stopPush } from '/push.js';
 import { numberLocaleFor } from '/settings/region-presets.js';
-import { setDisplayTimeZone } from '/utils/timezone.js';
+import { setDisplayTimeZone, zonedDateKey } from '/utils/timezone.js';
+import { rememberZonePrefs, forgetZonePrefs, noteZoneDecision } from '/utils/household-zone-hint.js';
 import { isKitchenRoute, getLastKitchenRoute } from '/utils/kitchen-tabs.js';
 import { swapPage } from '/utils/view-transition.js';
 import { moduleAccentToken, moduleAccentVar } from '/utils/module-accent.js';
@@ -624,6 +627,26 @@ function createFocusTrap(container) {
 }
 
 /**
+ * Der Umweg fuer eine Adresse ohne Route (#1607), oder null. Regeln in
+ * utils/unknown-route.js. Bekannt ist, was allRoutes() kennt - also erst
+ * verlaesslich, wenn die Erweiterungsrouten geladen sind (nach der Anmeldung).
+ * Landeplatz ist jede Route ausser einem abgeschalteten oder gesperrten Modul
+ * und den zwei Seiten, von denen eine angemeldete Sitzung sofort wieder
+ * wegfuehrt. Die Route eines solchen Moduls SELBST ist bekannt und bleibt den
+ * Modul-Guards in navigate().
+ */
+function unknownDetourFor(path) {
+  const routes = allRoutes();
+  return unknownPathDetour(path, {
+    known: routes.map((r) => r.path),
+    landable: routes
+      .filter((r) => r.path === '/' || (r.path !== '/login' && r.path !== '/setup'
+        && !(r.module && (_disabledModules.has(r.module) || !canAccessNavModule(r.module)))))
+      .map((r) => r.path),
+  });
+}
+
+/**
  * Navigiert zu einem Pfad und rendert die entsprechende Seite.
  * @param {string} path
  * @param {Object|boolean} userOrPushState - Direkt ein User-Objekt nach Login,
@@ -632,6 +655,33 @@ function createFocusTrap(container) {
  */
 async function navigate(path, userOrPushState = true, pushState = true) {
   if (isNavigating) return;
+  // UNBEKANNTE ADRESSE (#1607): statt still die Uebersicht unter der toten
+  // Adresse zu zeichnen, laeuft DIESE Navigation mit dem naechsten bekannten
+  // Vorfahren weiter. Bewusst kein zweites navigate(): das gab im finally die
+  // Sperre frei, waehrend das innere noch lud, und fragte den Verlassen-Schutz
+  // zweimal (Review #1638). takeDetour berichtigt nur den Pfad; Adresse und
+  // Hinweis folgen erst hinter Schutz und Sperre.
+  let detourAddress = null;
+  let unknownNotice = false;
+  const takeDetour = (push) => {
+    const detour = unknownDetourFor(path);
+    if (!detour) return false;
+    const corrected = detourPaths(detour, path, { pushState: push, location });
+    path = corrected.path;
+    detourAddress = corrected.address;
+    unknownNotice = detour.notify;
+    return true;
+  };
+  // Kaltstart und Zurueck/Vor: die tote Adresse IST der laufende Eintrag und
+  // wird ersetzt, Zurueck fuehrt danach nicht wieder auf sie. Bei einem Wechsel
+  // in der App schreibt der regulaere Eintrag weiter unten die berichtigte.
+  const commitDetourAddress = (push) => {
+    if (!push && detourAddress) history.replaceState({ path }, '', detourAddress);
+  };
+  // In einer laufenden Sitzung steht die Modulliste schon (sie kommt mit den
+  // Praeferenzen) - dann VOR dem Verlassen-Schutz, damit er nach dem Ziel
+  // fragt, auf dem die Navigation endet. Sonst nach dem zweiten Lookup unten.
+  if (currentUser && _preferencesLoaded && typeof userOrPushState !== 'object') takeDetour(userOrPushState);
   // VERLASSEN-SCHUTZ (utils/leave-guard.js, Re-Critique 2026-09-28 A7 P2-1):
   // eine Seite mit ungespeicherter Arbeit - der Anpassen-Modus der Uebersicht -
   // fragt, bevor sie verschwindet. Jeder Weg endet hier: Seitenleiste,
@@ -653,6 +703,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     return;
   }
   isNavigating = true;
+  commitDetourAddress(userOrPushState);
 
   // Offenes „Mehr“-Sheet beim Navigieren immer schließen — robust und
   // unabhängig vom Klick-Bubbling (das reißt, wenn die Navigation
@@ -679,7 +730,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
 
     // Alten Pfad merken, bevor currentPath aktualisiert wird - Kaltstart oder Wechsel
     const previousPath = currentPath;
-    const basePath = path.split('?')[0];
+    let basePath = path.split('?')[0];
     currentPath = basePath;
 
     // Scrollstand der Seite festhalten, die gerade verlassen wird - er ist die
@@ -691,7 +742,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     }
     // Vorwärts heißt oben anfangen, Zurück/Vor heißt weitermachen. Details und
     // die Begründung gegen eine Nav-Reihenfolge in utils/scroll-restore.js.
-    const scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
+    let scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
 
     // First-Run-Weiche: Solange kein Account existiert und niemand eingeloggt ist,
     // alle Routen außer /setup auf /setup umleiten.
@@ -766,6 +817,19 @@ async function navigate(path, userOrPushState = true, pushState = true) {
 
     route = allRoutes().find((r) => r.path === basePath) ?? route;
 
+    // Unbekannte Adresse, zweite Stelle (Kaltstart, Anmeldung): ERST HIER
+    // sind die Erweiterungsrouten geladen (syncThirdPartyModules im Auth-Guard),
+    // davor waere jede "unbekannt". Einen Verlassen-Schutz gibt es auf diesem
+    // Weg nicht - es steht noch keine Seite. Die Guards danach urteilen ueber
+    // die berichtigte Route.
+    if (takeDetour(pushState)) {
+      basePath = path.split('?')[0];
+      currentPath = basePath;
+      scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
+      route = allRoutes().find((r) => r.path === basePath) ?? route;
+      commitDetourAddress(pushState);
+    }
+
     // Split-Guest-Weiche: Gäste einer Ausgabenteilung sehen nur das Budget-Modul.
     // ABER: hat der Nutzer zusätzlich eine Familienrolle OHNE Budget-Recht, würde
     // ein bedingungsloses navigate('/budget') vom Modul-Guard (canAccessNavModule)
@@ -808,8 +872,8 @@ async function navigate(path, userOrPushState = true, pushState = true) {
        * WAR ER ES, TRITT DIE NEUE SEITE AN SEINE STELLE. Laege sie darueber,
        * zeigte der Rueckweg zuerst auf einen Eintrag mit derselben Adresse -
        * eine Geste, die sichtbar nichts tut. */
-      if (consumeOverlayMarker()) history.replaceState({ path }, '', path);
-      else history.pushState({ path }, '', path);
+      if (consumeOverlayMarker()) history.replaceState({ path }, '', detourAddress ?? path);
+      else history.pushState({ path }, '', detourAddress ?? path);
     }
 
     // Soft-Navigation innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt
@@ -885,6 +949,10 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     focusMainContentAfterNavigation(basePath);
   } finally {
     isNavigating = false;
+    // Im finally, weil auch die Soft-Navigation (Settings-Blatt) frueh
+    // zurueckkehrt - und nach dem Rendern, weil es die Toast-Flaeche beim
+    // Kaltstart erst mit der Shell gibt.
+    if (unknownNotice) showToast(t('common.unknownAddress'), 'default', 5000);
     // auth:expired kann waehrend einer Navigation gefeuert haben (z.B. wenn ein
     // paralleler API-Call 401 zurueckgab). Jetzt wo die Navigation abgeschlossen
     // ist, holen wir die Login-Weiterleitung nach.
@@ -914,6 +982,10 @@ async function syncPreferencesOnce() {
     // der nichts darueber aussagt, wo dieser Haushalt lebt. Ohne getroffene
     // Wahl bleibt die Anzeige also beim Browser, so wie bisher.
     setDisplayTimeZone(res?.data?.timezone ?? null);
+    // Der Zonen-Hinweis der Uebersicht (#1607) liest genau diese Antwort: sie
+    // ist da, bevor die erste Seite zeichnet, also steht er schon neben dem
+    // Skelett und schiebt nichts nach.
+    rememberZonePrefs(res?.data);
     // Region als Formatier-Locale für Zahlen/Währung spiegeln (z. B. de-CH →
     // 123'456.78). getFormatLocale() in i18n.js liest diesen Wert.
     const numberLocale = numberLocaleFor({
@@ -1125,11 +1197,6 @@ function syncSidebarTools(root = document.querySelector('.nav-sidebar__logo-acti
   }
 }
 
-/** Initialen fuer die Avatar-Scheibe ohne Bild (wie in den Einstellungen). */
-function accountInitials(name) {
-  return String(name || '').trim().split(/\s+/).map((w) => w[0] ?? '').join('').toUpperCase().slice(0, 2);
-}
-
 /**
  * Die Kontozeile am Fuss der Seitenleiste: Avatar, Name, und dahinter das
  * Konto-Menue (Hilfe, Aenderungen, Abmelden).
@@ -1241,7 +1308,7 @@ function syncSidebarAccount(root = document.querySelector('.nav-sidebar__account
     img.alt = '';
     avatar.replaceChildren(img);
   } else {
-    avatar.textContent = accountInitials(displayName);
+    avatar.textContent = initials(displayName);
   }
   const label = displayName ? t('nav.accountMenu', { name: displayName }) : t('nav.accountMenuAnonymous');
   trigger.dataset.baseLabel = label;
@@ -3756,12 +3823,15 @@ function renderSearchResults(container, data, onClose, { local = { places: [], a
   // 3. DATEN - Reihenfolge, Ueberschrift, Ziel und Zweitzeile je Trefferart:
   // utils/search-sections.js (test:search-permissions prueft sie gegen die
   // Antwort des Servers).
-  const fmt = { formatDate, formatTime, activityLabel };
+  // `dateKey` ist der Kalendertag in der ANZEIGEZONE: der Termin-Treffer baut
+  // daraus den Tag seines Links (#1607), und ein synchronisierter Termin liegt
+  // als Instant in der Zeile - sein UTC-Tag waere der falsche.
+  const fmt = { formatDate, formatTime, activityLabel, dateKey: zonedDateKey };
   if (data) {
     SEARCH_SECTIONS.forEach((section) => {
       const hits = Array.isArray(data?.[section.bucket]) ? data[section.bucket] : [];
       makeSection(t(section.labelKey), section.module, hits, {
-        route: section.route,
+        route: (item) => section.route(item, fmt),
         title: (item) => (section.label ? section.label(item, fmt) : item.title),
         meta: section.meta ? (item) => section.meta(item, fmt) : null,
       });
@@ -4706,6 +4776,7 @@ window.addEventListener('popstate', (e) => {
 function forgetSessionState() {
   currentUser = null;
   _preferencesLoaded = false;
+  forgetZonePrefs();
   _hiddenModules = new Set();
   _moduleOrder = [];
   _mobileNavOrder = [];
@@ -4870,6 +4941,10 @@ window.addEventListener('date-format-changed', refreshCurrentRoute);
 // Die Anzeigezone wirkt auf jede Uhrzeit auf dem Schirm - dasselbe Neuzeichnen
 // wie beim Datums-/Zeitformat (#829 Teil 3).
 window.addEventListener('timezone-changed', refreshCurrentRoute);
+// Und der Zonen-Hinweis der Uebersicht erfaehrt hier, dass entschieden ist
+// (#1607): das Auswahlfeld der Einstellungen schreibt an ihm vorbei. Das
+// Neuzeichnen oben laeuft per setTimeout, liest also schon den neuen Stand.
+window.addEventListener('timezone-changed', (event) => noteZoneDecision(event.detail?.timezone));
 window.addEventListener('time-format-changed', refreshCurrentRoute);
 
 window.addEventListener('resize', () => {
@@ -5072,6 +5147,29 @@ window.yuvomi = {
   // Die Uebersichtsseite reicht ihre `/dashboard`-Antwort herein, statt sie ein
   // zweites Mal holen zu lassen. Begruendung an `primeModuleCountsFrom`.
   primeModuleCountsFrom,
+  // Fuer eine Seite, die sich SELBST neu aufbaut, ohne dass der Router
+  // navigiert - die Uebersicht beim Betreten und Verlassen des Wand-Modus, nach
+  // „erneut versuchen" oder einer Aenderung aus einer Kachel. renderPage()
+  // laeuft dann nicht, und mit ihm fehlten beide Haelften des FAB-Wechsels
+  // (#1588):
+  //   - clearPageFab(): der Knopf des vorigen Aufbaus haengt schon in der
+  //     Shell-Ebene neben dem Container. Bringt der neue Aufbau keinen mit (die
+  //     Wand), stand der alte bedienbar auf der Wand, bis die Seite ihn nach
+  //     ihren Daten selbst raeumte.
+  //   - adoptPageFab(): bringt er einen mit, blieb der im Scrollport - ohne
+  //     Glyph (die Icons zeichnet sonst erst updateNav()), und die Tab-Kapsel
+  //     hielt ihr hinteres Ende nicht mehr frei, weil ihre Reserve an
+  //     `.fab-layer .page-fab` haengt: die Slots liefen unter den Knopf.
+  // Aufzurufen direkt nach dem synchronen Teil von render(), wie in renderPage().
+  replacePageFab: () => {
+    clearPageFab();
+    const fab = adoptPageFab();
+    if (fab) {
+      markFabShortcut(fab);
+      window.lucide?.createIcons({ el: fab.closest('.page-fab-group') ?? fab });
+    }
+    return fab;
+  },
   applyTheme: (value) => {
     if (value === 'dark') {
       document.documentElement.setAttribute('data-theme', 'dark');

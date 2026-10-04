@@ -4961,6 +4961,58 @@ test('Farb-Heilung: eine Farbwahl vor dem ersten Heil-Lauf kommt nicht in den Sc
   }
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+// Ein Termin aus einem fremden, ungeteilten ICS-Abo - per Kennung
+// ════════════════════════════════════════════════════════════════════════════
+//
+// Die Liste, die Suche und `/upcoming` ziehen den Abo-Filter seit jeher: ein
+// ICS-Termin erscheint nur aus einem geteilten oder eigenen Abo. Die Wege, die
+// eine Kennung aus dem Pfad nehmen, fragten nur die Zeilen-Sichtbarkeit - und
+// die steht bei einem importierten Termin auf `all`.
+test('ICS-Termin aus fremdem ungeteiltem Abo: per Kennung weder lesbar noch aenderbar', async () => {
+  const missing = await call('GET', '/999999', { actor: TOM });
+  assert.equal(missing.status, 404);
+
+  const subId = db.prepare(
+    "INSERT INTO ics_subscriptions (name, url, color, created_by, shared) VALUES ('Marias Abo','https://x/priv.ics','#112233',?,0)",
+  ).run(MARIA.id).lastInsertRowid;
+  const single = insertEvent({ title: 'ABO-GEHEIM', start_datetime: '2043-02-03T09:00', external_source: 'ics', subscription_id: subId, created_by: MARIA.id });
+  const series = insertEvent({ title: 'ABO-GEHEIM-SERIE', start_datetime: '2043-02-03T09:00', recurrence_rule: 'FREQ=DAILY', external_source: 'ics', subscription_id: subId, created_by: MARIA.id });
+  const before = () => db.prepare('SELECT id, title, user_modified FROM calendar_events WHERE subscription_id = ? ORDER BY id').all(subId);
+  const untouched = before();
+  const exdates = () => db.prepare('SELECT COUNT(*) AS n FROM calendar_event_exceptions WHERE event_id = ?').get(series).n;
+
+  // Die Voraussetzung: in der Liste steht er fuer Tom nicht.
+  const listed = await call('GET', '/?from=2043-02-01&to=2043-02-05', { actor: TOM });
+  assert.ok(!JSON.stringify(listed.body).includes('ABO-GEHEIM'), 'die Liste zeigt den Termin');
+
+  for (const viewer of [TOM, ADMIN]) {
+    const who = viewer === ADMIN ? 'Admin' : 'Mitglied';
+    const read = await call('GET', `/${single}`, { actor: viewer });
+    assert.equal(read.status, 404, `${who}: GET /:id`);
+    assert.deepEqual(read.body, missing.body, `${who}: die Antwort verraet den Termin`);
+    assert.equal((await call('PUT', `/${single}`, { actor: viewer, body: { title: 'uebernommen' } })).status, 404, `${who}: PUT /:id`);
+    assert.equal((await call('DELETE', `/${single}`, { actor: viewer })).status, 404, `${who}: DELETE /:id`);
+    assert.equal((await call('POST', `/${series}/exceptions`, { actor: viewer, body: { date: '2043-02-04' } })).status, 404, `${who}: POST /:id/exceptions`);
+    assert.equal((await call('PUT', `/${series}/occurrences/2043-02-04T09:00`, { actor: viewer, body: { title: 'x' } })).status, 404, `${who}: PUT occurrence`);
+    assert.equal((await call('DELETE', `/${series}/occurrences/2043-02-04T09:00`, { actor: viewer })).status, 404, `${who}: DELETE occurrence`);
+  }
+  assert.deepEqual(before(), untouched, 'ein fremder Aufruf hat den Termin veraendert');
+  assert.equal(exdates(), 0, 'ein fremder Aufruf hat eine Ausnahme geschrieben');
+
+  // Die Eigentuemerin des Abos liest ihren Termin.
+  const own = await call('GET', `/${single}`, { actor: MARIA });
+  assert.equal(own.status, 200);
+  assert.equal(own.body.data.title, 'ABO-GEHEIM');
+
+  // Geteilt: derselbe Termin ist fuer alle da.
+  db.prepare('UPDATE ics_subscriptions SET shared = 1 WHERE id = ?').run(subId);
+  assert.equal((await call('GET', `/${single}`, { actor: TOM })).status, 200);
+
+  db.prepare('DELETE FROM calendar_events WHERE subscription_id = ?').run(subId);
+  db.prepare('DELETE FROM ics_subscriptions WHERE id = ?').run(subId);
+});
+
 // ════════════════════════════════════════════════════════════════════════════════
 // #1607 (9): ein Serienende VOR dem Start
 // ════════════════════════════════════════════════════════════════════════════════
@@ -5111,4 +5163,46 @@ test('following - ein Nachfolger, dessen Regel vor seinem Start endet, wird abge
   } finally {
     db.prepare("DELETE FROM calendar_events WHERE title = 'ENDE-FOLGESERIE'").run();
   }
+});
+
+test('POST /:id/reset: ein Termin, den die Person nicht sieht, ist 404 - nicht 403 oder 400', async () => {
+  // Die Route lud den Termin per Kennung und antwortete je nach Fall anders:
+  // 400 fuer einen fremden PRIVATEN lokalen Termin ("nur ICS"), 403 fuer einen
+  // Termin aus fremdem ungeteiltem Abo. Beides sagt, dass es die Kennung gibt -
+  // und ein Admin konnte den Termin eines Abos zuruecksetzen, das er nicht sieht.
+  const missing = await call('POST', '/999999/reset', { actor: TOM });
+  assert.equal(missing.status, 404);
+
+  const subId = db.prepare(
+    "INSERT INTO ics_subscriptions (name, url, color, created_by, shared) VALUES ('Marias Reset-Abo','https://x/rs.ics','#112233',?,0)",
+  ).run(MARIA.id).lastInsertRowid;
+  const ics = insertEvent({ title: 'RESET-GEHEIM', start_datetime: '2044-02-03T09:00', external_source: 'ics', subscription_id: subId, created_by: MARIA.id, user_modified: 1 });
+  const priv = insertEvent({ title: 'RESET-PRIVAT', start_datetime: '2044-02-03T09:00', created_by: MARIA.id, visibility: 'private' });
+  const flag = () => db.prepare('SELECT user_modified FROM calendar_events WHERE id = ?').get(ics).user_modified;
+
+  for (const viewer of [TOM, ADMIN]) {
+    const who = viewer === ADMIN ? 'Admin' : 'Mitglied';
+    for (const [label, id] of [['ungeteiltes Abo', ics], ['privater lokaler Termin', priv]]) {
+      const r = await call('POST', `/${id}/reset`, { actor: viewer });
+      assert.equal(r.status, 404, `${who}: ${label}`);
+      assert.deepEqual(r.body, missing.body, `${who}: ${label} - die Antwort verraet den Termin`);
+    }
+  }
+  assert.equal(flag(), 1, 'ein fremder Aufruf hat den Termin zurueckgesetzt');
+
+  // Die Eigentuemerin des Abos setzt zurueck, und ihr eigener lokaler Termin
+  // bekommt weiter die ehrliche 400.
+  assert.equal((await call('POST', `/${priv}/reset`, { actor: MARIA })).status, 400);
+  assert.equal((await call('POST', `/${ics}/reset`, { actor: MARIA })).status, 200);
+  assert.equal(flag(), 0);
+
+  // Geteilt: der Admin sieht den Termin und darf zuruecksetzen wie bisher,
+  // ein Mitglied ohne Bezug bekommt die 403.
+  db.prepare('UPDATE ics_subscriptions SET shared = 1 WHERE id = ?').run(subId);
+  db.prepare('UPDATE calendar_events SET user_modified = 1 WHERE id = ?').run(ics);
+  assert.equal((await call('POST', `/${ics}/reset`, { actor: TOM })).status, 403);
+  assert.equal((await call('POST', `/${ics}/reset`, { actor: ADMIN })).status, 200);
+
+  db.prepare('DELETE FROM calendar_events WHERE id IN (?, ?)').run(ics, priv);
+  db.prepare('DELETE FROM ics_subscriptions WHERE id = ?').run(subId);
 });

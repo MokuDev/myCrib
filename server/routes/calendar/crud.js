@@ -7,7 +7,7 @@ import { createLogger } from '../../logger.js';
 import express from 'express';
 import * as db from '../../db.js';
 import { str, color, datetime, rrule, collectErrors, MAX_TITLE, MAX_TEXT, DATE_RE } from '../../middleware/validate.js';
-import { normalizeVisibility, visibilityWhere } from '../../services/visibility.js';
+import { icsSubscriptionVisibleWhere, normalizeVisibility, visibilityWhere } from '../../services/visibility.js';
 import { hasAnyOccurrence, endsBeforeStart } from '../../services/recurrence.js';
 import { resolveProjectedEventRows } from '../../services/calendar-event-reader.js';
 import { hasExplicitZone, householdTimeZone, shiftDateKey, utcToWall } from '../../utils/timezone.js';
@@ -448,8 +448,9 @@ router.get('/:id', (req, res) => {
       LEFT JOIN birthdays bd ON bd.calendar_event_id = e.id
       LEFT JOIN birthdays nd ON nd.name_day_calendar_event_id = e.id
       WHERE e.id = ?
+        AND ${icsSubscriptionVisibleWhere('e')}
         AND ${visibilityWhere('e', 'event_assignments', 'event_id')}
-    `).get(id, getUserId(req), getUserId(req));
+    `).get(id, getUserId(req), getUserId(req), getUserId(req));
 
     if (!event) return res.status(404).json({ error: 'Termin nicht gefunden', code: 404 });
     const database = db.get();
@@ -669,8 +670,9 @@ function loadVisibleEvent(id, req) {
   return db.get().prepare(`
     SELECT e.* FROM calendar_events e
     WHERE e.id = ?
+      AND ${icsSubscriptionVisibleWhere('e')}
       AND ${visibilityWhere('e', 'event_assignments', 'event_id')}
-  `).get(id, me, me);
+  `).get(id, me, me, me);
 }
 
 const CALENDAR_OCCURRENCE_ERRORS = {
@@ -1692,7 +1694,11 @@ router.post('/:id/reset', (req, res) => {
       LEFT JOIN ics_subscriptions s ON s.id = e.subscription_id
       WHERE e.id = ?
     `).get(id);
-    if (!event) return res.status(404).json({ error: 'Termin nicht gefunden', code: 404 });
+    // Unsichtbar heisst auch hier "gibt es nicht" (wie GET/PUT/DELETE /:id):
+    // sonst verriete die 400 einen fremden privaten Termin und die 403 einen
+    // Termin aus einem fremden ungeteilten Abo, und ein Admin setzte einen
+    // Termin zurueck, den er nicht sieht. Die Rechteregel darunter bleibt.
+    if (!event || !loadVisibleEvent(id, req)) return res.status(404).json({ error: 'Termin nicht gefunden', code: 404 });
     if (event.external_source !== 'ics')
       return res.status(400).json({ error: 'Nur ICS-Events können zurückgesetzt werden.', code: 400 });
 

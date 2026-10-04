@@ -383,6 +383,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+- **Ticking off, reopening or archiving a task now respects its visibility.** A private task, or
+  one visible to its assignees only, is hidden from everyone else, and since v2.12.0 it cannot be
+  edited or deleted by them either. Changing its status was left out of that rule: a household
+  member who could not see a task could still mark it done, reopen it or archive it by addressing
+  it directly through the API. Marking it done could credit the points to the wrong person and
+  create the next occurrence of a recurring task; reopening it took the points already credited
+  back again and discarded that next occurrence. The task's content was not readable this way. The
+  status change now answers "Task not found" for a task you cannot see, exactly as for one that
+  does not exist, and changes nothing. A subtask can no longer be added beneath a task you cannot
+  see for the same reason. Nothing changes for tasks you can see: the person who created a task,
+  the people assigned to it and, for tasks shared with everyone, every member tick them off as
+  before. Affected are all versions since v1.11.0, which introduced task visibility.
+- **A reminder can only be set on an entry you can see, and it only names an entry you can see.**
+  Reminders are set per person on a task, a calendar event, a subscription or an inventory item.
+  Setting one checked that you may use the module, but not that the entry exists or that you may
+  see it, and the list of due reminders and the notification then showed the entry's title. A
+  household member could therefore learn the title of a private task, of a task or event visible
+  to its assignees only, of an event from a calendar subscription that is not shared, and, in
+  personal budget mode, the name, amount and due date of a private subscription. Setting or
+  replacing a reminder on an entry you cannot see now answers "Entity not found", the same as for
+  an entry that does not exist. Due reminders, push notifications and the notification channels
+  skip a reminder whose entry its recipient cannot see. That also covers reminders created before
+  this update and entries that became private afterwards, such as a task changed to private or
+  an event you are no longer assigned to. Such a reminder is kept, not deleted, and comes back
+  if the entry becomes visible to you again. One consequence: a person assigned to a *private*
+  event no longer receives the reminder its creator set, because a private event is visible to
+  its creator only; use "assignees only" for an event the assigned people should hear about.
+  Your own reminders and those passed on to the assignees of an event work as before. Affected
+  are all versions since v1.11.0 for tasks and events, since v1.23.0 for subscriptions, and
+  since v0.20.38 for events from a calendar subscription that is not shared.
+- **The points history no longer names a task you cannot see.** A points entry in Rewards shows
+  the title of the task it was earned for, and the history is open to everyone who can use
+  Rewards. That made the title of a private task, or of one visible to its assignees only,
+  readable for the rest of the household as soon as the task was ticked off. The history now
+  shows that title only to the person the points belong to and to those who can see the task;
+  everyone else sees the entry with its person, date and points and the neutral text "Task
+  completed". Once a task has been deleted, its title stays with the person the points belong
+  to. This applies to entries already in the history as well. Balances, bonus points,
+  corrections and redemptions are shown as before. Affected are all versions since v1.11.0.
+- **An event from a calendar subscription that is not shared can no longer be opened or changed
+  by other members.** A subscribed calendar (ICS) that its owner has not shared is hidden from
+  everyone else in the calendar, the search and the overview. Addressing one of its events
+  directly through the API still returned it, with title, description and location, and let a
+  member edit or delete it. Marking such an event as a countdown also showed it on everyone's
+  overview. These paths now apply the same rule as the calendar list and answer "not found", as
+  for an event that does not exist. The same holds for resetting a subscribed event to its feed
+  version: an admin could reset an event of a subscription they cannot see, and the answer told
+  apart an event that exists but is hidden from one that does not exist. Events from a shared
+  subscription and local events are unaffected. Affected are all versions since v0.20.38; the
+  countdown since v2.18.0.
+- **Household notification channels no longer receive reminders for entries that are not visible
+  to everyone.** A notification channel set up by an admin (ntfy, Gotify, webhook or e-mail)
+  received every due reminder of every member, with the entry's title. That included your own
+  reminder for a private task or event, for one visible to its assignees only, for an event
+  from a calendar subscription that is not shared and, in personal budget mode, for a private
+  subscription with its amount and date, so the people reading that channel saw what the
+  entry's visibility hides from them. Such reminders now go to your own devices by push only
+  (and to a channel that belongs to you alone, where one exists). Reminders for entries everyone
+  can see reach the household channel as before. If you rely on a household channel for
+  reminders about private entries, turn on push notifications on your device; the reminder
+  also still appears in the app. Affected are all versions since v1.11.0.
+- **Health, shift and private-document reminders no longer reach household notification
+  channels.** The reminders Yuvomi creates on its own went to the household channel as well:
+  the predicted start of a period (in the version sent to a partner, with the person's name),
+  the daily cycle log hint, a due preventive check-up, fasting reminders, a shift about to start
+  and the expiry of a document, including a private one or one shared with named people only.
+  Cycle, check-up and fasting reminders and shift reminders now go to the person they are meant
+  for only, by push (and to a channel of their own, where one exists). A document expiry reaches
+  the household channel only if the document is visible to the whole family. Pantry and waste
+  collection reminders are household matters and reach the channel as before. Affected are
+  versions since v2.65.0 (cycle and shifts), v2.67.0 (partner notice) and v2.68.0 (check-ups,
+  fasting, document expiry).
+
 - **The budget list filter and the budget plan no longer reveal what other members keep private.**
   In personal budget mode, an entry another member shares as "amount only" shows you its amount and
   date, but not what it was for. Filtering the entry list by category still matched it under its

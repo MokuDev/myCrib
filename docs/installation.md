@@ -313,9 +313,9 @@ docker compose up -d
 Docker pulls `ghcr.io/mokudev/mycrib:latest` automatically. No build step, no Node.js installation needed.
 
 > **Pinning a version.** Every release is also published under immutable tags:
-> `1.1.0` (exact version), `1.1` (latest patch of that minor), plus a moving `main`
+> `1.2.0` (exact version), `1.2` (latest patch of that minor), plus a moving `main`
 > tag for the current development state. To pin production to a known-good release,
-> set `image: ghcr.io/mokudev/mycrib:1.1.0` in your compose file and bump it
+> set `image: ghcr.io/mokudev/mycrib:1.2.0` in your compose file and bump it
 > deliberately; `latest` always points at the newest release. Note: these version tags
 > and `latest` only exist once a `vX.Y.Z` tag has actually been pushed to this
 > repository and built - before the first one, only the `main` and per-commit `sha-`
@@ -327,7 +327,7 @@ Docker pulls `ghcr.io/mokudev/mycrib:latest` automatically. No build step, no No
 > image you are about to run is one GitHub built from a release tag of this repository:
 >
 > ```bash
-> cosign verify ghcr.io/mokudev/mycrib:1.1.0 \
+> cosign verify ghcr.io/mokudev/mycrib:1.2.0 \
 >   --certificate-oidc-issuer https://token.actions.githubusercontent.com \
 >   --certificate-identity-regexp '^https://github.com/MokuDev/myCrib/.github/workflows/docker-publish.yml@refs/tags/v'
 > ```
@@ -339,7 +339,7 @@ Docker pulls `ghcr.io/mokudev/mycrib:latest` automatically. No build step, no No
 > repository released. The `main` tag is signed too, under `refs/heads/main`, which the
 > pattern above deliberately excludes.
 > Provenance and SBOM travel inside the image: `docker buildx imagetools inspect
-> ghcr.io/mokudev/mycrib:1.1.0 --format '{{ json .Provenance }}'`.
+> ghcr.io/mokudev/mycrib:1.2.0 --format '{{ json .Provenance }}'`.
 
 Continue with [Step 4 — Verify](#4-verify-the-container-is-running).
 
@@ -384,7 +384,7 @@ docker compose logs -f
 You should see output like:
 
 ```
-yuvomi  | [myCrib] Server running on port 3000 | Version 1.1.0
+yuvomi  | [myCrib] Server running on port 3000 | Version 1.2.0
 yuvomi  | [myCrib] Environment: production
 yuvomi  | [Sync] Auto-sync active every 15 minutes.
 ```

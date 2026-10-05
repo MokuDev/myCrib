@@ -9,6 +9,7 @@
 // aus test-browser-loader.mjs, und '/utils/...' waere dort das Dateisystem-Root.
 // Im Browser loest './utils/timezone.js' von '/i18n.js' aus auf dasselbe auf.
 import { zonedFields } from './utils/timezone.js';
+import { resolveKoreanParticles } from './utils/korean-particles.js';
 
 const SUPPORTED_LOCALES = ['de', 'en', 'es', 'fr', 'it', 'sv', 'el', 'ru', 'tr', 'zh', 'ja', 'ar', 'hi', 'pt-BR', 'pt', 'uk', 'pl', 'nl', 'cs', 'vi', 'hu', 'ko', 'id', 'fa', 'fil', 'nb'];
 const RTL_LOCALES = new Set(['ar', 'fa']);
@@ -52,6 +53,19 @@ function applyDocumentLocale(locale) {
 // Vereinfacht, und genau darauf soll `zh-CN` fallen.
 const REGION_SCRIPT = { TW: 'Hant', HK: 'Hant', MO: 'Hant' };
 
+// Sprachcodes, die eine vorhandene Locale meinen, aber anders heissen. `no` ist
+// die Makrosprache Norwegisch, und Browser melden sie weiterhin (`no`, `no-NO`),
+// obwohl die Locale-Datei `nb` heisst. `nn` (Nynorsk) hat keine eigene Datei;
+// wer Nynorsk liest, liest Bokmaal eher als Englisch.
+//
+// Der Alias ist ein RUECKFALL, kein Ersatz: er greift erst, wenn der Tag selbst
+// nichts findet. Kommt eine `nn.json` dazu, gewinnt sie von allein.
+//
+// Dieselbe Zuordnung fuehren lang-init.js, tools/installer/i18n-mini.js,
+// install.sh und server/utils/i18n.js - kein Import verbindet die fuenf
+// (Schichtgrenze, <head>-Skript, Shell), test:language-lists haelt sie gleich.
+const LANGUAGE_ALIAS = { no: 'nb', nn: 'nb' };
+
 /**
  * Kanonische BCP-47-Schreibweise: Sprache klein, Schrift (vier Zeichen)
  * Titlecase, Region (zwei Zeichen) groß. Ein Browser darf `ZH-hant-tw` melden,
@@ -82,25 +96,40 @@ export function pickLocale(tags, supported) {
   for (const roh of tags || []) {
     if (!roh) continue;
     const teile = canonicalTag(roh).split('-');
-    // Eine Schrift, die im Tag STEHT, schlaegt jede, die eine Region nur nahelegt.
-    // `zh-Hans-HK` meint Vereinfacht in Hongkong, und macOS, iOS und Android melden
-    // genau das. Ohne diese Sperre antwortet die Regionszuordnung darauf mit
-    // Traditionell - also mit dem Gegenteil dessen, was ausdruecklich dasteht.
-    const traegtSchrift = teile.slice(1).some((teil) => teil.length === 4);
-    while (teile.length) {
-      const tag = teile.join('-');
-      if (supported.includes(tag)) return tag;
-      if (!traegtSchrift) {
-        const letzter = teile[teile.length - 1];
-        // hasOwnProperty.call statt Object.hasOwn: das kennt Chrome erst ab 93, und
-        // diese Zeile laeuft beim Start vor dem ersten Bild (#1276).
-        const schrift = Object.prototype.hasOwnProperty.call(REGION_SCRIPT, letzter) ? REGION_SCRIPT[letzter] : null;
-        if (schrift && supported.includes(`${teile[0]}-${schrift}`)) return `${teile[0]}-${schrift}`;
-      }
-      teile.pop();
+    const treffer = matchTag(teile.slice(), supported);
+    if (treffer) return treffer;
+    // hasOwnProperty.call statt Object.hasOwn, wie in matchTag (#1276).
+    if (Object.prototype.hasOwnProperty.call(LANGUAGE_ALIAS, teile[0])) {
+      const alias = matchTag([LANGUAGE_ALIAS[teile[0]]].concat(teile.slice(1)), supported);
+      if (alias) return alias;
     }
   }
   return 'en';
+}
+
+/**
+ * Ein Tag als Subtag-Liste gegen die Liste: vom vollen Tag abwaerts, oder null.
+ * Verbraucht `teile`.
+ */
+function matchTag(teile, supported) {
+  // Eine Schrift, die im Tag STEHT, schlaegt jede, die eine Region nur nahelegt.
+  // `zh-Hans-HK` meint Vereinfacht in Hongkong, und macOS, iOS und Android melden
+  // genau das. Ohne diese Sperre antwortet die Regionszuordnung darauf mit
+  // Traditionell - also mit dem Gegenteil dessen, was ausdruecklich dasteht.
+  const traegtSchrift = teile.slice(1).some((teil) => teil.length === 4);
+  while (teile.length) {
+    const tag = teile.join('-');
+    if (supported.includes(tag)) return tag;
+    if (!traegtSchrift) {
+      const letzter = teile[teile.length - 1];
+      // hasOwnProperty.call statt Object.hasOwn: das kennt Chrome erst ab 93, und
+      // diese Zeile laeuft beim Start vor dem ersten Bild (#1276).
+      const schrift = Object.prototype.hasOwnProperty.call(REGION_SCRIPT, letzter) ? REGION_SCRIPT[letzter] : null;
+      if (schrift && supported.includes(`${teile[0]}-${schrift}`)) return `${teile[0]}-${schrift}`;
+    }
+    teile.pop();
+  }
+  return null;
 }
 
 /** Resolve locale: manual override > navigator.languages > English */
@@ -229,9 +258,14 @@ export function t(key, params = {}) {
       ?? resolve(fallbackTranslations, key)
       ?? key;
   }
-  return str.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
+  const fill = (text) => text.replace(/\{\{(\w+)\}\}/g, (placeholder, name) => (
     Object.prototype.hasOwnProperty.call(params, name) ? String(params[name]) : placeholder
   ));
+  // Koreanisch schreibt hinter einen Platzhalter beide Formen der Partikel
+  // (`{{name}}이(가)`), weil die richtige am eingesetzten Wort haengt (#1607).
+  // Die Regel steht in utils/korean-particles.js; jede andere Sprache zahlt
+  // dafuer genau diesen einen Vergleich.
+  return currentLocale === 'ko' ? resolveKoreanParticles(str, fill) : fill(str);
 }
 
 const VALID_DATE_FORMATS = ['mdy', 'dmy', 'ymd', 'mdy_dot', 'dmy_dot', 'dmy_slash', 'ymd_dot', 'ymd_slash'];

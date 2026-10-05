@@ -9,6 +9,7 @@ import { setPermissions, clearPermissions } from '/permissions.js';
 import { setHouseholdSize, setOtherReaders, clearHouseholdSize } from '/utils/household.js';
 import { forgetLayoutHint } from '/utils/dashboard-layout-hint.js';
 import { t } from '/i18n.js';
+import { REFUSAL_MESSAGES } from '/utils/friendly-error.js';
 
 const API_BASE = '/api/v1';
 
@@ -108,9 +109,34 @@ async function apiFetch(path, options = {}, _retried = false) {
     // Waehrend ein Backup eingespielt wird, lehnt der Server Schreibzugriffe
     // mit 503 ab (#1431). Die Seiten zeigen meist `err.message` - also hier
     // uebersetzen, statt den englischen Servertext durchzureichen.
-    const message = response.status === 503 && data?.reason === 'restore_in_progress'
-      ? t('common.errorRestoreInProgress')
-      : data?.error || `HTTP ${response.status}`;
+    if (response.status === 503 && data?.reason === 'restore_in_progress') {
+      throw new ApiError(t('common.errorRestoreInProgress'), response.status, data, response.headers.get('Retry-After'));
+    }
+    // Eine Absage, die ihren Grund nennt (#1607 das Modul-Gate, #1640 gesperrte
+    // Aufgabe, gespiegeltes Rezept, CSRF): der Satz zum Grund statt des
+    // englischen vom Server. Manche Seiten zeigen `err.data.error` statt
+    // `err.message` (Gesundheit, deren Einstellungen) - deshalb traegt beides
+    // die Uebersetzung. Die Liste steht bei friendlyError, das denselben Satz zeigt.
+    const refusalKey = response.status === 403 ? REFUSAL_MESSAGES.get(data?.reason) : undefined;
+    if (refusalKey) {
+      const text = t(refusalKey);
+      throw new ApiError(text, response.status, { ...data, error: text }, response.headers.get('Retry-After'));
+    }
+    // Jede andere Absage OHNE Grund (#1607): "Not authorized.", "Admin access
+    // required." und rund hundert Geschwister sagen nur "das darfst du nicht",
+    // und zwar englisch - also ein uebersetzter Satz, an beiden Stellen wie
+    // beim Gate darueber. Der Server bleibt sprachfrei, sein Text unveraendert.
+    //
+    // NUR OHNE `reason`. Wer einen nennt, traegt eine Auskunft, die dieser Satz
+    // verschluckte (Display-Konto, fehlendes Recht in einem zweiten Modul), oder
+    // eine Seite liest ihn selbst (Anmeldung, Zwei-Faktor, Kalender-Anhang). Eine
+    // neue 403 mit eigener Auskunft bekommt am Server einen `reason` - die Liste
+    // haelt test:api. Ein Rumpf ohne `error` ist keine Absage der App (Proxy).
+    if (response.status === 403 && typeof data?.error === 'string' && !data.reason) {
+      const text = t('common.errorNoPermission');
+      throw new ApiError(text, response.status, { ...data, error: text }, response.headers.get('Retry-After'));
+    }
+    const message = data?.error || `HTTP ${response.status}`;
     throw new ApiError(message, response.status, data, response.headers.get('Retry-After'));
   }
 

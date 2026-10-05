@@ -14,6 +14,7 @@ import { resolveEventColor } from '/utils/event-color.js';
 import { buildWeekStrip } from '/utils/week-strip.js';
 import { relativeDateLabel, housekeepingSinceLabel } from '/utils/day-label.js';
 import { esc, fmtLocation, renderMarkdownLight } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 // `todayKey` heisst hier schon ein Parameter (bzw. eine lokale Bindung), der den
 // Bezugstag traegt - der Import kommt deshalb unter eigenem Namen herein.
 import { parseLocalDateKey, addLocalDays, todayKey as householdToday } from '/utils/date.js';
@@ -834,10 +835,6 @@ const MEAL_ICONS = {
   dinner:    'moon',
   snack:     'apple',
 };
-
-function initials(name = '') {
-  return name.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase();
-}
 
 function budgetCategoryLabel(category) {
   const key = BUDGET_CATEGORY_LABEL_KEYS[category];
@@ -2121,6 +2118,14 @@ function renderBudgetTopExpenses(budget, currency, size) {
     </div>`;
 }
 
+/* DIE BUDGET-KACHEL NENNT IHREN REITER (#1607). Das Budget merkt sich den
+ * zuletzt offenen Reiter und zeigt ihn ohne `?tab=` wieder - richtig fuer die
+ * Navigation, falsch fuer diese Kachel: wer zuletzt in der Statistik stand,
+ * landete ueber „Eintrag hinzufuegen" auf einem Reiter ohne Anlegen. Kachel und
+ * Kennzahl zeigen den Monat (Einnahmen, Ausgaben, Saldo), also fuehren ihre
+ * Wege auf die Monatsuebersicht. */
+const BUDGET_MONTH_ROUTE = '/budget?tab=budget';
+
 function renderBudgetWidget(budget, currency, size = '1x1') {
   const income = budget?.income || 0;
   const expenses = budget?.expenses || 0;
@@ -2131,17 +2136,17 @@ function renderBudgetWidget(budget, currency, size = '1x1') {
 
   if (!hasData) {
     return `<div class="widget widget--budget">
-      ${widgetHeader('budget', t('nav.budget'), null, '/budget')}
+      ${widgetHeader('budget', t('nav.budget'), null, BUDGET_MONTH_ROUTE)}
       <div class="widget__empty">
         <i data-lucide="wallet" class="empty-state__icon" aria-hidden="true"></i>
         <div>${t('dashboard.noBudgetData')}</div>
-        ${emptyStateCta('/budget', t('budget.addEntryLabel'))}
+        ${emptyStateCta(BUDGET_MONTH_ROUTE, t('budget.addEntryLabel'))}
       </div>
     </div>`;
   }
 
   return `<div class="widget widget--budget">
-    ${widgetHeader('budget', t('nav.budget'), null, '/budget')}
+    ${widgetHeader('budget', t('nav.budget'), null, BUDGET_MONTH_ROUTE)}
     <div class="budget-widget">
       <div class="budget-widget__headline">
         <span>${t('dashboard.monthlyBalance')}</span>
@@ -2216,7 +2221,7 @@ const METRIC_TILE_ORDER = ['tasks', 'shopping', 'budget', 'split-expenses', 'bir
 const METRIC_TILE_COUNT = 4;
 
 function metricTileFor(id, data, currency, sheetSpeaks = new Set()) {
-  const route = { tasks: '/tasks', shopping: '/shopping', budget: '/budget', birthdays: '/birthdays', meals: '/meals', notes: '/notes', rewards: '/rewards', health: '/health', housekeeping: '/housekeeping' }[id];
+  const route = { tasks: '/tasks', shopping: '/shopping', budget: BUDGET_MONTH_ROUTE, birthdays: '/birthdays', meals: '/meals', notes: '/notes', rewards: '/rewards', health: '/health', housekeeping: '/housekeeping' }[id];
   switch (id) {
     case 'tasks': {
       const open = data.openTaskCount;
@@ -2578,17 +2583,28 @@ function rewardGoalLabel(balance, catalog, goal = nextRewardGoal(balance, catalo
  * Kachel, die eine Rasterzeile hoch ist, trug die Eltern-Sicht mit Satz 259px
  * gegen 183px der Nachbarkachel und dehnte deren Zeile mit (gemessen 1440px).
  * Wer den Satz lesen will, zieht die Kachel auf 1x2 - dort steht er.
+ *
+ * AUSNAHME: DAS MINUS (#1623). Eine negative Zahl neben einem leeren Balken
+ * erklaert sich nicht, und der Satz stand nur in der Ansage. Kompakt steht
+ * deshalb eine Kurzform (`.rewards-goal__label--compact`, hoechstens zwei
+ * Zeilen), und sie steht AN STELLE des Balkens: der ist bei null leer und
+ * sagt sichtbar nichts, kostete mit der Zeile zusammen aber 23px je Mitglied
+ * (so 9px). Er bleibt per `.sr-only` im DOM - die Ansage behaelt Rolle, Wert
+ * und den ganzen Satz. Ueber null und auf der hohen Kachel aendert sich nichts.
  */
 function rewardGoalHTML(balance, catalog, who = '', { compact = false } = {}) {
   const goal = nextRewardGoal(balance, catalog);
   const label = rewardGoalLabel(balance, catalog, goal);
   if (!goal) return `<p class="rewards-goal__label rewards-goal__label--muted">${esc(label)}</p>`;
   const name = who ? `${t('rewards.progressLabel')}: ${who}` : t('rewards.progressLabel');
+  const compactHint = compact && Number(balance) < 0
+    ? `<p class="rewards-goal__label rewards-goal__label--compact" aria-hidden="true">${esc(t('rewards.balanceBelowZeroShort'))}</p>`
+    : '';
   return `
-    <div class="rewards-goal__track" role="progressbar" aria-label="${esc(name)}"
+    <div class="rewards-goal__track${compactHint ? ' sr-only' : ''}" role="progressbar" aria-label="${esc(name)}"
          aria-valuenow="${goal.pct}" aria-valuemin="0" aria-valuemax="100"
          aria-valuetext="${esc(label)}"><span class="rewards-goal__fill" style="--rewards-progress:${goal.pct / 100}"></span></div>
-    ${compact ? '' : `<p class="rewards-goal__label" aria-hidden="true">${esc(label)}</p>`}`;
+    ${compact ? compactHint : `<p class="rewards-goal__label" aria-hidden="true">${esc(label)}</p>`}`;
 }
 
 function rewardAvatarHTML(m) {

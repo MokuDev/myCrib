@@ -367,6 +367,43 @@ test('Belohnungen: der Einrichtungsschritt „Praemien" wechselt wirklich in den
   assert.ok(geklickt, `gesucht wurde ${gefragt} - der Reiter heisst data-tab-id="catalog"`);
 });
 
+test('Belohnungen: eine Buchung ohne Grund zeigt den Namen ihres Typs, keine leere Zeile', () => {
+  // Der Server liefert `reason: null`, wenn die Aufgabe hinter einer Buchung
+  // fuer die betrachtende Person nicht sichtbar ist (routes/rewards.js). Die
+  // Zeile bleibt dann stehen - mit Betrag und Person - und braucht einen Text,
+  // der nichts verraet: den Namen des Buchungstyps. Ohne den Rueckfall staende
+  // dort "null" oder nichts.
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, ledger: s.ledger, ledgerFilter: s.ledgerFilter };
+  try {
+    s.user = { id: 1, role: 'member' };
+    s.overview = { me: 1, balances: [{ id: 2, display_name: 'Emma', balance: 30 }] };
+    s.ledgerFilter = null;
+    const reasonOf = (row) => {
+      s.ledger = [{ id: 1, delta: 5, user_name: 'Emma', created_at: '2026-09-20', ...row }];
+      const el = markupEl();
+      rewardsPage.renderLedger(el);
+      return el.html.match(/<p class="rw-ledger-row__reason">([^<]*)<\/p>/)?.[1];
+    };
+    const named = reasonOf({ type: 'earn', reason: 'Zimmer', task_id: 7 });
+    assert.equal(named, 'Zimmer');
+    for (const type of ['earn', 'reversal']) {
+      const masked = reasonOf({ type, reason: null, task_id: null });
+      assert.ok(masked && masked.trim(), `${type}: die Zeile hat keinen Text`);
+      assert.notEqual(masked, 'null', `${type}: die Zeile zeigt das Wort null`);
+      assert.match(masked, new RegExp(`ledgerType\\.${type}$`), `${type}: der Text ist nicht der Name des Typs (${masked})`);
+    }
+    // Betrag und Person stehen in der maskierten Zeile weiter da.
+    s.ledger = [{ id: 1, type: 'earn', delta: 5, reason: null, task_id: null, user_name: 'Emma', created_at: '2026-09-20' }];
+    const el = markupEl();
+    rewardsPage.renderLedger(el);
+    assert.match(el.html, /rw-ledger-row__meta">Emma/);
+    assert.match(el.html, /rw-delta--pos/);
+  } finally {
+    Object.assign(s, vorher);
+  }
+});
+
 test('Belohnungen: Verlaufs-Chips sind Kanon-Filterchips mit aria-pressed (Re-Critique 2026-09-28 P2-6)', () => {
   // `.rw-chip` war ein eigener Dialekt: 31px hoch, kein Zustand fuer den
   // Screenreader (aria-pressed fehlte). Kanon ist `.filter-chip` (40/48px,
@@ -534,5 +571,125 @@ test('Belohnungsseite: Punktestandzeile, Anfrage und Verlauf erklaeren das Minus
     assert.equal(rewardsPage.ledgerReason({ type: 'earn', delta: 60, reason: 'Muell' }), 'Muell');
   } finally {
     Object.assign(s, vorher);
+  }
+});
+
+test('Kachel, eine Rasterzeile hoch: das Minus steht sichtbar da, nicht nur in der Ansage (#1623)', () => {
+  const kids = [emma(-50), leo(15)];
+  for (const size of ['1x1', '2x1']) {
+    for (const view of ['approver', 'family']) {
+      const html = renderRewardsWidget({ view, me: 1, standings: kids, participantCount: 2, pending: 0, catalog: [KINO] }, size);
+      const sichtbar = html.match(/<p class="rewards-goal__label[^"]*"[^>]*>([^<]*)<\/p>/g) || [];
+      assert.equal(sichtbar.length, 1, `${view} ${size}: genau eine sichtbare Zeile - Emmas, nicht Leos`);
+      assert.match(sichtbar[0], /rewards-goal__label--compact/, `${view} ${size}: die kompakte Zeile`);
+      assert.match(sichtbar[0], />rewards\.balanceBelowZeroShort</, `${view} ${size}: die Kurzform`);
+      assert.match(sichtbar[0], /aria-hidden="true"/, 'die Ansage traegt den ganzen Satz schon');
+      assert.match(html, /aria-valuetext="rewards\.balanceBelowZero"/, 'der ganze Satz bleibt in der Ansage');
+      assert.equal(progressValue(html), 0);
+      // Der leere Balken weicht der Kurzzeile sichtbar, bleibt aber fuer die Ansage im DOM.
+      const balken = html.match(/<div class="rewards-goal__track[^"]*"[^>]*>/g) || [];
+      assert.equal(balken.length, 2, `${view} ${size}: beide Balken stehen im DOM`);
+      const emmas = balken.find((b) => /aria-valuetext="rewards\.balanceBelowZero"/.test(b));
+      assert.match(emmas, /class="rewards-goal__track sr-only"/, `${view} ${size}: im Minus nicht sichtbar`);
+      assert.match(emmas, /role="progressbar"/);
+      assert.match(emmas, /aria-valuenow="0"/);
+      const leos = balken.find((b) => b !== emmas);
+      assert.match(leos, /class="rewards-goal__track"/, `${view} ${size}: ein Saldo ueber null behaelt seinen Balken`);
+    }
+  }
+  // Hoch bleibt, wie es war: der ganze Satz, keine Kurzform.
+  const tall = renderRewardsWidget({ view: 'approver', me: 1, standings: kids, participantCount: 2, pending: 0, catalog: [KINO] }, '1x2');
+  assert.match(tall, /class="rewards-goal__label"[^>]*>rewards\.balanceBelowZero</);
+  assert.doesNotMatch(tall, /balanceBelowZeroShort/);
+  assert.doesNotMatch(tall, /sr-only/, 'hoch bleibt der Balken sichtbar');
+});
+
+test('Kachel: die Kurzform bricht um, hoechstens zwei Zeilen (#1623)', async () => {
+  // Zwei Mitglieder nebeneinander (Viewports um 500 und um 1000px) lassen dem
+  // Satz nur 165-197px: einzeilig mit Ellipse schnitt de, fr und el ab.
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/dashboard.css', import.meta.url), 'utf8');
+  const rule = [...eachRule(css)].find((r) => r.selector.trim() === '.rewards-goal__label--compact');
+  assert.ok(rule, 'die Regel gibt es');
+  assert.doesNotMatch(rule.body, /white-space:\s*nowrap/, 'kein Einzeiler');
+  assert.match(rule.body, /(?:^|[;\s])line-clamp:\s*2\b/, 'Standard-Eigenschaft');
+  assert.match(rule.body, /-webkit-line-clamp:\s*2\b/);
+  assert.match(rule.body, /display:\s*-webkit-box/);
+  assert.match(rule.body, /-webkit-box-orient:\s*vertical/);
+  assert.match(rule.body, /overflow:\s*hidden/, 'ohne overflow klemmt line-clamp nichts ab');
+});
+
+test('Genehmigungsliste: der Saldo kommt mit der Anfrage, nicht aus der Teilnehmerliste (#1623)', () => {
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, redemptions: s.redemptions };
+  try {
+    s.user = { role: 'admin' };
+    // Mia ist ausgetragen: `balances` fuehrt sie nicht mehr.
+    s.overview = { me: 1, balances: [{ id: 4, display_name: 'Tom', balance: 20 }] };
+    s.redemptions = [
+      { id: 1, user_id: 3, user_name: 'Mia', reward_name: 'Eis', cost: 50, user_balance: -50 },
+      { id: 2, user_id: 4, user_name: 'Tom', reward_name: 'Eis', cost: 50, user_balance: 20 },
+    ];
+    const hinweise = lesbar(rewardsPage.renderPendingPanel()).match(/rewards\.pendingBalanceBelowZero\{[^}]*\}/g) || [];
+    assert.equal(hinweise.length, 1, 'Mia ist im Minus, auch ohne Zeile in balances');
+    assert.match(hinweise[0], /"points":"-50"/);
+    // Die Anfrage gewinnt gegen die Teilnehmerliste, wenn beide etwas sagen.
+    s.redemptions = [{ id: 2, user_id: 4, user_name: 'Tom', reward_name: 'Eis', cost: 50, user_balance: -5 }];
+    assert.match(lesbar(rewardsPage.renderPendingPanel()), /pendingBalanceBelowZero\{"points":"-5"\}/);
+    s.user = { role: 'member' };
+    assert.doesNotMatch(lesbar(rewardsPage.renderPendingPanel()), /pendingBalanceBelowZero/);
+  } finally {
+    Object.assign(s, vorher);
+  }
+});
+
+test('Uebersicht ohne Teilnehmende: die offene Anfrage steht trotzdem da und ist entscheidbar (#1623)', async () => {
+  // Der haerteste Fall: die Anfragende war die LETZTE Teilnehmende und wurde
+  // ausgetragen. `balances` ist leer, die Uebersicht kehrte mit dem
+  // Leerzustand zurueck - vor dem Anfragen-Panel.
+  const { setPermissions, clearPermissions } = await import('../public/permissions.js');
+  // Der Leerzustand BAUT Knoten (emptyStateHTML): dafuer das Mini-DOM, nur hier.
+  const { installMiniDom } = await import('./mini-dom.js');
+  const domZurueck = installMiniDom();
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, catalog: s.catalog, redemptions: s.redemptions };
+  try {
+    s.user = { id: 1, role: 'admin' };
+    s.overview = { me: 1, balances: [], setup: { participantCount: 0, catalogCount: 1, pointedTaskCount: 1 } };
+    s.catalog = [];
+    s.redemptions = [{ id: 9, user_id: 3, user_name: 'Mia', reward_name: 'Eis', cost: 50, user_balance: -50 }];
+    const el = markupEl();
+    rewardsPage.renderOverview(el);
+    const html = lesbar(el.html);
+    assert.doesNotMatch(html, /NaN|undefined/);
+    assert.match(html, /rw-pending-panel/, 'das Panel steht ohne Punktestaende');
+    assert.match(html, /Mia/);
+    assert.match(html, /pendingBalanceBelowZero\{"points":"-50"\}/, 'samt Hinweis auf das Minus');
+    assert.match(html, /data-decide="fulfill" data-id="9"/, 'genehmigen ist erreichbar');
+    assert.match(html, /data-decide="reject" data-id="9"/, 'ablehnen auch');
+    assert.match(html, /rewards\.emptyOverviewTitle/, 'der Leerzustand bleibt daneben stehen');
+    assert.ok(html.indexOf('rw-pending-panel') < html.indexOf('rewards.emptyOverviewTitle'), 'das Dringende zuerst');
+
+    // Nur lesen: der Zustand bleibt als Zeichen, die Handlung geht.
+    setPermissions({ admin: false, modules: { rewards: 'read' }, widgets: {}, capabilities: {} });
+    try {
+      const ro = markupEl();
+      rewardsPage.renderOverview(ro);
+      assert.match(ro.html, /rw-pending-panel/);
+      assert.doesNotMatch(ro.html, /data-decide=/);
+      assert.doesNotMatch(ro.html, /rw-manage-participants/);
+    } finally {
+      clearPermissions();
+    }
+
+    // Ohne offene Anfrage bleibt es beim blossen Leerzustand.
+    s.redemptions = [];
+    const leer = markupEl();
+    rewardsPage.renderOverview(leer);
+    assert.doesNotMatch(leer.html, /rw-pending/);
+    assert.match(leer.html, /rewards\.emptyOverviewTitle/);
+  } finally {
+    Object.assign(s, vorher);
+    domZurueck();
   }
 });

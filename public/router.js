@@ -12,10 +12,13 @@ import { clearApiCache } from '/sw-register.js';
 import { forgetLayoutHint } from '/utils/dashboard-layout-hint.js';
 import { initI18n, getLocale, t, formatDate, formatTime } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { initials } from '/utils/initials.js';
 import { emptyHintEl, emptyStateEl } from '/utils/empty-state.js';
 import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight } from '/utils/ux.js';
 import { TOAST_SURFACES } from '/utils/toast-surface.js';
 import { showToast } from '/utils/toast-show.js';
+import { unknownPathDetour, publicPathDetour, detourPaths } from '/utils/unknown-route.js';
+import { friendlyError } from '/utils/friendly-error.js';
 import { BULK_PILL_LAYER, clearBulkPill } from '/utils/bulk-pill.js';
 import { watchToastPlacement } from '/utils/toast-placement.js';
 import { COMPOSITION_MODES } from '/utils/page-layout.js';
@@ -625,6 +628,38 @@ function createFocusTrap(container) {
 }
 
 /**
+ * Der Umweg fuer eine Adresse ohne Route (#1607), oder null. Regeln in
+ * utils/unknown-route.js. Bekannt ist, was allRoutes() kennt - also erst
+ * verlaesslich, wenn die Erweiterungsrouten geladen sind (nach der Anmeldung).
+ * Landeplatz ist jede Route ausser einem abgeschalteten oder gesperrten Modul
+ * und den zwei Seiten, von denen eine angemeldete Sitzung sofort wieder
+ * wegfuehrt. Die Route eines solchen Moduls SELBST ist bekannt und bleibt den
+ * Modul-Guards in navigate().
+ *
+ * OHNE SITZUNG (#1640) urteilt nur der oeffentliche Teil der Tabelle: `/pair`
+ * und `/join` sind bekannt, bevor sich jemand angemeldet hat, also fuehrt
+ * `/pair/extra` auf `/pair` statt ueber die Uebersicht auf die Anmeldung. Alles
+ * andere bleibt offen bis hinter den Auth-Guard - dort erst stehen die
+ * Erweiterungsrouten und die Rechte.
+ */
+function unknownDetourFor(path) {
+  const routes = allRoutes();
+  const known = routes.map((r) => r.path);
+  const landable = routes
+    .filter((r) => r.path === '/' || (r.path !== '/login' && r.path !== '/setup'
+      && !(r.module && (_disabledModules.has(r.module) || !canAccessNavModule(r.module)))))
+    .map((r) => r.path);
+  if (!currentUser) {
+    return publicPathDetour(path, {
+      known,
+      open: routes.filter((r) => !r.requiresAuth).map((r) => r.path),
+      landable,
+    });
+  }
+  return unknownPathDetour(path, { known, landable });
+}
+
+/**
  * Navigiert zu einem Pfad und rendert die entsprechende Seite.
  * @param {string} path
  * @param {Object|boolean} userOrPushState - Direkt ein User-Objekt nach Login,
@@ -633,6 +668,36 @@ function createFocusTrap(container) {
  */
 async function navigate(path, userOrPushState = true, pushState = true) {
   if (isNavigating) return;
+  // UNBEKANNTE ADRESSE (#1607): statt still die Uebersicht unter der toten
+  // Adresse zu zeichnen, laeuft DIESE Navigation mit dem naechsten bekannten
+  // Vorfahren weiter. Bewusst kein zweites navigate(): das gab im finally die
+  // Sperre frei, waehrend das innere noch lud, und fragte den Verlassen-Schutz
+  // zweimal (Review #1638). takeDetour berichtigt nur den Pfad; Adresse und
+  // Hinweis folgen erst hinter Schutz und Sperre.
+  let detourAddress = null;
+  let unknownNotice = false;
+  const takeDetour = (push) => {
+    const detour = unknownDetourFor(path);
+    if (!detour) return false;
+    const corrected = detourPaths(detour, path, { pushState: push, location });
+    path = corrected.path;
+    detourAddress = corrected.address;
+    unknownNotice = detour.notify;
+    return true;
+  };
+  // Kaltstart und Zurueck/Vor: die tote Adresse IST der laufende Eintrag und
+  // wird ersetzt, Zurueck fuehrt danach nicht wieder auf sie. Bei einem Wechsel
+  // in der App schreibt der regulaere Eintrag weiter unten die berichtigte.
+  const commitDetourAddress = (push) => {
+    if (!push && detourAddress) history.replaceState({ path }, '', detourAddress);
+  };
+  // In einer laufenden Sitzung steht die Modulliste schon (sie kommt mit den
+  // Praeferenzen) - dann VOR dem Verlassen-Schutz, damit er nach dem Ziel
+  // fragt, auf dem die Navigation endet. Sonst nach dem zweiten Lookup unten.
+  // Ohne Sitzung (#1640) ebenfalls hier, aber nur fuer oeffentliche Vorfahren:
+  // der Lookup unten fiele sonst auf die Uebersicht zurueck, die eine Sitzung
+  // verlangt, und `/pair/extra` endete auf der Anmeldung statt auf `/pair`.
+  if (typeof userOrPushState !== 'object' && (!currentUser || _preferencesLoaded)) takeDetour(userOrPushState);
   // VERLASSEN-SCHUTZ (utils/leave-guard.js, Re-Critique 2026-09-28 A7 P2-1):
   // eine Seite mit ungespeicherter Arbeit - der Anpassen-Modus der Uebersicht -
   // fragt, bevor sie verschwindet. Jeder Weg endet hier: Seitenleiste,
@@ -654,6 +719,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     return;
   }
   isNavigating = true;
+  commitDetourAddress(userOrPushState);
 
   // Offenes „Mehr“-Sheet beim Navigieren immer schließen — robust und
   // unabhängig vom Klick-Bubbling (das reißt, wenn die Navigation
@@ -680,7 +746,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
 
     // Alten Pfad merken, bevor currentPath aktualisiert wird - Kaltstart oder Wechsel
     const previousPath = currentPath;
-    const basePath = path.split('?')[0];
+    let basePath = path.split('?')[0];
     currentPath = basePath;
 
     // Scrollstand der Seite festhalten, die gerade verlassen wird - er ist die
@@ -692,7 +758,7 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     }
     // Vorwärts heißt oben anfangen, Zurück/Vor heißt weitermachen. Details und
     // die Begründung gegen eine Nav-Reihenfolge in utils/scroll-restore.js.
-    const scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
+    let scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
 
     // First-Run-Weiche: Solange kein Account existiert und niemand eingeloggt ist,
     // alle Routen außer /setup auf /setup umleiten.
@@ -712,20 +778,38 @@ async function navigate(path, userOrPushState = true, pushState = true) {
 
     let route = allRoutes().find((r) => r.path === basePath) ?? ROUTES.find((r) => r.path === '/');
 
+    // DIESE Navigation laeuft auf einem anderen Pfad weiter (#1640), wie beim
+    // Umweg oben: kein zweites navigate(). Das gab im finally die Sperre frei,
+    // waehrend das innere noch lud, und liess den Eintrag der Adresse stehen,
+    // von der die Weiche gleich wieder wegfuehrt - Zurueck landete in ihr.
+    // Kaltstart und Zurueck/Vor ersetzen den laufenden Eintrag, ein Wechsel in
+    // der App schreibt weiter unten das berichtigte Ziel.
+    const continueOn = (target) => {
+      path = target;
+      basePath = target;
+      currentPath = target;
+      scrollTarget = scrollPositionFor(target, { restore: !pushState });
+      route = allRoutes().find((r) => r.path === target) ?? route;
+      detourAddress = target;
+      commitDetourAddress(pushState);
+    };
+
     // Split-Guest-Weiche: Gäste einer Ausgabenteilung sehen nur das Budget-Modul.
     // ABER: hat der Nutzer zusätzlich eine Familienrolle OHNE Budget-Recht, würde
-    // ein bedingungsloses navigate('/budget') vom Modul-Guard (canAccessNavModule)
+    // ein bedingungsloser Wechsel auf '/budget' vom Modul-Guard (canAccessNavModule)
     // sofort wieder auf '/' geworfen — und '/' schickt zurück auf '/budget':
     // Endlosschleife bis Stack-Overflow (#480). Daher nur umleiten, wenn Budget
     // tatsächlich zugänglich ist; sonst greift der reguläre Rechte-Guard und der
     // Nutzer landet auf einer für ihn erlaubten Seite.
+    // Zugaenglich heisst auch: im Haushalt nicht abgeschaltet (#1640). Der
+    // Modul-Guard wirft von einem abgeschalteten '/budget' auf '/', die Weiche
+    // von '/' wieder zurueck - dieselbe Schleife - und hinter dem Auth-Guard
+    // prueft nach der Weiche niemand mehr die Abschaltung.
     if (currentUser?.access_scope === 'split_guest'
         && route.path !== '/budget'
-        && canAccessNavModule('budget')) {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/budget');
-      return;
+        && canAccessNavModule('budget')
+        && !_disabledModules.has('budget')) {
+      continueOn('/budget');
     }
 
     // Modul-Guard: deaktivierte ODER per Rechte gesperrte Module leiten auf das
@@ -767,29 +851,52 @@ async function navigate(path, userOrPushState = true, pushState = true) {
 
     route = allRoutes().find((r) => r.path === basePath) ?? route;
 
+    // Unbekannte Adresse, zweite Stelle (Kaltstart, Anmeldung): ERST HIER
+    // sind die Erweiterungsrouten geladen (syncThirdPartyModules im Auth-Guard),
+    // davor waere jede "unbekannt". Einen Verlassen-Schutz gibt es auf diesem
+    // Weg nicht - es steht noch keine Seite. Die Guards danach urteilen ueber
+    // die berichtigte Route.
+    if (takeDetour(pushState)) {
+      basePath = path.split('?')[0];
+      currentPath = basePath;
+      scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
+      route = allRoutes().find((r) => r.path === basePath) ?? route;
+      commitDetourAddress(pushState);
+    }
+
     // Split-Guest-Weiche: Gäste einer Ausgabenteilung sehen nur das Budget-Modul.
     // ABER: hat der Nutzer zusätzlich eine Familienrolle OHNE Budget-Recht, würde
-    // ein bedingungsloses navigate('/budget') vom Modul-Guard (canAccessNavModule)
+    // ein bedingungsloser Wechsel auf '/budget' vom Modul-Guard (canAccessNavModule)
     // sofort wieder auf '/' geworfen — und '/' schickt zurück auf '/budget':
     // Endlosschleife bis Stack-Overflow (#480). Daher nur umleiten, wenn Budget
     // tatsächlich zugänglich ist; sonst greift der reguläre Rechte-Guard und der
     // Nutzer landet auf einer für ihn erlaubten Seite.
+    // Zugaenglich heisst auch: im Haushalt nicht abgeschaltet (#1640). Der
+    // Modul-Guard wirft von einem abgeschalteten '/budget' auf '/', die Weiche
+    // von '/' wieder zurueck - dieselbe Schleife - und hinter dem Auth-Guard
+    // prueft nach der Weiche niemand mehr die Abschaltung.
     if (currentUser?.access_scope === 'split_guest'
         && route.path !== '/budget'
-        && canAccessNavModule('budget')) {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/budget');
-      return;
+        && canAccessNavModule('budget')
+        && !_disabledModules.has('budget')) {
+      continueOn('/budget');
     }
 
-    // Rechte-Guard nach frisch geladenen Rechten (Deep-Link auf ein für diese
-    // Rolle/dieses Mitglied gesperrtes Modul → Dashboard). #467
-    if (route.module && route.path !== '/' && !canAccessNavModule(route.module)) {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/');
-      return;
+    // Modul-Guard, zweite Stelle: nach frisch geladenen Rechten UND Praeferenzen
+    // (Deep-Link auf ein gesperrtes oder abgeschaltetes Modul → Dashboard). #467
+    //
+    // Dieselbe Regel wie am Modul-Guard oben. Die Abschaltung fehlte hier: beim
+    // Kaltstart laeuft der Guard oben, bevor die Praeferenzen geladen sind -
+    // `_disabledModules` ist dann noch leer - und hier pruefte nur das Recht.
+    // Der Direktlink auf ein abgeschaltetes Modul wurde gezeichnet.
+    //
+    // Wie die Gast-Weiche darueber laeuft DIESE Navigation weiter, statt eine
+    // zweite zu starten (#1640). Das Ziel '/' nimmt die Bedingung selbst aus:
+    // es kann weder abgeschaltet noch gesperrt sein, eine Schleife gibt es nicht.
+    if (route.module
+        && route.path !== '/'
+        && (_disabledModules.has(route.module) || !canAccessNavModule(route.module))) {
+      continueOn('/');
     }
 
     if (!route.requiresAuth && currentUser && path === '/login') {
@@ -809,8 +916,8 @@ async function navigate(path, userOrPushState = true, pushState = true) {
        * WAR ER ES, TRITT DIE NEUE SEITE AN SEINE STELLE. Laege sie darueber,
        * zeigte der Rueckweg zuerst auf einen Eintrag mit derselben Adresse -
        * eine Geste, die sichtbar nichts tut. */
-      if (consumeOverlayMarker()) history.replaceState({ path }, '', path);
-      else history.pushState({ path }, '', path);
+      if (consumeOverlayMarker()) history.replaceState({ path }, '', detourAddress ?? path);
+      else history.pushState({ path }, '', detourAddress ?? path);
     }
 
     // Soft-Navigation innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt
@@ -886,6 +993,12 @@ async function navigate(path, userOrPushState = true, pushState = true) {
     focusMainContentAfterNavigation(basePath);
   } finally {
     isNavigating = false;
+    // Im finally, weil auch die Soft-Navigation (Settings-Blatt) frueh
+    // zurueckkehrt - und nach dem Rendern, weil es die Toast-Flaeche beim
+    // Kaltstart erst mit der Shell gibt. Deshalb leitet die Gast-Weiche oben
+    // nicht mehr ueber ein zweites navigate() weiter (#1640): dieses finally
+    // lief dann VOR dessen Rendern, und der Hinweis fand keine Flaeche.
+    if (unknownNotice) showToast(t('common.unknownAddress'), 'default', 5000);
     // auth:expired kann waehrend einer Navigation gefeuert haben (z.B. wenn ein
     // paralleler API-Call 401 zurueckgab). Jetzt wo die Navigation abgeschlossen
     // ist, holen wir die Login-Weiterleitung nach.
@@ -1130,11 +1243,6 @@ function syncSidebarTools(root = document.querySelector('.nav-sidebar__logo-acti
   }
 }
 
-/** Initialen fuer die Avatar-Scheibe ohne Bild (wie in den Einstellungen). */
-function accountInitials(name) {
-  return String(name || '').trim().split(/\s+/).map((w) => w[0] ?? '').join('').toUpperCase().slice(0, 2);
-}
-
 /**
  * Die Kontozeile am Fuss der Seitenleiste: Avatar, Name, und dahinter das
  * Konto-Menue (Hilfe, Aenderungen, Abmelden).
@@ -1246,7 +1354,7 @@ function syncSidebarAccount(root = document.querySelector('.nav-sidebar__account
     img.alt = '';
     avatar.replaceChildren(img);
   } else {
-    avatar.textContent = accountInitials(displayName);
+    avatar.textContent = initials(displayName);
   }
   const label = displayName ? t('nav.accountMenu', { name: displayName }) : t('nav.accountMenuAnonymous');
   trigger.dataset.baseLabel = label;
@@ -4544,26 +4652,9 @@ function errorDetails(err) {
 // Event-Listener
 // --------------------------------------------------------
 
-// --------------------------------------------------------
-// Fehler-Hilfsfunktion
-// --------------------------------------------------------
-
-function friendlyError(err) {
-  // Offline-Mutation (ApiError status 0): spezifische Meldung — auch wenn
-  // navigator.onLine fälschlich true meldet (Netz weg, aber kein offline-Event).
-  if (err?.status === 0) return t('common.errorOfflineMutation');
-  if (!navigator.onLine) return t('common.errorOffline');
-  // Vor dem Status-Zweig: ein 503 waehrend eines Restores ist kein Serverfehler (#1431).
-  if (err?.data?.reason === 'restore_in_progress') return t('common.errorRestoreInProgress');
-  const status = err?.status ?? err?.response?.status;
-  if (status === 403) return t('common.errorForbidden');
-  if (status === 404) return t('common.errorNotFound');
-  if (status >= 500) return t('common.errorServer');
-  if (err?.name === 'AbortError' || err?.name === 'TimeoutError') return t('common.errorTimeout');
-  if (/Failed to fetch|NetworkError|Load failed/i.test(err?.message || '')) return t('common.errorServer');
-  if (err?.name === 'TypeError') return t('common.unexpectedError');
-  return err?.data?.error || err?.message || t('common.errorGeneric');
-}
+// friendlyError lebt in utils/friendly-error.js (#1640), damit die Zuordnung
+// Fehler -> Satz ohne Browser pruefbar ist; window.yuvomi.friendlyError unten
+// reicht sie weiter.
 
 // --------------------------------------------------------
 // Globale Fehler-Handler (Error Boundary)

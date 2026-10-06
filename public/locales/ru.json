@@ -1662,7 +1662,6 @@
         "loanAddedToast": "Займ добавлен",
         "loanSavedToast": "Займ сохранён",
         "loanDeletedToast": "Займ удалён",
-        "loanPaymentAddedToast": "Платёж записан",
         "loanPaymentTitle": "Платеж по займу: {{borrower}}",
         "typeLoan": "Займ",
         "tabsLabel": "Разделы бюджета",
@@ -1864,7 +1863,11 @@
         "handoverToSplit": "Перенести в общие расходы",
         "loanRemainingInstallmentsForecast": "{{forecast}} (план: {{plan}})",
         "detailDateLabel": "Дата",
-        "loanDetailStartMonthLabel": "Первый месяц оплаты"
+        "loanDetailStartMonthLabel": "Первый месяц оплаты",
+        "loanDueDayLabel": "День оплаты",
+        "loanDueDayHint": "Необязательно: день месяца, от 1 до 31. Платежи, отмеченные как оплаченные, записываются тогда этим днём, а не сегодняшним. В более коротких месяцах берётся последний день.",
+        "loanDueDayInvalid": "Укажите день от 1 до 31 или оставьте поле пустым",
+        "loanPaymentAddedOnToast": "Платёж записан на дату {{date}}"
     },
     "settings": {
         "healthCycleEnableLabel": "Показать вкладку цикла",

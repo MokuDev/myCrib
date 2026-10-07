@@ -1,12 +1,10 @@
-<!-- version: 1.1.0 -->
-This update adds Brazilian Portuguese and fixes several things people ran into after 2.70.0.
+<!-- version: 1.2.0 -->
+This update adds Norwegian Bokmål as the 26th language and brings four rounds of fixes from the origin project.
 
-A browser or system that announces Norwegian as `no` or `nn` now gets the Norwegian translation instead of English. Refused requests explain themselves in your language: a locked task, a recipe mirrored from Mealie or Tandoor and an expired page each have their own sentence, and the misleading advice to sign in again is gone.
+Admins are asked once whether the household should use the browser's time zone, so "today" counts in the right zone. Reminders, tasks, calendar subscriptions, reward history and budget plans now follow the visibility set on each entry. A module the household switched off no longer works in the background, and mixed answers such as the overview and the calendar leave it out.
 
-In the budget, a loan created from "New entry" can now say how many installments are already paid, and the suggestion for that number works when the first due month lies in the past. Editing a shared expense shows amounts in your household's number format. Guests of a shared-expense group are no longer stuck behind the back button.
+In the budget, a loan created from "New entry" can say how many installments are already paid. Editing a shared expense shows amounts in your household's number format. A direct link to a module that is switched off opens the overview, and the back button behaves on wide screens and for shared-expense guests.
 
-In the calendar, closing an event dialog on a wide screen no longer moves the address to the previous page. A direct link to a module that is switched off opens the overview, and a wrong address below the pairing or invitation page leads to that page instead of the sign-in page. Housekeeping reads the check-in of visits that were imported by hand correctly for "today" and "last visit".
+This update adds one database migration (for the rewards ledger). It runs on its own at the first start, and it is worth keeping a backup as usual.
 
-There are no database migrations in this update and no action is needed.
-
-Full release notes are available at https://github.com/ulsklyc/yuvomi/releases/tag/v2.73.0
+Full release notes are available at https://github.com/MokuDev/myCrib/releases/tag/v1.2.0

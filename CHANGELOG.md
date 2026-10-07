@@ -13,14 +13,7 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [Unreleased]
 
-- **Der zweite Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 13 Commits seit
-  deren v2.71.0).
-- **Der dritte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 11 weitere Commits vom
-  2. Oktober 2026, darunter Migration 230 für den Belohnungs-Ledger).
-- **Der vierte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 43 weitere Commits
-  bis zu deren v2.73.0: Sichtbarkeit von Erinnerungen, Aufgaben, Kalender und Budget, ausgeschaltete
-  Module, Zeitzonen- und Koreanisch-Korrekturen, Darlehens-Dialog, Zurück-Taste).
-
+## [1.2.0] - 2026-10-07
 
 ### Added
 
@@ -42,6 +35,10 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ### Changed
 
+- **Four syncs with the origin project** (`ulsklyc/yuvomi`, up to its v2.73.0): visibility of
+  reminders, tasks, calendar and budget, modules switched off for the household, time zone and
+  Korean fixes, the loan dialog and the back button. It includes migration 230 for the rewards
+  ledger, which runs on its own at the first start.
 - **The event and task forms say when "Only me" is combined with assigned people.** Visibility
   "Only me" means only the person who created the entry sees it, so the other people
   assigned to it do not see it. The form now shows a hint for that combination and points to

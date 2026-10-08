@@ -419,3 +419,126 @@ test('Serien-Mahlzeit: Loeschen im Fuss fragt den Umfang UEBER dem Editor - ein 
     globalThis.__apiStub = zuvor.api;
   }
 });
+
+// ---------------------------------------------------------------------------
+// Eigene Rezepte zeigen ihr Bild (Critique 2026-10-05, R16)
+// ---------------------------------------------------------------------------
+// Das Vorschaubild hing an `isMirrored`: ein eigenes Rezept bekam im Editor ein
+// Bild, der Wochenplan zeigte es - die Rezeptliste nicht, und das Detail hatte
+// gar keins. Die Frage ist "hat es ein Bild", nicht "woher kommt das Rezept".
+
+const NATIVE_MIT_BILD = { id: 11, title: 'Lachs', source: 'native', has_own_image: true, provider_has_image: false, ingredients: [], meal_types: ['dinner'] };
+const NATIVE_OHNE_BILD = { ...NATIVE_MIT_BILD, id: 12, has_own_image: false };
+
+test('R16: ein eigenes Rezept mit Bild traegt das Vorschaubild in der Liste, eines ohne Bild keinen Platzhalter', () => {
+  assert.equal(recipes.rowShowsThumb(NATIVE_MIT_BILD), true);
+  assert.equal(recipes.rowShowsThumb(NATIVE_OHNE_BILD), false, 'ein eigenes Rezept ohne Bild bleibt eine Textzeile');
+  // Gespiegelte Rezepte behalten ihre Regel (#1059): Bild oder Platzhalter.
+  assert.equal(recipes.rowShowsThumb({ id: 13, source: 'mealie', provider_has_image: false }), true);
+});
+
+test('R16: das Detail traegt ein Kopfbild, wenn es ein eigenes Bild gibt - und nur dann', () => {
+  // Das Mini-DOM kennt keine Selektoren: gelesen werden die Kinder selbst.
+  const isHero = (node) => node?.className === 'recipe-detail__hero';
+  const mit = document.createElement('div');
+  recipes.fillRecipeDetail(mit, NATIVE_MIT_BILD);
+  const [hero] = mit.childNodes;
+  assert.ok(isHero(hero), 'das Kopfbild steht im Detail, und zwar zuerst');
+  const [img] = hero.childNodes;
+  assert.equal(img.tagName, 'img');
+  assert.equal(img.src, '/api/v1/recipes/11/image');
+  assert.equal(img.alt, '', 'dekorativ: der Name steht in der Zeile');
+  assert.equal(img.loading, 'lazy');
+  assert.equal(img.listener, 'error', 'ein Bild, das nicht laedt, nimmt seinen Rahmen mit');
+
+  const ohne = document.createElement('div');
+  recipes.fillRecipeDetail(ohne, NATIVE_OHNE_BILD);
+  assert.equal(ohne.childNodes.some(isHero), false, 'ohne Bild kein Platzhalterblock');
+  assert.ok(ohne.childNodes.length > 0, 'das Detail selbst ist da');
+});
+
+/* REZEPT-DETAILKOPF (Critique R18, 2026-10-07; Entscheidung Ulas 07.10.): ein
+ * bildloses Rezept bekommt im DETAIL ein flaches Band im Kuechenton mit dem
+ * Zeichen der ersten Mahlzeit - kein 3:2-Rahmen, kein grauer Block. Die LISTE
+ * bleibt ohne. Zutatenmengen stehen in einer eigenen rechtsbuendigen Spalte. */
+test('R18: ohne Bild traegt das Detail ein flaches Band mit dem Zeichen der Mahlzeit - die Liste nicht', async () => {
+  const isBand = (node) => node?.className === 'recipe-detail__band';
+  const ohne = document.createElement('div');
+  recipes.fillRecipeDetail(ohne, NATIVE_OHNE_BILD);
+  const [band] = ohne.childNodes;
+  assert.ok(isBand(band), 'das Band steht im Detail, und zwar zuerst');
+  assert.notEqual(band.className, 'recipe-detail__hero', 'kein Bildrahmen ohne Bild');
+  const [seal] = band.childNodes;
+  assert.equal(seal.className, 'recipe-detail__band-seal', 'das Zeichen sitzt im Vollton-Siegel');
+  const [sign] = seal.childNodes;
+  assert.equal(sign.dataset.lucide, 'moon', 'NATIVE_OHNE_BILD passt nur zum Abendessen - dessen Zeichen');
+  assert.equal(sign.className, 'recipe-detail__band-icon');
+
+  // Gilt das Rezept fuer alle Mahlzeiten oder fuer keine, sagt kein Mahlzeit-Zeichen etwas: Besteck.
+  for (const [was, meal_types] of [['alle', ['breakfast', 'lunch', 'dinner', 'snack']], ['keine', []]]) {
+    const el = document.createElement('div');
+    recipes.fillRecipeDetail(el, { ...NATIVE_OHNE_BILD, meal_types });
+    assert.equal(el.childNodes[0].childNodes[0].childNodes[0].dataset.lucide, 'utensils', `${was} Mahlzeiten: das Zeichen der Kueche`);
+  }
+  // Mehrere, aber nicht alle: die erste in der Reihenfolge der Slots.
+  const zwei = document.createElement('div');
+  recipes.fillRecipeDetail(zwei, { ...NATIVE_OHNE_BILD, meal_types: ['dinner', 'lunch'] });
+  assert.equal(zwei.childNodes[0].childNodes[0].childNodes[0].dataset.lucide, 'sun', 'Mittag steht vor Abend');
+
+  // Mit Bild bleibt der Hero - und kein Band daneben.
+  const mit = document.createElement('div');
+  recipes.fillRecipeDetail(mit, NATIVE_MIT_BILD);
+  assert.equal(mit.childNodes[0].className, 'recipe-detail__hero');
+  assert.equal(mit.childNodes.some(isBand), false, 'Bild ODER Band, nie beides');
+
+  // Das Band selbst: Schmuck, mit Rueckfall-Zeichen.
+  const { recipeBandEl, recipeHeroEl } = await import('../public/utils/recipe-thumb.js');
+  const leer = recipeBandEl();
+  assert.equal(leer.childNodes[0].childNodes[0].dataset.lucide, 'utensils');
+  // Scheitert das Bild beim Laden, tritt das Band an seine Stelle (statt einer Luecke).
+  const src = (await import('node:fs')).readFileSync(new URL('../public/utils/recipe-thumb.js', import.meta.url), 'utf8');
+  const fn = src.slice(src.indexOf('export function recipeHeroEl('), src.indexOf('export function recipeBandEl('));
+  assert.match(fn, /const next = typeof fallback === 'function' \? fallback\(\) : null;\s*if \(!next\) \{ frame\.remove\(\); return; \}\s*frame\.replaceWith\(next\);/);
+  assert.match(src, /band\.setAttribute\('aria-hidden', 'true'\)/, 'der Name steht in der Zeile, das Band ist Schmuck');
+  assert.equal(recipeHeroEl({ recipeId: 5, hasOwnImage: false, fallback: () => leer }), null, 'ohne Bild baut der Aufrufer das Band selbst');
+
+  // Die Liste: eine Zeile ohne Bild bleibt eine Textzeile (R16) - kein Band in der Zeile.
+  assert.equal(recipes.rowShowsThumb(NATIVE_OHNE_BILD), false);
+  const page = (await import('node:fs')).readFileSync(new URL('../public/pages/recipes.js', import.meta.url), 'utf8');
+  assert.equal(page.match(/recipeBandEl\(/g)?.length, 1, 'das Band entsteht an genau EINER Stelle: im Detail');
+  assert.ok(page.indexOf('recipeBandEl(') > page.indexOf('function fillRecipeDetail('), 'und zwar in fillRecipeDetail');
+
+  // CSS: flach (feste Hoehe, kein Seitenverhaeltnis), Kuechenton aus der Toenungsleiter, kein Grau.
+  const { eachRule } = await import('./css-rules.js');
+  const css = (await import('node:fs')).readFileSync(new URL('../public/styles/recipes.css', import.meta.url), 'utf8');
+  const rule = [...eachRule(css)].find((r) => r.selector.trim() === '.recipe-detail__band');
+  assert.match(rule.body, /block-size:\s*var\(--space-16\)/, 'eine Zeile hoch');
+  assert.doesNotMatch(rule.body, /aspect-ratio/, 'kein 3:2-Rahmen');
+  assert.match(rule.body, /background-color:\s*color-mix\(in srgb, var\(--module-recipes\) var\(--tint-surface\), var\(--color-surface\)\)/);
+  assert.doesNotMatch(rule.body, /--color-surface-2|--color-fill-well/, 'kein grauer Block');
+  // Das Zeichen im Vollton-Siegel, nicht "zweimal blass" (Flaeche UND Zeichen im selben blassen Ton).
+  const sealRule = [...eachRule(css)].find((r) => r.selector.trim() === '.recipe-detail__band-seal');
+  assert.match(sealRule.body, /background-color:\s*var\(--module-recipes\)/);
+  assert.match(sealRule.body, /color:\s*var\(--color-ink-on-vivid\)/);
+  assert.doesNotMatch(rule.body, /(^|[;\s])color:/, 'das Band selbst mischt keine Schrift im eigenen Ton');
+  // Grafikkontrast, beide Themes: Zeichen auf Siegel, Siegel auf Band (color-mix in sRGB nachgerechnet).
+  const { contrastRatio } = await import('../public/utils/contrast.js');
+  const mix = (a, b, p) => `#${[1, 3, 5].map((i) => Math.round(parseInt(a.slice(i, i + 2), 16) * p + parseInt(b.slice(i, i + 2), 16) * (1 - p)).toString(16).padStart(2, '0')).join('')}`;
+  for (const [name, tone, surface, ink] of [['hell', '#C2410C', '#FFFFFF', '#FFFFFF'], ['dunkel', '#FB923C', '#2B2825', '#0A0A0C']]) {
+    assert.ok(contrastRatio(ink, tone) >= 3, `${name}, Zeichen auf Siegel: ${contrastRatio(ink, tone)}`);
+    assert.ok(contrastRatio(tone, mix(tone, surface, 0.16)) >= 3, `${name}, Siegel auf Band: ${contrastRatio(tone, mix(tone, surface, 0.16))}`);
+  }
+});
+
+
+test('R16: das Kopfbild beschneidet (3:2, cover) und verzerrt nicht', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/recipes.css', import.meta.url), 'utf8');
+  const rules = [...eachRule(css)];
+  const frame = rules.find((r) => r.selector.trim() === '.recipe-detail__hero');
+  const image = rules.find((r) => r.selector.trim() === '.recipe-detail__hero-img');
+  assert.match(frame?.body ?? '', /aspect-ratio:\s*3\s*\/\s*2/);
+  assert.match(frame?.body ?? '', /overflow:\s*hidden/);
+  assert.match(image?.body ?? '', /object-fit:\s*cover/, 'das Bild wird beschnitten, nicht gestaucht');
+});

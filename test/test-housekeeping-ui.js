@@ -172,7 +172,7 @@ test('Startzustand: laufender Monat, Reset verborgen', async () => {
   assert.match(head, /id="housekeeping-report-month">September 2026</);
   // `.is-current` + `inert` wie Budget und Kalender (#1200), nicht `hidden`:
   // der Reset behaelt seinen Platz, und der Weiter-Pfeil ruckt nicht.
-  assert.match(head, /class="btn btn--secondary housekeeping-month-nav__current is-current" type="button"\s+id="housekeeping-report-current" inert>/,
+  assert.match(head, /<button type="button" class="btn btn--secondary period-stepper__reset housekeeping-month-nav__current is-current" id="housekeeping-report-current" inert>/,
     'Reset im laufenden Monat verborgen, sein Platz bleibt');
   assert.ok(head.indexOf('housekeeping-report-prev') < head.indexOf('housekeeping-report-month')
     && head.indexOf('housekeeping-report-month') < head.indexOf('housekeeping-report-next')
@@ -676,14 +676,58 @@ test('Uebersicht am Desktop: Besuche | Zahlungen nebeneinander, sobald die Spalt
   assert.ok(cols, 'die beiden Karten stehen in EINEM Spaltentraeger');
   assert.match(cols[1], /housekeeping\.recentVisits[\s\S]*housekeeping\.payments/, 'Besuche links, Zahlungen rechts');
   const rules = [...eachRule(HK_STYLES)];
-  const wide = rules.find((r) => r.selector.trim() === '.housekeeping-page[data-tab="dashboard"]' && !r.at.length);
-  assert.match(wide?.body ?? '', /--page-measure:\s*var\(--layout-wide\)/, 'die Uebersicht bekommt das breite Mass');
+  // Das breite Mass fuehrt die SEITE (Critique R16, 2026-10-05), nicht mehr
+  // nur dieser Reiter: mit `[data-tab="dashboard"] { --page-measure }` endeten
+  // Kopf und Knopf in der Uebersicht bei 996px und in den anderen Reitern bei
+  // 720 - die Kante wechselte je Reiter.
+  assert.equal(rules.filter((r) => /\[data-tab/.test(r.selector) && /--page-measure/.test(r.body)).length, 0,
+    'kein Reiter schaltet das Mass um');
   // Zwei Spalten am Container der Seite, nicht am Viewport (PAGE-005).
   const grid = rules.find((r) => r.selector.trim() === '.housekeeping-dashboard-columns'
     && r.at.some((a) => /@container housekeeping-page \(min-width:\s*60rem\)/.test(a)));
   assert.match(grid?.body ?? '', /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\)/);
   const HK_SRC = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
-  assert.match(HK_SRC, /page\.dataset\.tab = state\.tab/, 'der Reiter steht an der Seite, damit das Mass ihm folgt');
+  assert.equal((HK_SRC.match(/class="housekeeping-page app-page app-page--dashboard app-page--columns[ "]/g) || []).length, 3,
+    'Seite, Ladezustand und Fehlerzustand fuehren dasselbe breite Mass');
+  assert.doesNotMatch(HK_SRC, /app-page--reading/, 'kein Lesemass-Rest an einer der drei Wurzeln');
+});
+
+// Critique R16 (2026-10-05): Aufgaben, Berichte und Personal standen auf 720px
+// neben 308/468px leerer Flaeche. Die Listen bleiben auf dem Lesemass, aber im
+// Spaltenraster der Shell - mit dem, was es als zweiten Inhalt schon gibt.
+test('Listenreiter am Desktop: Liste im Spaltenraster, Kennzahlen bzw. Protokoll in der Seitenspalte', () => {
+  const HK_SRC = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
+  const fn = (name) => {
+    const start = HK_SRC.indexOf(`function ${name}(`);
+    assert.ok(start >= 0, `${name} fehlt`);
+    const end = HK_SRC.indexOf('\nfunction ', start + 1);
+    return HK_SRC.slice(start, end < 0 ? undefined : end);
+  };
+  // renderTasks() reicht seit R16 an redrawList() weiter; das Markup baut drawTasks().
+  const tasks = fn('drawTasks');
+  assert.match(tasks, /renderPageColumns\(\{\s*main:[\s\S]*housekeeping-task-list/, 'Aufgaben: die Liste steht in der Listenspalte');
+  // R17: der Reiter HAT einen zweiten Inhalt - „Faellig" und „Erledigt im Monat"
+  // standen nur auf der Uebersicht, die Spalte daneben blieb leer (384px bei 1280).
+  assert.match(tasks, /\brail: taskSummaryHtml\(\),/, 'Aufgaben: die zwei Kennzahlen stehen in der Seitenspalte');
+  assert.doesNotMatch(tasks, /railFirst/, 'hinter der Liste im DOM: schmal stehen sie darunter, nie davor');
+  const summary = fn('taskSummaryHtml');
+  assert.match(summary, /state\.dashboard/, 'derselbe Bestand wie die Uebersicht (nach jedem Erledigen neu geladen)');
+  assert.match(summary, /class="metric-grid budget-glance-details housekeeping-task-summary"/,
+    'unter 640px bleiben die Kacheln aus - das Telefon bekommt nichts vor oder unter die Liste');
+  assert.match(summary, /t\('housekeeping\.pendingChores'\)[\s\S]*data\.pending_tasks|pending_tasks[\s\S]*t\('housekeeping\.pendingChores'\)/);
+  assert.match(summary, /t\('housekeeping\.finishedChores'\)/, 'dieselben Worte wie auf der Uebersicht');
+  assert.equal(summary.match(/class="metric-card\$\{/g)?.length, 2, 'zwei Karten, keine dritte erfunden');
+  const reports = fn('renderReports');
+  assert.match(reports, /renderPageColumns\(\{\s*railFirst: true,\s*rail:[\s\S]*metric-grid[\s\S]*main:[\s\S]*housekeeping-reports/,
+    'Berichte: Kennzahlen im DOM vor der Liste (mobil darueber), am Desktop in der Seitenspalte');
+  const staff = fn('renderStaff');
+  assert.match(staff, /rail: state\.selectedStaffId \? renderStaffVisitLog\(\) : ''/,
+    'Personal: das Protokoll der gewaehlten Person steht in der Seitenspalte');
+  const rules = [...eachRule(HK_STYLES)];
+  const heading = rules.find((r) => r.selector.trim() === '.page-columns__rail .housekeeping-section-heading'
+    && r.at.some((a) => /@container module-surface \(min-width:\s*65rem\)/.test(a)));
+  assert.match(heading?.body ?? '', /flex-direction:\s*column/,
+    'in der 360px-Spalte stehen Titel und Monatswahl untereinander wie am Telefon');
 });
 
 test('Haushaltshilfe spricht EINEN Namen: Reiter "Uebersicht", Kennzahlen mit Zeitbezug, Geldschein statt Dollar', () => {
@@ -756,4 +800,243 @@ test('#1556 Tagesabfrage und Check-in lesen den Tag des Haushalts, nicht Tag und
     assert.equal(zone, 'Europe/Berlin', `${where}: die Zone der Anzeige`);
   }
   assert.match(checkIn.payment_description, /"date":"2026-10-01"/, 'die Zahlungsaufgabe nennt den Tag des Haushalts');
+});
+
+// Critique 2026-10-05 (R16): der Namens-Knopf der Personalzeile mass 178x25,5px.
+// Die Maus trifft die ganze Zeile (data-select-worker), Tastatur und assistive
+// Technik aber nur diesen Knopf - und der war so hoch wie eine Textzeile. Er
+// reicht jetzt ueber die Polsterung der Zeile (Polster + Gegenmarge), ohne die
+// Zeile hoeher zu machen.
+test('R16: der Auswahlknopf der Personalzeile hat die Hoehe der Zeile, nicht die des Namens', () => {
+  const rule = [...eachRule(HK_STYLES)].find((r) => r.selector.trim() === '.housekeeping-staff-row__select' && !r.at.length);
+  assert.ok(rule, 'die Regel ist nicht auffindbar - der Guard misst dann nichts');
+  assert.match(rule.body, /padding-block:\s*var\(--space-3\)/, 'der Knopf traegt die Polsterung der Zeile selbst');
+  assert.match(rule.body, /margin-block:\s*calc\(var\(--space-3\)\s*\*\s*-1\)/, 'und nimmt sie nach aussen zurueck: die Zeile bleibt so hoch wie vorher');
+  assert.doesNotMatch(rule.body, /(^|[\s;])padding:\s*0/, 'ein pauschales padding: 0 hoebe das wieder auf');
+});
+
+// ---------------------------------------------------------------------------
+// Review PR #1673: Fokus nach dem Loeschen aus dem Bearbeiten-Dialog
+// ---------------------------------------------------------------------------
+//
+// `deleteTask()` klappt die Zeile aus und zeichnet die Liste ERST DANACH neu.
+// Der Dialog rief `refocusAfterRender()` im selben Atemzug: die alte Zeile stand
+// noch, der Fokus galt als heil, und das spaetere Neuzeichnen liess ihn fallen.
+// Der Rueckruf laeuft jetzt nach dem Neuzeichnen - und noch einmal, wenn der
+// Toast die Zeile zurueckholt. Den Ablauf selbst faehrt
+// test-module-readonly-ui.js (dort steht das Mini-DOM fuer die Aufgabenliste).
+
+test('der Bearbeiten-Dialog gibt den Fokus NACH dem Neuzeichnen weiter, nicht davor', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
+  const from = src.indexOf("panel.querySelector('[data-delete-task]')?.addEventListener('click'");
+  assert.ok(from > 0, 'der Loeschen-Knopf des Dialogs ist verdrahtet');
+  const handler = src.slice(from, src.indexOf("#housekeeping-task-edit-form')?.addEventListener", from));
+  assert.match(handler, /deleteTask\(task, content, \(\) => focusTaskRowAfterDelete\(content, task\.id, index\)\);/);
+  assert.doesNotMatch(handler, /^\s*refocusAfterRender\(\);\s*$/m,
+    'ein Aufruf als eigene Anweisung laeuft vor dem Neuzeichnen und tut nichts');
+});
+
+// ---------------------------------------------------------------------------
+// #1723, Punkt 6: ein Wort fuer die Person, drei Schluessel fuer drei Aufgaben
+// ---------------------------------------------------------------------------
+//
+// `housekeeping.staff` ("Personal") war zugleich Reiter, Ersatz fuer einen
+// fehlenden Namen und Rollenname in Einstellungen > Familie. Der Reiter will
+// die Mehrzahl, die anderen beiden die Einzahl - ein Schluessel kann das nicht.
+// Gefahren werden die drei Stellen selbst; der i18n-Stub gibt den Schluessel
+// zurueck, den sie lesen.
+
+async function wordsForThePerson() {
+  // Reiter: der Kopf der Seite, wie renderShell() ihn baut.
+  let shell = '';
+  const page = { appendChild() {}, addEventListener() {} };
+  hk.state().tab = 'tasks';
+  // renderShell() baut den FAB ueber die DOM-API; mehr als ein Element, das
+  // Attribute annimmt, braucht er dafuer nicht.
+  const realDocument = globalThis.document;
+  const element = () => ({ dataset: {}, setAttribute() {}, appendChild() {}, addEventListener() {} });
+  globalThis.document = { createElement: element };
+  try {
+    hk.renderShell({
+      replaceChildren() { shell = ''; },
+      insertAdjacentHTML(_position, markup) { shell += markup; },
+      querySelector: (sel) => (sel === '.housekeeping-page' ? page : null),
+    });
+  } finally {
+    globalThis.document = realDocument;
+  }
+  const tab = shell.match(/data-tab-id="staff"[\s\S]*?<span class="sub-tab__label">([^<]+)<\/span>/)?.[1];
+
+  // Ersatzname: ein Besuch ohne `worker_name` im Monatsbericht.
+  const reports = await freshReports();
+  delete globalThis.__apiStub;
+  const placeholder = reports.html.match(/housekeeping\.\w+(?= · )/)?.[0];
+
+  // Rolle: die Zeile eines Haushaltshilfe-Kontos in Einstellungen > Familie.
+  const { __test: family } = await import('../public/settings/pages/admin-family.js');
+  const row = family.memberHtml({
+    id: 4, username: 'carla', display_name: 'Carla', role: 'member', family_role: 'other',
+    avatar_color: '#123456', is_worker: true, is_household_member: false, deactivated_at: null,
+  }, 1);
+  const role = row.match(/@carla · ([\w.]+)/)?.[1];
+  return { tab, placeholder, role };
+}
+
+test('#1723: Reiter, Ersatzname und Rolle der Haushaltshilfe lesen drei verschiedene Schluessel', async () => {
+  const { readFileSync, readdirSync } = await import('node:fs');
+  const words = await wordsForThePerson();
+  for (const [where, key] of Object.entries(words)) {
+    assert.match(key ?? '', /^housekeeping\.\w+$/, `${where}: kein Schluessel im Markup gefunden - der Test misst dann nichts`);
+  }
+  assert.equal(new Set(Object.values(words)).size, 3,
+    `zwei der drei Stellen teilen sich einen Schluessel: ${JSON.stringify(words)}`);
+
+  const dir = new URL('../public/locales/', import.meta.url);
+  const read = (file) => JSON.parse(readFileSync(new URL(file, dir), 'utf8'));
+  const value = (locale, key) => key.split('.').reduce((o, k) => o?.[k], locale);
+  const de = read('de.json');
+  const en = read('en.json');
+  // Ein Nomen: Haushaltshilfe / Housekeeper. Der Reiter und seine Ueberschrift
+  // tragen die Mehrzahl, der Knopf "+" die Einzahl.
+  assert.equal(value(de, words.tab), 'Haushaltshilfen');
+  assert.equal(value(en, words.tab), 'Housekeepers');
+  for (const key of [words.placeholder, words.role, 'newLabel.housekeepingWorker']) {
+    assert.equal(value(de, key), 'Haushaltshilfe', `de ${key}`);
+    assert.equal(value(en, key), 'Housekeeper', `en ${key}`);
+  }
+  // Der Modulname bleibt, wie er ist.
+  assert.equal(de.housekeeping.title, 'Haushaltshilfe');
+  assert.equal(en.housekeeping.title, 'Housekeeping');
+
+  for (const file of readdirSync(dir).filter((name) => name.endsWith('.json'))) {
+    const locale = read(file);
+    assert.equal(locale.housekeeping.staff, undefined, `${file}: housekeeping.staff ist als toter Schluessel geblieben`);
+    for (const key of Object.values(words)) {
+      assert.equal(typeof value(locale, key), 'string', `${file}: ${key} fehlt`);
+    }
+    // Die Person, die der Knopf "+" anlegt, heisst wie die Person, die in der
+    // Zeile steht - nicht "Person" hier und "Personal" dort.
+    assert.equal(value(locale, 'newLabel.housekeepingWorker'), value(locale, words.role),
+      `${file}: der Knopf nennt die Person anders als ihre Rolle`);
+  }
+});
+
+test('#1723: die Ueberschrift des Reiters heisst wie der Reiter', async () => {
+  const words = await wordsForThePerson();
+  const state = hk.state();
+  state.workers = [{ id: 7, display_name: 'Ana' }];
+  state.selectedStaffId = '7';
+  state.staffVisits = [];
+  state.tab = 'staff';
+  const content = fakeContainer();
+  hk.renderStaff(content);
+  // Unsichtbar: ein sichtbares h2 mit dem Namen des Reiters nennt die Ebene
+  // zweimal (test-typography.js). Die Gliederung behaelt es.
+  const heading = content.html.match(/<h2 class="sr-only">([^<]+)<\/h2>/)?.[1];
+  assert.equal(heading, words.tab, 'Reiter und Ueberschrift nennen dieselbe Liste verschieden');
+  assert.doesNotMatch(content.html.split('page-columns__rail')[0], /<h2 class="u-section-title">/,
+    'ueber der Liste steht eine zweite, sichtbare Ueberschrift');
+});
+
+// ---------------------------------------------------------------------------
+// Critique R17: die Reiterleiste steht auf jedem Reiter gleich
+// ---------------------------------------------------------------------------
+
+/* Der Monats-Stepper des Berichte-Reiters stand im Center-Slot des Kopfs. Mobil
+ * schob er sich damit als eigene Zeile ZWISCHEN Titel und Reiter: die Leiste
+ * sprang beim Wechsel auf "Berichte" von y=53 auf y=105 (Kopf 118 -> 170px).
+ * Jetzt ist der Kopf auf jedem Reiter derselbe, und der Zeitraum steht als
+ * eigene Zeile zwischen Kopf und Inhalt - ausserhalb des Inhalts, weil der bei
+ * jedem Monatsschritt neu gebaut wird und der Pfeil seinen Fokus behalten muss.
+ * Gemessen am ECHTEN Markup von renderShell(). */
+test('R17: der Zeitraum der Berichte steht unter den Reitern, nicht im Kopf', async () => {
+  let html = '';
+  const seite = { appendChild() {}, addEventListener() {}, dataset: {} };
+  const container = {
+    replaceChildren() { html = ''; },
+    insertAdjacentHTML(_pos, markup) { html += markup; },
+    querySelector: (sel) => (sel === '.housekeeping-page' ? seite : null),
+  };
+  hk.state().tab = 'reports';
+  // renderShell() baut nach dem Markup den FAB per DOM-API; dafuer reicht das
+  // Mini-DOM, und es wird danach wieder abgeraeumt.
+  const { installMiniDom } = await import('./mini-dom.js');
+  const abraeumen = installMiniDom();
+  try {
+    hk.renderShell(container);
+  } finally {
+    abraeumen();
+  }
+
+  const kopf = html.match(/<header class="([^"]*)"[^>]*>([\s\S]*?)<\/header>/);
+  assert.ok(kopf, 'die Seite hat einen Kopf');
+  assert.doesNotMatch(kopf[2], /housekeeping-period|page-toolbar__center/,
+    'im Kopf steht kein Zeitraum-Slot - er oeffnete mobil eine Zeile ueber den Reitern');
+  assert.doesNotMatch(kopf[1], /page-toolbar--period\b|page-toolbar--wrap\b/,
+    'der Kopf behauptet keinen Zeitraum mehr (der Modifier engte mobil den Zeilenabstand)');
+  assert.match(kopf[2], /role="tablist"/, 'die Reiter stehen im Kopf');
+
+  const nachKopf = html.slice(html.indexOf('</header>'));
+  assert.match(nachKopf, /^<\/header>\s*<div class="housekeeping-period" id="housekeeping-period" hidden><\/div>\s*<div class="housekeeping-content" id="housekeeping-content"><\/div>/,
+    'der Zeitraum ist die Zeile zwischen Kopf und Inhalt: unter den Reitern, ausserhalb des Inhalts, auf den anderen Reitern verborgen');
+  assert.equal((html.match(/id="housekeeping-period"/g) || []).length, 1, 'genau ein Slot');
+
+  // Die Zeile bringt ihr Layout selbst mit - den Center-Slot der Shell hat sie nicht mehr.
+  const { readFileSync } = await import('node:fs');
+  const { eachRule } = await import('./css-rules.js');
+  const regeln = [...eachRule(readFileSync(new URL('../public/styles/housekeeping.css', import.meta.url), 'utf8'))];
+  const basis = regeln.find((r) => r.selector.trim() === '.housekeeping-period' && r.at.length === 0);
+  assert.ok(basis, '.housekeeping-period hat eine Basisregel');
+  assert.match(basis.body, /display:\s*flex/);
+  assert.match(basis.body, /var\(--page-inline-pad\)/, 'dasselbe Seitenpolster wie der Inhalt darunter');
+  const verborgen = regeln.findIndex((r) => r.selector.trim() === '.housekeeping-period[hidden]' && /display:\s*none/.test(r.body));
+  assert.ok(verborgen > regeln.indexOf(basis), '`[hidden]` gewinnt gegen `display: flex` (steht dahinter)');
+});
+
+/* Entscheidung R17 (E16): am Desktop steht der Zeitraum wieder in der
+ * Titelzeile - dort sprang nie etwas, und unter den Reitern scrollte der Monat
+ * mit dem Inhalt weg. EIN Knoten, zwei Plaetze: placeReportPeriod() haengt ihn
+ * um. Mobil bleibt der Platz aus dem Markup (Test darueber). */
+test('R17/E16: ab 1024px haengt der Zeitraum in der Titelzeile, darunter unter den Reitern', async () => {
+  const klassen = new Set(['housekeeping-period']);
+  const zuege = [];
+  const actions = { name: 'actions' };
+  const slot = {
+    parentNode: null,
+    classList: { add: (c) => klassen.add(c), remove: (c) => klassen.delete(c) },
+  };
+  const head = {
+    querySelector: (sel) => (sel === '.page-toolbar__actions' ? actions : null),
+    insertBefore(node, vor) { zuege.push(['insertBefore', vor.name]); node.parentNode = head; },
+    after(node) { zuege.push(['after']); node.parentNode = page; },
+  };
+  const page = {
+    querySelector: (sel) => (sel === '#housekeeping-period' ? slot : sel === '.housekeeping-toolbar' ? head : null),
+  };
+  slot.parentNode = page;
+
+  hk.placeReportPeriod(page, true);
+  assert.deepEqual(zuege, [['insertBefore', 'actions']], 'breit: der Slot steht im Kopf VOR den Aktionen (Titel, Zeitraum, Pille)');
+  assert.ok(klassen.has('page-toolbar__center'), 'im Kopf ist er der Center-Slot der Shell');
+
+  hk.placeReportPeriod(page, true);
+  assert.equal(zuege.length, 1, 'steht er schon im Kopf, wird er nicht neu eingehaengt (der Pfeil behielte seinen Fokus nicht)');
+
+  hk.placeReportPeriod(page, false);
+  assert.deepEqual(zuege[1], ['after'], 'schmal: zurueck hinter den Kopf, also unter die Reiter');
+  assert.ok(!klassen.has('page-toolbar__center'), 'unter den Reitern ist er kein Center-Slot mehr');
+
+  hk.placeReportPeriod(page, false);
+  assert.equal(zuege.length, 2, 'steht er schon unter den Reitern, bleibt er stehen');
+
+  assert.equal(hk.REPORT_PERIOD_HEAD_QUERY, '(min-width: 1024px)', 'die Schwelle der angedockten Kopf-Pille');
+  const { readFileSync } = await import('node:fs');
+  const quelle = readFileSync(new URL('../public/pages/housekeeping.js', import.meta.url), 'utf8');
+  const shell = quelle.slice(quelle.indexOf('function renderShell('), quelle.indexOf('\n}\n', quelle.indexOf('function renderShell(')));
+  assert.match(shell, /watchReportPeriodPlace\(page\)/, 'renderShell() stellt den Platz ein und folgt der Breite');
+  const { eachRule } = await import('./css-rules.js');
+  const regeln = [...eachRule(readFileSync(new URL('../public/styles/housekeeping.css', import.meta.url), 'utf8'))];
+  const imKopf = regeln.find((r) => r.selector.trim() === '.page-toolbar > .housekeeping-period');
+  assert.match(imKopf?.body ?? '', /padding:\s*0/, 'im Kopf faellt das eigene Zeilenpolster');
 });

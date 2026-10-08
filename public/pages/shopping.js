@@ -5,11 +5,12 @@
  */
 
 import { api } from '/api.js';
-import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, collapseOut, expandIn, acknowledgeCheck } from '/utils/ux.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
 import { flipSnapshot, flipPlay } from '/utils/flip.js';
 import { t } from '/i18n.js';
 import { esc } from '/utils/html.js';
+import { readRowHtml, readDetailsLabel } from '/utils/read-row.js';
 import { promptModal, openModal, closeModal, confirmModal, reportFieldError, refocusAfterRender } from '/components/modal.js';
 import { DEFAULT_CATEGORY_NAME, categoryLabel } from '/utils/shopping-categories.js';
 import { addLocalDays, todayKey } from '/utils/date.js';
@@ -18,6 +19,7 @@ import { mayImportMealPlan, mayTransferShoppingToPantry } from '/utils/kitchen-t
 import { mayWritePath } from '/utils/module-access.js';
 import { mountEmptyState, mountLoadError } from '/utils/empty-state.js';
 import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
+import { rowMenuHtml } from '/utils/row-action.js';
 import '/components/category-manager.js';
 import { findPageFab } from '/utils/fab.js';
 import { setBulkPill, clearBulkPill, bulkPillLayer } from '/utils/bulk-pill.js';
@@ -549,6 +551,11 @@ function settleIntents(items, listId, { fromCache = false, startedAt = 0 } = {})
   }
 }
 
+/** Der Haken einer Artikelzeile - das Element, das die Quittung traegt. */
+function checkOf(container, id) {
+  return container.querySelector(`.swipe-row[data-swipe-id="${id}"] .item-check`);
+}
+
 async function toggleShoppingItem(id, checked, container) {
   // Dritte Linie hinter Markup und Handler-Riegel: auch ein Aufruf, den ein
   // Rechtewechsel ueberholt hat, schickt nichts.
@@ -577,10 +584,19 @@ async function toggleShoppingItem(id, checked, container) {
 
   const seq = ++_checkSeq;
   intents.set(id, { value: newVal, seq, listId, delta });
+  // HAPTIK IM MOMENT DES TIPPS (Critique 2026-10-05, R16). Sie stand nach der
+  // Serverantwort: die Zeile wechselte sofort, das Vibrieren kam mit der
+  // Leitung hinterher. Die Zeile ist optimistisch, also ist es ihre Quittung auch.
+  vibrate(10);
   if (item) {
     // Nur die betroffene Zeile aktualisieren — kein Komplett-Re-Render,
     // damit die Scroll-Position der Liste erhalten bleibt (Issue #276).
     updateItemRow(container, item);
+    // DIE QUITTUNG GEHOERT DIESEM TIPP (R18). Sie hing als CSS-Animation an
+    // `.item-check--checked` und lief deshalb bei jedem Neuzeichnen auf allen
+    // abgehakten Zeilen. `updateItemRow` selbst quittiert nichts: es laeuft
+    // auch fuer fremde Aenderungen und beim Zuruecksetzen nach einem Fehler.
+    acknowledgeCheck(checkOf(container, id), { checked: newVal === 1 });
     // userChecked NUR beim Abhaken selbst (#1039): das Zurueckholen eines
     // Artikels eroeffnet keinen neuen Feedback-Batch.
     updateCheckedActions(container, { userChecked: newVal === 1 });
@@ -613,7 +629,6 @@ async function toggleShoppingItem(id, checked, container) {
       current.is_checked = newVal;
     }
     settledAt.set(id, _loadSeq);
-    vibrate(10);
   } catch (err) {
     // ZWEI GRUENDE, WARUM DIE EIGENE ABSICHT NICHT MEHR DA IST, und sie fuehren
     // auseinander. Ueberstimmt: ein neueres Antippen steht an, dessen Ausgang
@@ -745,6 +760,51 @@ function deleteItemUndoable(id, container) {
 // Render-Bausteine
 // --------------------------------------------------------
 
+/**
+ * Die Eintraege des Werkzeugmenues der gewaehlten Liste, in vier Gruppen:
+ * Abgehakt | Liste | Stammdaten | Loeschen.
+ *
+ * DIE ABGEHAKT-GRUPPE (Critique 2026-10-05, R16). "In den Vorrat" und
+ * "Abgehakt loeschen" lebten nur in der Sammel-Pille: fuenf Sekunden nach dem
+ * ersten Abhaken eines Batches, danach unterdrueckt, bis die Zahl auf 0 faellt
+ * (#1039). Wer im Laden zwanzig Artikel abhakt und zu Hause einraeumt, fand
+ * den Weg in den Vorrat nicht wieder. Die Pille bleibt die Abkuerzung im
+ * Moment des Abhakens; der DAUERHAFTE Ort ist dieses Menue - mit denselben
+ * Handlern und denselben Rechtefragen (`pantryTransferOffered`, #1265).
+ * Bei `read` entfaellt das ganze Menue (renderTabs), also auch die Gruppe.
+ */
+function listToolsItems() {
+  const list = state.activeList;
+  if (!list) return [];
+  const checkedCount = state.items.filter((i) => checkedOf(i)).length;
+  const checkedGroup = checkedCount ? [{
+    group: t('shopping.checkedHint', { count: checkedCount }),
+    items: [
+      ...(pantryTransferOffered()
+        ? [{ action: 'checked-to-pantry', label: t('shopping.toPantry'), icon: 'archive' }]
+        : []),
+      { action: 'clear-checked', label: t('shopping.clearChecked', { count: checkedCount }), icon: 'list-x', danger: true },
+    ],
+  }, { separator: true }] : [];
+  return [
+    ...checkedGroup,
+    { action: 'rename-list', label: t('shopping.renameListLabel'), icon: 'pencil', id: list.id },
+    { action: 'duplicate-list', label: t('shopping.duplicateListLabel'), icon: 'copy' },
+    // Die Uebernahme schreibt auch in den Essensplan (`on_shopping_list`),
+    // und die Route verlangt dafuer `meals: write` - schon fuer die
+    // Vorschau (#1290). Ohne das endete der Eintrag im 403.
+    ...(mayImportMealPlan(list.id)
+      ? [{ action: 'import-meals', label: t('shopping.importMeals'), icon: 'utensils' }]
+      : []),
+    { action: 'send-list', label: t('shopping.sendList'), icon: 'mail' },
+    { separator: true },
+    { action: 'manage-categories', label: t('shopping.manageCategories'), icon: 'tags' },
+    { action: 'manage-stores', label: t('shopping.manageStores'), icon: 'store' },
+    { separator: true },
+    { action: 'delete-list', label: t('shopping.deleteListLabel'), icon: 'trash', id: list.id, danger: true },
+  ];
+}
+
 function renderTabs(container) {
   const bar = container.querySelector('#list-tabs-bar');
   if (!bar) return;
@@ -796,20 +856,7 @@ function renderTabs(container) {
         // einer Überschrift, die den Bezug herstellt. „Mehr" allein ließe offen,
         // worauf sich „Löschen" bezieht - und das löscht die Liste des Haushalts.
         label: t('shopping.listActionsLabel', { name: state.activeList.name }),
-        items: [
-          { action: 'rename-list', label: t('shopping.renameListLabel'), icon: 'pencil', id: state.activeList.id },
-          { action: 'duplicate-list', label: t('shopping.duplicateListLabel'), icon: 'copy' },
-          // Die Uebernahme schreibt auch in den Essensplan (`on_shopping_list`),
-          // und die Route verlangt dafuer `meals: write` - schon fuer die
-          // Vorschau (#1290). Ohne das endete der Eintrag im 403.
-          ...(mayImportMealPlan(state.activeList.id)
-            ? [{ action: 'import-meals', label: t('shopping.importMeals'), icon: 'utensils' }]
-            : []),
-          { action: 'send-list', label: t('shopping.sendList'), icon: 'mail' },
-          { action: 'manage-categories', label: t('shopping.manageCategories'), icon: 'tags' },
-          { action: 'manage-stores', label: t('shopping.manageStores'), icon: 'store' },
-          { action: 'delete-list', label: t('shopping.deleteListLabel'), icon: 'trash', id: state.activeList.id, danger: true },
-        ],
+        items: listToolsItems(),
       })}` : '';
 
   bar.insertAdjacentHTML('beforeend', `
@@ -1318,7 +1365,7 @@ function renderReadActions(item) {
   if (!hasReadDetails(item)) return '';
   return `
           <button class="row-action" data-action="item-details" data-id="${item.id}"
-                  aria-label="${t('shopping.detailsLabel', { name: esc(item.name) })}">
+                  aria-label="${esc(readDetailsLabel(item.name))}">
             <i data-lucide="info" class="icon-md" aria-hidden="true"></i>
           </button>`;
 }
@@ -1362,19 +1409,19 @@ function renderItem(item) {
                   title="${t('shopping.reorderHandleHint')}">
             <i data-lucide="grip-vertical" class="icon-md" aria-hidden="true"></i>
           </button>
-          <button class="row-action" data-action="item-details" data-id="${item.id}"
-                  aria-label="${t('shopping.detailsLabel', { name: esc(item.name) })}">
-            <i data-lucide="pencil" class="icon-md" aria-hidden="true"></i>
-          </button>
-          <button class="row-action row-action--danger" data-action="delete-item" data-id="${item.id}"
-                  aria-label="${t('shopping.deleteItemLabel', { name: esc(item.name) })}">
-            ${/* trash-2 statt x: das Kreuz heisst app-weit „Schliessen"
-                 (Modals, Chips), Loeschen traegt ueberall den Papierkorb
-                 (Aufgaben, Geburtstage, Mahlzeiten). Der Einkauf war die eine
-                 Zeile, die fuer dieselbe Tat ein anderes Zeichen sprach
-                 (Critique 2026-08-27, P3). */ ''}
-            <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>
-          </button>`}
+${/* ZWEI SICHTBAR, DER REST IM MEHR-KNOPF (Entscheidung 2026-10-07,
+               utils/row-action.js): Stift und Papierkorb standen in jeder der
+               23 Zeilen - drei Dauer-Aktionen neben dem Haken. Bearbeiten und
+               Loeschen sind jetzt Eintraege mit Wort; Loeschen bleibt
+               widerrufbar (Undo-Toast) und per Wischen erreichbar. */ ''}
+          ${rowMenuHtml({
+            id: `shopping-item-menu-${item.id}`,
+            label: t('common.moreActionsNamed', { name: item.name }),
+            items: [
+              { action: 'item-details', id: item.id, icon: 'pencil', label: t('common.edit') },
+              { action: 'delete-item', id: item.id, icon: 'trash-2', label: t('common.delete'), danger: true },
+            ],
+          })}`}
         </div>
       </div>
     </div>`;
@@ -1539,13 +1586,42 @@ function _flashAddBtn(btn) {
  * @param {Element} container
  * @param {boolean} open
  */
+/** Letzte Absicht des Quick-Add (offen/zu) - ein Zuklappen, das ein Oeffnen ueberholt hat, raeumt nicht mehr ab. */
+let quickAddOpenIntent = false;
+
 function syncQuickAddDisclosure(container, open) {
   const page = container.querySelector('.shopping-page');
   const fab = findPageFab('fab-new-item');
   if (!page || !fab) return;
 
   const collapsible = window.matchMedia('(hover: none)').matches && Boolean(state.activeList);
-  page.classList.toggle('shopping-page--adding', collapsible && open);
+  const wasOpen = page.classList.contains('shopping-page--adding');
+  const nowOpen = collapsible && open;
+  quickAddOpenIntent = nowOpen;
+  // DAS FELD ZIEHT AUF UND KLAPPT ZU (R16, Bewegung). Vorher schaltete nur
+  // `display` um: die Liste darunter sprang um die Hoehe des Formulars (127px
+  // bei 390). Der ZUSTAND bleibt die Klasse; die Bewegung liegt davor bzw.
+  // dahinter, und wo nichts animiert (kein `animate`, reduzierte Bewegung -
+  // dann loest collapseOut sofort auf), faellt sie im selben Takt wie bisher.
+  const quick = page.querySelector?.('.quick-add') ?? null;
+  const canAnimate = typeof quick?.animate === 'function';
+  if (wasOpen && !nowOpen && canAnimate) {
+    collapseOut(quick).then(() => {
+      // Inzwischen wieder geoeffnet: das Oeffnen hat schon aufgeraeumt.
+      if (quickAddOpenIntent) return;
+      page.classList.remove('shopping-page--adding');
+      // collapseOut haelt die Hoehe 0 (fill: forwards) - nach `display: none` verwerfen.
+      quick.getAnimations?.().forEach((anim) => anim.cancel());
+      quick.style.overflow = '';
+    });
+  } else {
+    page.classList.toggle('shopping-page--adding', nowOpen);
+    if (nowOpen && canAnimate) {
+      quick.getAnimations?.().forEach((anim) => anim.cancel());
+      quick.style.overflow = '';
+      if (!wasOpen) expandIn(quick);
+    }
+  }
 
   // `aria-expanded` NUR wo der Knopf tatsächlich etwas aufklappt. Auf Desktop
   // fokussiert er ein sichtbares Feld; ein „eingeklappt" zu melden, was gar nicht
@@ -2015,24 +2091,6 @@ function refreshItemName(container, item) {
  * Weg an einer Stelle, an der man gerade einen Namen tippt, wäre eine
  * Fehlerquelle, kein Gewinn.
  */
-/**
- * Eine Zeile der Leseansicht - das Markup von `detailRowEl()` aus
- * components/detail-view.js (Icon, Beschriftung, Wert), als Zeichenkette wie
- * in birthdays.js. Ohne Wert keine Zeile: ein Strich waere ein Wert, den es
- * nicht gibt.
- */
-function readRowHtml({ icon, label, valueHtml, multiline = false }) {
-  if (!valueHtml) return '';
-  return `
-        <div class="detail-row${multiline ? ' detail-row--multiline' : ''}">
-          <i class="detail-row__icon" data-lucide="${icon}" aria-hidden="true"></i>
-          <div class="detail-row__text">
-            <span class="detail-row__label">${esc(label)}</span>
-            <span class="detail-row__value">${valueHtml}</span>
-          </div>
-        </div>`;
-}
-
 /** Der Preis als Betrag in der Haushaltswaehrung, in deren kleinster Einheit gespeichert. */
 function priceReadText(cents) {
   if (cents == null) return '';
@@ -2054,12 +2112,12 @@ function itemReadHtml(item) {
   return `
     <div class="item-details-read detail-view" data-view="read" data-item-id="${item.id}">
       <div class="detail-view__rows">
-        ${readRowHtml({ icon: 'hash', label: t('shopping.itemQtyLabel'), valueHtml: esc(item.quantity || '') })}
-        ${readRowHtml({ icon: 'tag', label: t('shopping.categoryLabel'), valueHtml: item.category ? esc(categoryLabel(item.category)) : '' })}
-        ${readRowHtml({ icon: 'receipt', label: t('shopping.priceLabel'), valueHtml: esc(priceReadText(item.price_cents)) })}
-        ${readRowHtml({ icon: 'store', label: t('shopping.storeLabel'), valueHtml: esc(storeName(item)) })}
+        ${readRowHtml({ icon: 'hash', label: t('shopping.itemQtyLabel'), value: item.quantity || '' })}
+        ${readRowHtml({ icon: 'tag', label: t('shopping.categoryLabel'), value: item.category ? categoryLabel(item.category) : '' })}
+        ${readRowHtml({ icon: 'receipt', label: t('shopping.priceLabel'), value: priceReadText(item.price_cents) })}
+        ${readRowHtml({ icon: 'store', label: t('shopping.storeLabel'), value: storeName(item) })}
         ${readRowHtml({ icon: 'link', label: t('shopping.urlLabel'), valueHtml: link })}
-        ${readRowHtml({ icon: 'align-left', label: t('shopping.notesLabel'), valueHtml: esc(item.notes || ''), multiline: true })}
+        ${readRowHtml({ icon: 'align-left', label: t('shopping.notesLabel'), value: item.notes || '', multiline: true })}
       </div>
     </div>`;
 }
@@ -2103,7 +2161,7 @@ function openItemDetails(itemId, container) {
           <input class="form-input" type="text" id="item-details-name" required
                  value="${esc(item.name)}">
         </div>
-        <div class="pantry-form-row">
+        <div class="form-pair">
           <div class="form-group">
             <label class="form-label" for="item-details-qty">${t('shopping.itemQtyLabel')}</label>
             <input class="form-input" type="text" id="item-details-qty"
@@ -2126,7 +2184,7 @@ function openItemDetails(itemId, container) {
             * geoeffnet wird - nachtragen statt unterbrechen.
             *
             * Betont bei einem abgehakten Artikel: dann ist die Frage aktuell. */ ''}
-        <div class="pantry-form-row">
+        <div class="form-pair">
           <div class="form-group">
             <label class="form-label" for="item-details-price">${t('shopping.priceLabel')}</label>
             <input class="form-input" type="text" id="item-details-price" inputmode="decimal"
@@ -3286,6 +3344,26 @@ function wireListContentEvents(container) {
       openMealPlanImport(container);
     }
 
+    // ---- Abgehakt-Gruppe des Werkzeugmenues (R16): dieselben Handler wie
+    // die Sammel-Pille. Die Rueckfrage vor dem Sammel-Loeschen bleibt
+    // (Critique 2026-08-13, P0) - hier als Dialog, weil ein Menue keine
+    // zweite Stufe in sich traegt.
+    if (action === 'checked-to-pantry') {
+      if (pantryTransferOffered()) await openPantryTransfer(container);
+    }
+
+    if (action === 'clear-checked') {
+      const count = state.items.filter((i) => checkedOf(i)).length;
+      if (!count) return;
+      // Ohne `danger`: das Loeschen ist fuenf Sekunden lang ruecknehmbar,
+      // der Dialog droht also mit nichts Unwiederbringlichem.
+      const confirmed = await confirmModal(
+        t('shopping.clearCheckedConfirm', { count }),
+        { confirmLabel: t('common.delete') },
+      );
+      if (confirmed) clearCheckedUndoable(container);
+    }
+
     if (action === 'send-list') {
       await openSendListDialog(container);
     }
@@ -3745,6 +3823,7 @@ export const __test = {
   // Vorhandensein einer Wache. Beide Wege gehoeren dazu - der Merker wird beim
   // Abhaken gesetzt und beim Laden gelesen.
   toggleShoppingItem,
+  listToolsItems,
   loadItems,
   deleteItemUndoable,
   clearCheckedUndoable,

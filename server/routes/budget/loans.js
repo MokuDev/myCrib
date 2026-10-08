@@ -6,14 +6,15 @@
 import express from 'express';
 import { createLogger } from '../../logger.js';
 import * as db from '../../db.js';
-import { str, num, date as validateDate, month as validateMonth, collectErrors, MAX_TITLE, MAX_SHORT } from '../../middleware/validate.js';
+import { str, num, date as validateDate, month as validateMonth, MAX_TITLE, MAX_SHORT } from '../../middleware/validate.js';
 import { normalizeObjectVisibility } from '../../services/budget-visibility.js';
 import { computeLoanSchedule, MAX_LOAN_MONTHS } from '../../services/loan-amortization.js';
 import { translate, resolveHouseholdLocale } from '../../utils/i18n.js';
+import { todayKey } from '../../utils/timezone.js';
 import {
   budgetFilter, mayEdit, getBudgetMode, loanSummaryRow, loadLoan, refreshLoanStatus, cents,
   budgetCurrency, toBudgetAmount, CURRENCY_RE, validateAccountRef, addMonths,
-  LOAN_DIRECTIONS, bookingFor,
+  LOAN_DIRECTIONS, bookingFor, refusal, refusals, refuse, dueDateInMonth,
 } from './helpers.js';
 
 const log = createLogger('Budget');
@@ -23,31 +24,9 @@ const router = express.Router();
 // wie 'fixed', der Satz gilt aber nur als aktueller Wert (Prognose).
 const INTEREST_MODES = ['none', 'fixed', 'variable', 'fixed_then_variable'];
 
-/**
- * Eine Absage des Darlehens-Formulars mit ihrem Grund (#1656).
- *
- * Der Satz bleibt, wie er war - er ist die zugesagte Antwort der API. Der Grund
- * kommt dazu, damit der Dialog die Absage am Feld und in der Sprache der
- * Oberflaeche zeigen kann, statt den englischen Satz durchzureichen. Wer hier
- * einen Grund ergaenzt, ordnet ihn in `LOAN_REFUSALS` (public/pages/budget.js)
- * ein; test:budget-ui haelt beide Listen deckungsgleich.
- */
-const refusal = (reason, error) => ({ reason, error });
-
-/** Die Fehler allgemeiner Validatoren (str/num/validateMonth) unter einem Grund. */
-const refusals = (reason, results) => collectErrors(results).map((error) => refusal(reason, error));
-
-/**
- * 400 aus einer Liste von Absagen: alle Saetze wie bisher in `error`, der Grund
- * der ERSTEN in `reason` - der Dialog zeigt ohnehin ein Feld nach dem anderen.
- */
-function refuse(res, errors) {
-  return res.status(400).json({
-    error: errors.map((e) => e.error).join(' '),
-    code: 400,
-    reason: errors[0].reason,
-  });
-}
+// Hoechste Ratenanzahl eines Darlehens ohne Zins. Die Absage nennt sie als
+// `max`, damit der Dialog die Grenze sagen kann (#1668).
+const MAX_LOAN_INSTALLMENTS = 360;
 
 /**
  * Richtung aus dem Request (#638).
@@ -60,6 +39,32 @@ function validateDirection(body, loan = null) {
   const raw = String(body.direction || '').trim();
   if (!LOAN_DIRECTIONS.includes(raw)) return refusal('loan_direction_invalid', 'Direction must be either lent or borrowed.');
   return { value: raw };
+}
+
+/**
+ * Faelligkeitstag aus dem Request (#1631): optional, eine ganze Zahl von 1 bis 31.
+ *
+ * Fehlt das Feld, bleibt es beim Bestand (PUT) bzw. bei "kein Tag" (POST); `null`
+ * oder ein leerer String nimmt den Tag wieder weg. Angenommen wird die Zahl
+ * selbst oder ihre Ziffernfolge, wie ein Formularfeld sie schickt - `1.5`,
+ * `"x"`, `true` und alles ausserhalb von 1 bis 31 sind eine Absage und werden
+ * nicht still gerundet: ein Tag, den der Nutzer nicht gemeint hat, datierte
+ * jede kuenftige Rate falsch.
+ *
+ * @param {object} body       Request-Body
+ * @param {object|null} loan  Bestehendes Darlehen (PUT) - liefert den Default
+ * @returns {{ value: number|null }|{ error: string, reason: string }}
+ */
+function validateDueDay(body, loan = null) {
+  const raw = body.due_day;
+  if (raw === undefined) return { value: loan?.due_day ?? null };
+  if (raw === null || (typeof raw === 'string' && raw.trim() === '')) return { value: null };
+  const day = typeof raw === 'number' ? raw
+    : (typeof raw === 'string' && /^\d{1,2}$/.test(raw.trim()) ? Number(raw.trim()) : NaN);
+  if (!Number.isInteger(day) || day < 1 || day > 31) {
+    return refusal('loan_due_day_invalid', 'Due day must be a whole number between 1 and 31.');
+  }
+  return { value: day };
 }
 
 /**
@@ -153,7 +158,7 @@ function deriveInterestTerms(body, mode) {
   if (!result.ok) {
     return result.reason === 'not_amortizing'
       ? refusal('loan_not_amortizing', 'The monthly rate does not cover the interest; the loan never amortizes.')
-      : refusal('loan_term_too_long', 'The resulting term exceeds the supported maximum.');
+      : refusal('loan_term_too_long', 'The resulting term exceeds the supported maximum.', { max: MAX_LOAN_MONTHS });
   }
   return {
     calc: result,
@@ -180,7 +185,11 @@ router.post('/loans/preview', (req, res) => {
       return res.json({ data: { ok: false } });
     }
     const derived = deriveInterestTerms(req.body, mode);
-    if (derived.error) return res.json({ data: { ok: false } });
+    // Der Grund reist mit (#1668): "tilgt nicht" und "laeuft zu lange" sind zwei
+    // Saetze, und die Vorschau soll denselben sagen wie die Absage beim Speichern.
+    if (derived.error) {
+      return res.json({ data: { ok: false, reason: derived.reason, ...(derived.max !== undefined ? { max: derived.max } : {}) } });
+    }
     const c = derived.calc;
     const bindingEnd = mode === 'fixed_then_variable' && req.body.fixed_period_months
       ? c.remainingAfterBinding
@@ -206,6 +215,7 @@ router.get('/loans', (req, res) => {
     // Sichtbarkeit (#476/#505): Loans folgen dem Modus, ohne Mein/Haushalt-Scope.
     const filter = budgetFilter(req, 'l', { scoped: false });
     const base = budgetCurrency();
+    const today = todayKey(db.get());
     const loans = db.get().prepare(`
       SELECT l.*, u.display_name AS creator_name
       FROM budget_loans l
@@ -214,7 +224,7 @@ router.get('/loans', (req, res) => {
       ORDER BY CASE l.status WHEN 'active' THEN 0 ELSE 1 END,
                l.start_month ASC,
                l.created_at DESC
-    `).all(...filter.params).map((loan) => loanSummaryRow(loan, base));
+    `).all(...filter.params).map((loan) => loanSummaryRow(loan, base, today));
     const active = loans.filter((loan) => loan.status === 'active');
     // Währung je Darlehen (#582): Die Summenkarte ist die einzige Stelle, die über
     // mehrere Darlehen hinweg addiert - sie muss deshalb in EINER Währung rechnen.
@@ -268,6 +278,10 @@ router.get('/loans', (req, res) => {
  * liefen nie über den Haushalt - sie als Buchungen anzulegen hieße, vergangene
  * Monate mit Ausgaben zu füllen, die dort nie stattgefunden haben, und Kontostände
  * wie Statistik zu verfälschen.
+ *
+ * Mit Faelligkeitstag (#1631) traegt jede dieser Raten den Tag ihres Monats,
+ * ohne ihn wie bisher den Ersten. Das gilt nur hier, beim Anlegen: ein spaeter
+ * gesetzter oder geaenderter Tag fasst keine bestehende Rate an.
  */
 function seedPaidInstallments(loanId, count, userId) {
   const loan = loadLoan(loanId);
@@ -279,11 +293,12 @@ function seedPaidInstallments(loanId, count, userId) {
       if (remaining <= 0) break;
       const amount = Math.min(perInstallment, remaining);
       if (amount <= 0) break;
+      const month = addMonths(loan.start_month, n - 1);
       db.get().prepare(`
         INSERT INTO budget_loan_payments
           (loan_id, installment_number, amount, paid_date, budget_entry_id, created_by)
         VALUES (?, ?, ?, ?, NULL, ?)
-      `).run(loanId, n, amount, `${addMonths(loan.start_month, n - 1)}-01`, userId);
+      `).run(loanId, n, amount, dueDateInMonth(month, loan.due_day) ?? `${month}-01`, userId);
       booked = cents(booked + amount);
     }
   })();
@@ -311,8 +326,8 @@ router.post('/loans', (req, res) => {
       const vAmount = num(req.body.total_amount, 'Amount', { required: true });
       const installmentCount = parseInt(req.body.installment_count, 10);
       errors.push(...refusals('loan_amount_invalid', [vAmount]));
-      if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 360) {
-        errors.push(refusal('loan_installments_invalid', 'Installment count must be between 1 and 360.'));
+      if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > MAX_LOAN_INSTALLMENTS) {
+        errors.push(refusal('loan_installments_invalid', `Installment count must be between 1 and ${MAX_LOAN_INSTALLMENTS}.`, { max: MAX_LOAN_INSTALLMENTS }));
       }
       if (vAmount.value !== null && vAmount.value <= 0) errors.push(refusal('loan_amount_invalid', 'Amount must be greater than zero.'));
       terms = {
@@ -331,6 +346,8 @@ router.post('/loans', (req, res) => {
     if (dir.error) errors.push(dir);
     const account = validateAccountRef(req.body.account_id);
     if (account.error) errors.push(refusal('loan_account_invalid', account.error));
+    const dueDay = validateDueDay(req.body);
+    if (dueDay.error) errors.push(dueDay);
 
     // Altlasten beim Anlegen (#813): Ein Darlehen, das schon läuft, wenn es hier
     // eingetragen wird, startet sonst mit lauter offenen Raten - der Nutzer müsste
@@ -347,7 +364,7 @@ router.post('/loans', (req, res) => {
       if (!Number.isInteger(paidInstallments) || paidInstallments < 0) {
         errors.push(refusal('loan_paid_installments_invalid', 'Paid installments must be zero or a positive number.'));
       } else if (terms && paidInstallments > terms.installment_count) {
-        errors.push(refusal('loan_paid_installments_exceed', 'Paid installments cannot exceed the installment count.'));
+        errors.push(refusal('loan_paid_installments_exceed', 'Paid installments cannot exceed the installment count.', { max: terms.installment_count }));
       }
     }
     if (errors.length) return refuse(res, errors);
@@ -361,8 +378,8 @@ router.post('/loans', (req, res) => {
       INSERT INTO budget_loans
         (title, borrower, total_amount, installment_count, start_month, notes, created_by, owner_id, visibility,
          interest_mode, principal, fixed_rate, initial_repayment_rate, fixed_period_months, followup_rate,
-         currency, exchange_rate, direction, account_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         currency, exchange_rate, direction, account_id, due_day)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       vTitle.value,
       vBorrower.value,
@@ -374,7 +391,7 @@ router.post('/loans', (req, res) => {
       terms.interest_mode, terms.principal, terms.fixed_rate, terms.initial_repayment_rate,
       terms.fixed_period_months, terms.followup_rate,
       money.currency, money.exchange_rate,
-      dir.value, account.value
+      dir.value, account.value, dueDay.value
     );
 
     const loanId = result.lastInsertRowid;
@@ -413,8 +430,8 @@ router.put('/loans/:id', (req, res) => {
         const vAmount = num(req.body.total_amount, 'Amount', { required: true });
         const installmentCount = parseInt(req.body.installment_count, 10);
         iErrors.push(...refusals('loan_amount_invalid', [vAmount]));
-        if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 360) {
-          iErrors.push(refusal('loan_installments_invalid', 'Installment count must be between 1 and 360.'));
+        if (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > MAX_LOAN_INSTALLMENTS) {
+          iErrors.push(refusal('loan_installments_invalid', `Installment count must be between 1 and ${MAX_LOAN_INSTALLMENTS}.`, { max: MAX_LOAN_INSTALLMENTS }));
         }
         if (vAmount.value !== null && vAmount.value <= 0) iErrors.push(refusal('loan_amount_invalid', 'Amount must be greater than zero.'));
         terms = {
@@ -438,6 +455,8 @@ router.put('/loans/:id', (req, res) => {
         ? { value: loan.account_id }
         : validateAccountRef(req.body.account_id);
       if (iAccount.error) iErrors.push(refusal('loan_account_invalid', iAccount.error));
+      const iDueDay = validateDueDay(req.body, loan);
+      if (iDueDay.error) iErrors.push(iDueDay);
       if (iErrors.length) return refuse(res, iErrors);
 
       db.get().prepare(`
@@ -448,7 +467,7 @@ router.put('/loans/:id', (req, res) => {
           notes = ?,
           total_amount = ?, installment_count = ?, interest_mode = ?, principal = ?,
           fixed_rate = ?, initial_repayment_rate = ?, fixed_period_months = ?, followup_rate = ?,
-          currency = ?, exchange_rate = ?, direction = ?, account_id = ?
+          currency = ?, exchange_rate = ?, direction = ?, account_id = ?, due_day = ?
         WHERE id = ?
       `).run(
         req.body.title?.trim() ?? null,
@@ -457,7 +476,7 @@ router.put('/loans/:id', (req, res) => {
         req.body.notes !== undefined ? (req.body.notes?.trim() || null) : loan.notes,
         terms.total_amount, terms.installment_count, terms.interest_mode, terms.principal,
         terms.fixed_rate, terms.initial_repayment_rate, terms.fixed_period_months, terms.followup_rate,
-        iMoney.currency, iMoney.exchange_rate, iDir.value, iAccount.value,
+        iMoney.currency, iMoney.exchange_rate, iDir.value, iAccount.value, iDueDay.value,
         id
       );
       if (iDir.value !== loan.direction) rebookPayments(id, iDir.value);
@@ -480,8 +499,8 @@ router.put('/loans/:id', (req, res) => {
     if (req.body.start_month !== undefined) errors.push(...refusals('loan_start_month_invalid', [validateMonth(req.body.start_month, 'Start month')]));
     if (req.body.notes !== undefined) errors.push(...refusals('loan_notes_invalid', [str(req.body.notes, 'Notes', { max: 1000, required: false })]));
     const installmentCount = req.body.installment_count === undefined ? null : parseInt(req.body.installment_count, 10);
-    if (req.body.installment_count !== undefined && (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > 360)) {
-      errors.push(refusal('loan_installments_invalid', 'Installment count must be between 1 and 360.'));
+    if (req.body.installment_count !== undefined && (!Number.isInteger(installmentCount) || installmentCount < 1 || installmentCount > MAX_LOAN_INSTALLMENTS)) {
+      errors.push(refusal('loan_installments_invalid', `Installment count must be between 1 and ${MAX_LOAN_INSTALLMENTS}.`, { max: MAX_LOAN_INSTALLMENTS }));
     }
     const paidCount = db.get().prepare('SELECT COUNT(*) AS c FROM budget_loan_payments WHERE loan_id = ?').get(id).c;
     if (installmentCount !== null && installmentCount < paidCount) {
@@ -496,6 +515,8 @@ router.put('/loans/:id', (req, res) => {
       ? { value: loan.account_id }
       : validateAccountRef(req.body.account_id);
     if (account.error) errors.push(refusal('loan_account_invalid', account.error));
+    const dueDay = validateDueDay(req.body, loan);
+    if (dueDay.error) errors.push(dueDay);
     if (errors.length) return refuse(res, errors);
 
     db.get().prepare(`
@@ -509,7 +530,8 @@ router.put('/loans/:id', (req, res) => {
           currency = ?,
           exchange_rate = ?,
           direction = ?,
-          account_id = ?
+          account_id = ?,
+          due_day = ?
       WHERE id = ?
     `).run(
       req.body.title?.trim() ?? null,
@@ -519,7 +541,7 @@ router.put('/loans/:id', (req, res) => {
       req.body.start_month ?? null,
       req.body.notes !== undefined ? (req.body.notes?.trim() || null) : loan.notes,
       money.currency, money.exchange_rate,
-      dir.value, account.value,
+      dir.value, account.value, dueDay.value,
       id
     );
     if (dir.value !== loan.direction) rebookPayments(id, dir.value);
@@ -540,7 +562,7 @@ router.post('/loans/:id/payments', (req, res) => {
     if (!mayEdit(req, loanRow)) return res.status(403).json({ error: 'You cannot modify this loan.', code: 403 });
     // is_settled statt remaining_installments: ein frueh volltilgtes Zins-Darlehen
     // hat noch ungebuchte Plan-Raten, aber nichts mehr zu bezahlen (#954).
-    if (loan.is_settled) return res.status(409).json({ error: 'Loan is already paid.', code: 409 });
+    if (loan.is_settled) return refuse(res, [refusal('loan_settled', 'Loan is already paid.')], 409);
 
     const installmentNumber = req.body.installment_number === undefined
       ? loan.next_installment_number
@@ -550,20 +572,24 @@ router.post('/loans/:id/payments', (req, res) => {
       : Math.min(loan.installment_amount, loan.remaining_amount);
     const vAmount = num(req.body.amount ?? defaultAmount, 'Amount', { required: true });
     const vDate = validateDate(req.body.paid_date, 'Paid date', true);
-    const errors = collectErrors([vAmount, vDate]);
+    // Reihenfolge der Saetze wie bisher: Betrag, Datum, Ratennummer, Grenzen.
+    const errors = [
+      ...refusals('loan_payment_amount_invalid', [vAmount]),
+      ...refusals('loan_payment_date_invalid', [vDate]),
+    ];
     if (!Number.isInteger(installmentNumber) || installmentNumber < 1 || installmentNumber > loan.installment_count) {
-      errors.push('Installment number is invalid.');
+      errors.push(refusal('loan_payment_installment_invalid', 'Installment number is invalid.'));
     }
-    if (vAmount.value !== null && vAmount.value <= 0) errors.push('Amount must be greater than zero.');
+    if (vAmount.value !== null && vAmount.value <= 0) errors.push(refusal('loan_payment_amount_invalid', 'Amount must be greater than zero.'));
     if (vAmount.value !== null && vAmount.value - loan.remaining_amount > 0.005) {
-      errors.push('Amount cannot be greater than the remaining loan amount.');
+      errors.push(refusal('loan_payment_amount_exceeds', 'Amount cannot be greater than the remaining loan amount.'));
     }
-    if (errors.length) return res.status(400).json({ error: errors.join(' '), code: 400 });
+    if (errors.length) return refuse(res, errors);
 
     const existing = db.get().prepare(`
       SELECT 1 FROM budget_loan_payments WHERE loan_id = ? AND installment_number = ?
     `).get(id, installmentNumber);
-    if (existing) return res.status(409).json({ error: 'Installment already paid.', code: 409 });
+    if (existing) return refuse(res, [refusal('loan_installment_paid', 'Installment already paid.')], 409);
 
     const paymentAmount = cents(vAmount.value);
     // Währung je Darlehen (#582): Die Rate wird in Darlehenswährung geführt

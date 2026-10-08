@@ -5,6 +5,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, globSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { eachRule } from './css-rules.js';
 
 // Minimales Window/Navigator-Mock für Node
@@ -162,7 +163,7 @@ test('stagger: ein neuer Traeger (Seite neu aufgebaut) blendet wieder ein', () =
  */
 test('stagger: jeder Aufruf in public/ nennt seinen Listentraeger (host)', () => {
   const offenders = [];
-  for (const file of globSync('public/**/*.js', { cwd: new URL('..', import.meta.url).pathname })) {
+  for (const file of globSync('public/**/*.js', { cwd: fileURLToPath(new URL('..', import.meta.url)) })) {
     if (file.includes('vendor') || file.endsWith('utils/ux.js')) continue;
     const src = readFileSync(new URL(`../${file}`, import.meta.url), 'utf8');
     for (const m of src.matchAll(/\bstagger\(/g)) {
@@ -988,6 +989,7 @@ function dockStub({ withMenu = true, tabBar = false, padTop = 0, barTop = 57 } =
     addEventListener(type, fn) { (this.handlers[type] ??= []).push(fn); }
     removeEventListener(type, fn) { this.handlers[type] = (this.handlers[type] ?? []).filter((f) => f !== fn); }
     click() { this.clicks += 1; for (const fn of this.handlers.click ?? []) fn({ target: this }); }
+    focus() { this.focused = (this.focused ?? 0) + 1; global.document.activeElement = this; }
     getClientRects() { return this.visible() ? [this.rect] : []; }
     getBoundingClientRect() {
       const r = this.visible() ? this.rect : { top: 0, bottom: 0, left: 0, width: 0 };
@@ -1093,8 +1095,21 @@ test('M9: im Werkzeugmenue stehen die gefalteten Kontrollen, ein Eintrag klickt 
     assert.equal(s.panel.children.indexOf(items[0]), 0, 'oben im Menue');
     items[1].click();
     assert.equal(s.kanban.clicks, 1, 'der Eintrag loest die Aktion des Originals aus, keine zweite Kopie');
+    // R17 Schritt 8: der gewaehlte Stellvertreter traegt den Fokus, wenn das
+    // Menue schliesst - und faellt dabei aus dem DOM. Der Fokus muss VORHER
+    // zum Ausloeser, sonst gibt ihn die Popover-API an niemanden zurueck.
+    const trigger = s.actions.querySelector(':scope > .page-tools-btn[popovertarget]');
+    items[1].focus();
     s.toggleMenu('closed');
     assert.equal(s.panel.children.filter((c) => c.classes.has('page-toolbar__fold-item')).length, 0, 'geschlossen: Stellvertreter wieder weg');
+    assert.equal(global.document.activeElement, trigger, 'der Fokus steht am Ausloeser, nicht auf einem abgehaengten Eintrag');
+
+    // Stand der Fokus woanders (Maus neben das Menue), bleibt er dort.
+    s.toggleMenu('open');
+    s.filter.focus();
+    const before = trigger.focused;
+    s.toggleMenu('closed');
+    assert.equal(trigger.focused, before, 'ohne Fokus auf einem Stellvertreter wird nichts umgesetzt');
 
     s.toolbar.classList.remove('is-docked');
     s.toggleMenu('open');
@@ -1340,15 +1355,24 @@ test('K1: die Kuechen-Kontextzeile aus reinen Werkzeugen klappt beim Andocken ei
   } finally { s.restore(); }
 });
 
-test('K1: eine Kontextzeile, die etwas benennt, und ein kurzer Port falten nicht', () => {
-  const named = kitchenFoldStub({ centerCls: ['page-toolbar__center', 'week-nav'] });
-  try {
-    wireCollapsingHeader(named.toolbar);
-    assert.equal(named.toolbar.classList.contains('page-toolbar--fold-row'), false, 'Wochenstepper und Listen-Kapseln bleiben stehen');
-    named.fire('touchstart', named.row);
-    named.scrollTo(120);
-    assert.equal(named.toolbar.classList.contains('is-collapsed'), false);
-  } finally { named.restore(); }
+// R17 Schritt 5 (Critique 2026-10-07): bis dahin blieben Wochenstepper
+// (Mahlzeiten) und Listen-Kapseln (Einkauf) stehen - 121px Kopf in jedem
+// Scrollstand, der Vorrat daneben 56. Jede Zeile unter der Leiste faltet.
+test('K1: auch eine Kontextzeile, die etwas benennt, faltet - ein kurzer Port nicht', () => {
+  for (const centerCls of [['page-toolbar__center', 'week-nav'], ['page-toolbar__center']]) {
+    const named = kitchenFoldStub({ centerCls });
+    try {
+      wireCollapsingHeader(named.toolbar);
+      assert.equal(named.toolbar.classList.contains('page-toolbar--fold-row'), true,
+        `Wochenstepper und Listen-Kapseln falten wie die Suche (${centerCls.join(' ')})`);
+      assert.equal(named.toolbar.props.get('--fold-row-h'), '64px');
+      named.fire('touchstart', named.row);
+      named.scrollTo(120);
+      assert.equal(named.toolbar.classList.contains('is-collapsed'), true, 'angedockt steht nur die Kuechen-Leiste');
+      named.scrollTo(0);
+      assert.equal(named.toolbar.classList.contains('is-collapsed'), false, 'zurueck oben kommen Woche und Liste wieder');
+    } finally { named.restore(); }
+  }
   const short = kitchenFoldStub();
   try {
     short.port.scrollHeight = short.port.clientHeight + 90;
@@ -1405,4 +1429,225 @@ test('K1: die gefaltete Zeile misst die Reserve ausgeklappt - sonst pendelt sie 
     s.scrollTo(101);
     assert.equal(s.toolbar.classList.contains('is-collapsed'), true, 'die Zeile bleibt gefaltet');
   } finally { s.restore(); }
+});
+
+/*
+ * growBars (Critique R16, P2 Bewegung): die Budget-Balken tragen eine
+ * Transition, die nie lief, weil `--bar-scale` schon am Endwert im Markup
+ * steht. Der Helfer setzt kurz den Startwert und sofort wieder den Endwert.
+ * Drei Zusagen: (a) der Endwert wird IMMER erreicht - per rAF oder per Timer,
+ * wer zuerst kommt; (b) reduzierte Bewegung und verdeckter Tab fassen nichts
+ * an; (c) ein unveraenderter Balken ruehrt sich beim Neuzeichnen nicht.
+ */
+function barEl(key, value) {
+  const props = new Map([['--bar-scale', value]]);
+  const el = {
+    dataset: { barKey: key },
+    writes: [],
+    offsetWidth: 100,
+    style: {
+      getPropertyValue: (name) => props.get(name) ?? '',
+      setProperty: (name, v) => { props.set(name, String(v)); el.writes.push(String(v)); },
+    },
+    value: () => props.get('--bar-scale'),
+  };
+  return el;
+}
+
+async function withBarEnv({ reduced = false, visibility = 'visible', raf = 'never' }, fn) {
+  const { growBars } = await import('../public/utils/ux.js');
+  const saved = { matchMedia: global.window.matchMedia, document: global.document, raf: global.requestAnimationFrame };
+  const frames = [];
+  global.window.matchMedia = (q) => ({ matches: reduced && /prefers-reduced-motion/.test(q) });
+  global.document = { visibilityState: visibility };
+  if (raf === 'missing') delete global.requestAnimationFrame;
+  else global.requestAnimationFrame = (cb) => { frames.push(cb); return frames.length; };
+  try { return await fn(growBars, frames); } finally {
+    global.window.matchMedia = saved.matchMedia;
+    if (saved.document === undefined) delete global.document; else global.document = saved.document;
+    if (saved.raf === undefined) delete global.requestAnimationFrame; else global.requestAnimationFrame = saved.raf;
+  }
+}
+
+/*
+ * drawChartOnce (Critique R17, Bewegung): Linie und Ring zeichnen sich EINMAL
+ * ein. Geprueft wird das Programm: was animiert wird, womit, und dass es beim
+ * zweiten Mal, unter reduzierter Bewegung und im verdeckten Tab still bleibt -
+ * ohne den Merker zu verbrauchen.
+ */
+function chartMark(attrs = {}) {
+  const el = {
+    calls: [],
+    getAttribute: (name) => attrs[name] ?? null,
+    animate(keyframes, timing) { el.calls.push({ keyframes, timing }); return {}; },
+  };
+  return el;
+}
+
+async function withChartEnv({ reduced = false, visibility = 'visible' }, fn) {
+  const saved = { window: globalThis.window, document: globalThis.document, getComputedStyle: globalThis.getComputedStyle };
+  globalThis.window = { matchMedia: (q) => ({ matches: reduced && /prefers-reduced-motion/.test(q) }) };
+  globalThis.document = { visibilityState: visibility, documentElement: {} };
+  globalThis.getComputedStyle = () => ({ getPropertyValue: (name) => ({ '--duration-xl': '300ms', '--ease-out': 'cubic-bezier(0.16, 1, 0.3, 1)' }[name] ?? '') });
+  const { drawChartOnce } = await import('../public/utils/ux.js');
+  try { return await fn(drawChartOnce); } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete globalThis[key]; else globalThis[key] = value;
+    }
+  }
+}
+
+test('drawChartOnce: Linie per clip-path, Ring per stroke-dasharray - aus Tokens, ohne fill, und nur einmal', async () => {
+  await withChartEnv({}, async (drawChartOnce) => {
+    const lines = chartMark();
+    const arc = chartMark({ 'stroke-dasharray': '94.25 376.99', 'stroke-dashoffset': '-120.00' });
+    assert.equal(drawChartOnce('test-once', { lines, arcs: [arc] }), 2);
+    assert.deepEqual(lines.calls[0].keyframes, [{ clipPath: 'inset(0 100% 0 0)' }, { clipPath: 'inset(0 0 0 0)' }]);
+    assert.deepEqual(arc.calls[0].keyframes, [
+      { strokeDasharray: '0 376.99', strokeDashoffset: '0' },
+      { strokeDasharray: '94.25 376.99', strokeDashoffset: '-120.00' },
+    ], 'das Segment waechst von 12 Uhr an seine Stelle; Ziel ist der Wert aus dem Markup');
+    for (const mark of [lines, arc]) {
+      assert.deepEqual(mark.calls[0].timing, { duration: 300, easing: 'cubic-bezier(0.16, 1, 0.3, 1)' }, 'Dauer und Kurve aus Tokens, kein fill');
+    }
+    // Zweiter Aufruf (Zeitraum geblaettert, Reiter neu betreten): nichts.
+    const again = chartMark();
+    assert.equal(drawChartOnce('test-once', { lines: again }), 0);
+    assert.equal(again.calls.length, 0);
+  });
+});
+
+test('drawChartOnce: reduzierte Bewegung, verdeckter Tab und ein leeres Diagramm verbrauchen den Merker nicht', async () => {
+  for (const env of [{ reduced: true }, { visibility: 'hidden' }]) {
+    await withChartEnv(env, async (drawChartOnce) => {
+      const lines = chartMark();
+      assert.equal(drawChartOnce('test-held', { lines }), 0, JSON.stringify(env));
+      assert.equal(lines.calls.length, 0);
+    });
+  }
+  await withChartEnv({}, async (drawChartOnce) => {
+    assert.equal(drawChartOnce('test-held', { lines: null, arcs: [] }), 0, 'ohne Marken kein Lauf');
+    assert.equal(drawChartOnce('test-held', { lines: {} }), 0, 'ohne animate kein Lauf');
+    const lines = chartMark();
+    assert.equal(drawChartOnce('test-held', { lines }), 1, 'der erste echte Aufruf zeichnet');
+  });
+});
+
+test('growBars: startet bei 0, und der Endwert kommt auch OHNE rAF (Timer-Rueckfall)', async () => {
+  await withBarEnv({ raf: 'never' }, async (growBars, frames) => {
+    const a = barEl('a', '0.4000');
+    const b = barEl('b', '1.0000');
+    const root = { querySelectorAll: () => [a, b] };
+    assert.equal(growBars(root, { selector: '.bar', memo: 'test-timer' }), 2);
+    assert.equal(a.value(), '0', 'der Balken steht fuer einen Frame am Startwert');
+    assert.equal(frames.length, 1, 'ein Frame ist angefragt');
+    // rAF feuert NIE (verdeckter Tab nach dem Start): der Timer muss es richten.
+    await new Promise((r) => setTimeout(r, 200));
+    assert.equal(a.value(), '0.4000');
+    assert.equal(b.value(), '1.0000');
+    // Ein spaet doch noch feuernder Frame schreibt nichts Falsches mehr.
+    frames[0]();
+    assert.deepEqual(a.writes, ['0', '0.4000']);
+  });
+});
+
+test('growBars: mit rAF setzt der Frame den Endwert, der Timer danach nichts mehr', async () => {
+  await withBarEnv({ raf: 'never' }, async (growBars, frames) => {
+    const a = barEl('a', '0.2500');
+    growBars({ querySelectorAll: () => [a] }, { selector: '.bar', memo: 'test-raf' });
+    frames[0]();
+    assert.equal(a.value(), '0.2500');
+    await new Promise((r) => setTimeout(r, 200));
+    assert.deepEqual(a.writes, ['0', '0.2500'], 'genau ein Zuruecksetzen, genau ein Endwert');
+  });
+});
+
+test('growBars: reduzierte Bewegung, verdeckter Tab und fehlendes rAF fassen den Endwert nicht an', async () => {
+  for (const env of [{ reduced: true }, { visibility: 'hidden' }, { raf: 'missing' }]) {
+    await withBarEnv(env, async (growBars) => {
+      const a = barEl('a', '0.7000');
+      const moved = growBars({ querySelectorAll: () => [a] }, { selector: '.bar', memo: `test-still-${JSON.stringify(env)}` });
+      assert.equal(moved, 0, JSON.stringify(env));
+      assert.deepEqual(a.writes, [], `${JSON.stringify(env)}: der Balken bleibt am Wert aus dem Markup`);
+    });
+  }
+  // Nichts zu tun, nichts kaputt.
+  const { growBars } = await import('../public/utils/ux.js');
+  assert.equal(growBars(null, { selector: '.bar', memo: 'x' }), 0);
+});
+
+test('growBars: ein unveraenderter Balken ruehrt sich beim Neuzeichnen nicht, ein geaenderter waechst vom alten Wert', async () => {
+  await withBarEnv({ raf: 'never' }, async (growBars, frames) => {
+    const memo = 'test-memo';
+    growBars({ querySelectorAll: () => [barEl('a', '0.4000'), barEl('b', '0.6000')] }, { selector: '.bar', memo });
+    frames.splice(0).forEach((cb) => cb());
+    // Neuzeichnen: neue Knoten, a gleich, b geaendert, c neu.
+    const a = barEl('a', '0.4000');
+    const b = barEl('b', '0.9000');
+    const c = barEl('c', '0.1000');
+    assert.equal(growBars({ querySelectorAll: () => [a, b, c] }, { selector: '.bar', memo }), 2);
+    assert.deepEqual(a.writes, [], 'gleich geblieben: keine Bewegung');
+    assert.equal(b.value(), '0.6000', 'geaendert: startet am zuletzt gezeigten Wert');
+    assert.equal(c.value(), '0', 'neu: startet bei 0');
+    frames.splice(0).forEach((cb) => cb());
+    assert.equal(b.value(), '0.9000');
+    assert.equal(c.value(), '0.1000');
+  });
+});
+
+/*
+ * toggleRegion (R16, Bewegung): der Zustand ist `hidden`, nicht die Animation.
+ * Auf faellt `hidden` sofort; zu setzt es NACH dem Einklappen - und auch dann,
+ * wenn `finish` nie kommt. Ein Oeffnen, das ein Zuklappen ueberholt, gewinnt.
+ */
+function regionEl({ hidden = true, animates = true } = {}) {
+  const el = {
+    hidden,
+    style: {},
+    calls: [],
+    cancelled: 0,
+    getBoundingClientRect: () => ({ height: 120 }),
+    getAnimations: () => el.calls.map(() => ({ cancel: () => { el.cancelled += 1; } })),
+  };
+  if (animates) el.animate = (keyframes, timing) => { el.calls.push({ keyframes, timing }); return { finished: new Promise(() => {}) }; };
+  return el;
+}
+
+test('toggleRegion: auf faellt hidden sofort, zu erst nach dem Einklappen - auch ohne finish', async () => {
+  const { toggleRegion } = await import('../public/utils/ux.js');
+  const savedGcs = global.getComputedStyle;
+  const savedDoc = global.document;
+  global.getComputedStyle = () => ({ getPropertyValue: () => '', opacity: '1', paddingTop: '0px', paddingBottom: '0px', marginTop: '0px', marginBottom: '0px', borderTopWidth: '0px', borderBottomWidth: '0px' });
+  global.document = { documentElement: {} };
+  try {
+    const region = regionEl({ hidden: true });
+    const opening = toggleRegion(region, true);
+    assert.equal(region.hidden, false, 'der Inhalt ist im selben Moment erreichbar');
+    assert.equal(region.calls.length, 1, 'die Hoehe zieht auf');
+    await opening;
+
+    const closing = toggleRegion(region, false);
+    assert.equal(region.hidden, false, 'solange es einklappt, steht die Region noch');
+    await closing; // `finished` loest nie auf - der Timer muss es tun
+    assert.equal(region.hidden, true, 'der Zustand kommt an');
+    assert.ok(region.cancelled > 0, 'die gehaltene Hoehe 0 ist verworfen');
+
+    // Zuklappen, sofort wieder oeffnen: das Oeffnen gewinnt.
+    region.hidden = false;
+    const late = toggleRegion(region, false);
+    toggleRegion(region, true);
+    await late;
+    assert.equal(region.hidden, false, 'ein ueberholtes Zuklappen raeumt nicht ab');
+
+    // Ohne animate (und damit auch unter reduzierter Bewegung): im selben Takt.
+    const plain = regionEl({ hidden: false, animates: false });
+    await toggleRegion(plain, false);
+    assert.equal(plain.hidden, true);
+    await toggleRegion(plain, true);
+    assert.equal(plain.hidden, false);
+    await toggleRegion(null, true);
+  } finally {
+    if (savedGcs === undefined) delete global.getComputedStyle; else global.getComputedStyle = savedGcs;
+    if (savedDoc === undefined) delete global.document; else global.document = savedDoc;
+  }
 });

@@ -579,3 +579,253 @@ test('Schlaf auf der Karte: kurze Form „7:30" plus Einheit, der lange Satz ble
     assert.match(health.cardMarkup(sleep, kurz), /<span class="metric-card__value">6:05<\/span>/, 'Minuten zweistellig');
   });
 });
+
+// --------------------------------------------------------
+// Gleitendes Standardfenster (Critique 2026-10-05, R16)
+// --------------------------------------------------------
+//
+// Der Standard "Monat" war der KALENDERMONAT. Am 05.10. zeigte er fuenf Tage,
+// und ueber vier Messungen der Vorwoche stand "Zu wenige Messwerte fuer einen
+// Trend". Der laufende Zeitraum ist jetzt gleitend - die letzten 30 bzw. 7
+// Tage, endend HEUTE -, und wer in die Vergangenheit blaettert, bekommt wie
+// bisher den Kalendermonat bzw. die Kalenderwoche. `today` ist ein Parameter,
+// damit die Regel ohne Uhr pruefbar ist; der letzte Test nagelt Uhr UND Zone
+// fest und laesst den Standard selbst rechnen.
+
+const R16_TODAY = '2026-10-05'; // Montag
+
+test('R16: der laufende Monat sind die letzten 30 Tage, endend heute', () => {
+  const { buckets, from, to, gran } = buildVitalBuckets('month', R16_TODAY, 1, { today: R16_TODAY });
+  assert.equal(from, '2026-09-06');
+  assert.equal(to, R16_TODAY);
+  assert.equal(buckets.length, 30);
+  assert.equal(gran, 'day');
+  // Jeder Tag des Monats landet im gleitenden Fenster, nicht nur der Monatserste.
+  assert.equal(buildVitalBuckets('month', '2026-10-01', 1, { today: R16_TODAY }).to, R16_TODAY);
+});
+
+test('R16: die laufende Woche sind die letzten 7 Tage, endend heute', () => {
+  const { buckets, from, to } = buildVitalBuckets('week', R16_TODAY, 1, { today: R16_TODAY });
+  assert.equal(from, '2026-09-29');
+  assert.equal(to, R16_TODAY);
+  assert.equal(buckets.length, 7);
+});
+
+test('R16: wer zurueckblaettert, bekommt den Kalendermonat und die Kalenderwoche', () => {
+  const month = buildVitalBuckets('month', '2026-09-05', 1, { today: R16_TODAY });
+  assert.deepEqual([month.from, month.to], ['2026-09-01', '2026-09-30']);
+  const week = buildVitalBuckets('week', '2026-09-28', 1, { today: R16_TODAY });
+  assert.deepEqual([week.from, week.to], ['2026-09-28', '2026-10-04']);
+  // Auch nach vorn: ein Zeitraum, der heute nicht enthaelt, ist ein Kalenderfenster.
+  const next = buildVitalBuckets('month', '2026-11-05', 1, { today: R16_TODAY });
+  assert.deepEqual([next.from, next.to], ['2026-11-01', '2026-11-30']);
+});
+
+// Review PR #1673: das gleitende Fenster endet heute, "Weiter" begann erst mit
+// dem naechsten Kalenderzeitraum. Der Rest der laufenden Woche / des laufenden
+// Monats lag damit in KEINEM erreichbaren Fenster - und Messwerte duerfen ein
+// Datum in der Zukunft tragen. Ein Anker hinter heute meint jetzt das
+// Kalenderfenster, und das Blaettern haelt dort an.
+
+const vitalsModule = await import('../public/utils/health-vitals.js');
+
+test('R16: ein Anker hinter heute im laufenden Zeitraum zeigt das Kalenderfenster', () => {
+  const week = buildVitalBuckets('week', '2026-10-08', 1, { today: R16_TODAY });
+  assert.deepEqual([week.from, week.to], ['2026-10-05', '2026-10-11']);
+  const month = buildVitalBuckets('month', '2026-10-31', 1, { today: R16_TODAY });
+  assert.deepEqual([month.from, month.to], ['2026-10-01', '2026-10-31']);
+  // Ein Messwert von uebermorgen steht damit in einem erreichbaren Fenster.
+  const rows = [{ id: 1, type: 'weight', value_num: 70, unit: 'kg', measured_at: '2026-10-07T07:00' }];
+  const series = computeVitalSeries(rows, { type: 'weight', range: 'week', anchor: '2026-10-11', today: R16_TODAY });
+  assert.equal(series.hasData, true);
+});
+
+/** Laeuft `steps` Schritte und sammelt die Fenster [from, to] in Leserichtung. */
+function walkWindows(range, start, dir, steps, today) {
+  const out = [];
+  let anchor = start;
+  for (let i = 0; i <= steps; i++) {
+    const { from, to } = buildVitalBuckets(range, anchor, 1, { today });
+    out.push([from, to]);
+    anchor = vitalsModule.stepVitalAnchor(range, anchor, dir, 1, { today });
+  }
+  return out;
+}
+
+function nextDay(key) {
+  const [y, m, d] = key.split('-').map(Number);
+  const dt = new Date(y, m - 1, d + 1);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+}
+
+test('R16: Blaettern laesst keinen Tag aus - jedes Fenster beginnt spaetestens am Tag nach dem vorigen', () => {
+  // Montag, Mittwoch, Sonntag (letzter Tag der Woche), Monatsletzter, 31. Januar.
+  for (const today of ['2026-10-05', '2026-10-07', '2026-10-11', '2026-10-31', '2027-01-31']) {
+    for (const range of ['week', 'month']) {
+      let start = today;
+      for (let i = 0; i < 4; i++) start = vitalsModule.stepVitalAnchor(range, start, -1, 1, { today });
+      const forward = walkWindows(range, start, 1, 9, today);
+      for (let i = 1; i < forward.length; i++) {
+        assert.ok(forward[i][0] <= nextDay(forward[i - 1][1]),
+          `${range} am ${today}: Luecke zwischen ${forward[i - 1]} und ${forward[i]}`);
+        assert.ok(forward[i][1] > forward[i - 1][1], `${range} am ${today}: ${forward[i]} fuehrt nicht weiter`);
+      }
+      // Zurueck ueber dieselben Fenster, in umgekehrter Reihenfolge.
+      let end = start;
+      for (let i = 0; i < 9; i++) end = vitalsModule.stepVitalAnchor(range, end, 1, 1, { today });
+      assert.deepEqual(walkWindows(range, end, -1, 9, today), [...forward].reverse(), `${range} am ${today}: Rueckweg`);
+    }
+  }
+});
+
+test('R16: die Folge am Montag, 05.10. - vorige Woche, gleitend, laufende Woche, naechste Woche', () => {
+  const start = vitalsModule.stepVitalAnchor('week', R16_TODAY, -1, 1, { today: R16_TODAY });
+  assert.deepEqual(walkWindows('week', start, 1, 3, R16_TODAY), [
+    ['2026-09-28', '2026-10-04'],
+    ['2026-09-29', '2026-10-05'],
+    ['2026-10-05', '2026-10-11'],
+    ['2026-10-12', '2026-10-18'],
+  ]);
+  const monthStart = vitalsModule.stepVitalAnchor('month', R16_TODAY, -1, 1, { today: R16_TODAY });
+  assert.deepEqual(walkWindows('month', monthStart, 1, 3, R16_TODAY), [
+    ['2026-09-01', '2026-09-30'],
+    ['2026-09-06', '2026-10-05'],
+    ['2026-10-01', '2026-10-31'],
+    ['2026-11-01', '2026-11-30'],
+  ]);
+  // Am 31. reichen 30 Tage nur bis zum 2. - der Monatserste gehoert dazu.
+  const last = buildVitalBuckets('month', '2026-10-31', 1, { today: '2026-10-31' });
+  assert.deepEqual([last.from, last.to, last.buckets.length], ['2026-10-01', '2026-10-31', 31]);
+  // Am letzten Tag des Zeitraums liegt nichts mehr dahinter: kein Zwischenhalt.
+  assert.equal(vitalsModule.stepVitalAnchor('week', '2026-10-11', 1, 1, { today: '2026-10-11' }), '2026-10-18');
+  // Das Jahr blaettert wie bisher.
+  assert.equal(vitalsModule.stepVitalAnchor('year', R16_TODAY, -1, 1, { today: R16_TODAY }), '2025-10-05');
+});
+
+test('R16: die Seite blaettert ueber die Bausteine, nicht ueber eigene Kalenderrechnung', () => {
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  assert.match(src, /function stepAnchor\(dir\) \{\s*vitals\.anchor = stepVitalAnchor\(vitals\.range, vitals\.anchor, dir\);\s*\}/);
+  assert.match(src, /function stepActivityWeek\(dir\) \{\s*activity\.anchor = stepActivityAnchor\(activity\.anchor, dir\);\s*\}/);
+});
+
+test('R16: vier Messungen der Vorwoche ergeben am Monatsanfang einen Trend', () => {
+  const rows = ['2026-09-29', '2026-09-30', '2026-10-01', '2026-10-02'].map((day, i) => (
+    { id: i + 1, type: 'weight', value_num: 70 + i / 10, unit: 'kg', measured_at: `${day}T07:00` }));
+  const series = computeVitalSeries(rows, { type: 'weight', range: 'month', anchor: R16_TODAY, today: R16_TODAY });
+  assert.equal(series.points.filter((p) => p.count > 0).length, 4, 'alle vier liegen im Fenster');
+  assert.deepEqual([series.from, series.to], ['2026-09-06', R16_TODAY], 'die Beschriftung nennt den gleitenden Bereich');
+  const svg = health.chartMarkup(vitalMetric('weight'), series);
+  assert.match(svg, /<polyline/, 'eine Kurve, kein "zu wenige Messwerte"');
+  assert.doesNotMatch(svg, /health\.vitals\.sparse/);
+});
+
+test('R16: "heute" ist der Tag des HAUSHALTS, auch wenn das Geraet noch im Vortag steht', async () => {
+  const { mock } = await import('node:test');
+  const tz = await import('/utils/timezone.js');
+  const prevTz = process.env.TZ;
+  // 23:30 UTC am 04.10.: in Berlin 01:30 am 05.10., in Los Angeles 16:30 am 04.10.
+  process.env.TZ = 'America/Los_Angeles';
+  mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-04T23:30:00Z') });
+  tz.setDisplayTimeZone('Europe/Berlin');
+  try {
+    assert.equal(new Date().getDate(), 4, 'das Geraet steht im Vortag');
+    const month = buildVitalBuckets('month');
+    assert.deepEqual([month.from, month.to], ['2026-09-06', '2026-10-05']);
+    const week = buildVitalBuckets('week');
+    assert.deepEqual([week.from, week.to], ['2026-09-29', '2026-10-05']);
+  } finally {
+    tz.setDisplayTimeZone(null);
+    mock.timers.reset();
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz;
+  }
+});
+
+test('R16: die Jahresachse nennt Monate, keine Monatsersten', () => {
+  const rows = [
+    { id: 1, type: 'weight', value_num: 70, unit: 'kg', measured_at: '2026-02-10T07:00' },
+    { id: 2, type: 'weight', value_num: 71, unit: 'kg', measured_at: '2026-08-10T07:00' },
+  ];
+  const series = computeVitalSeries(rows, { type: 'weight', range: 'year', anchor: R16_TODAY, today: R16_TODAY });
+  const svg = health.chartMarkup(vitalMetric('weight'), series);
+  const axis = [...svg.matchAll(/class="chart__axis" text-anchor="[a-z]+">([^<]*)</g)].map((m) => m[1]);
+  assert.equal(axis.length, 3);
+  for (const label of axis) {
+    assert.doesNotMatch(label, /^\d{4}-\d{2}-01$/, `"${label}" ist ein Tagesdatum fuer einen Monatspunkt`);
+  }
+  assert.doesNotMatch(svg, /<title>[^<]*2026-0[28]-01/, 'auch der Punkt nennt seinen Monat, nicht dessen ersten Tag');
+});
+
+/* KENNZAHLKARTEN MIT FESTER ANATOMIE (Critique R18, 2026-10-07). Gesehen in der
+ * Vitalreihe: die Datumszeilen auf drei Hoehen (mit Trendlinie, ohne, mit
+ * zweizeiligem Label), "SAUERSTOFFSÄTTI-/GUNG" als gesperrte Versalzeile, die
+ * Einheit unter dem Wert ("116/74" / "mmHg"), graue Haarlinien als Trend. */
+test('R18: die Kennzahlkarte hat vier feste Zeilen - Kopf, Wert, Trendlinie, Meta', async () => {
+  const panel = readFileSync(new URL('../public/styles/panel.css', import.meta.url), 'utf8');
+  const typo = readFileSync(new URL('../public/styles/typography.css', import.meta.url), 'utf8');
+  const rules = [...eachRule(panel)];
+  const body = (sel, at = () => true) => rules.filter((r) => r.selector.split(',').map((s) => s.trim()).includes(sel) && at(r)).map((r) => r.body).join(';');
+  const plain = (r) => r.at.length === 0;
+  // Jeder Teil hat seine Zeile - eine fehlende Trendlinie zieht die Meta-Zeile nicht hoch.
+  assert.match(body('.metric-rows > .metric-card', plain), /grid-template-rows:\s*auto auto minmax\(var\(--metric-spark-row, 0px\), auto\) auto/);
+  for (const [part, row] of [['head', 1], ['body', 2], ['spark', 3], ['meta', 4], ['note', 4]]) {
+    assert.match(body(`.metric-rows > .metric-card > .metric-card__${part}`), new RegExp(`grid-row:\\s*${row}\\b`), `.metric-card__${part} steht in Zeile ${row}`);
+  }
+  // Subgrid: die Karten EINER Rasterzeile teilen sich die vier Zeilenhoehen. Nur als Aufsatz.
+  const sub = (r) => r.at.some((a) => /@supports\s*\(grid-template-rows:\s*subgrid\)/.test(a));
+  assert.match(body('.metric-rows > .metric-card', sub), /grid-row:\s*span 4/);
+  assert.match(body('.metric-rows > .metric-card', sub), /grid-template-rows:\s*subgrid/);
+  assert.doesNotMatch(body('.metric-rows > .metric-card', plain), /subgrid/, 'ohne Subgrid bleibt der Rueckfall mit festen Zeilen');
+  // Beide Vitalraster tragen die Anatomie und melden sich als Reihe (Kompaktstufe des Werts).
+  const src = readFileSync(new URL('../public/pages/health.js', import.meta.url), 'utf8');
+  assert.match(src, /<div class="health-vitals__cards metric-rows" id="health-vitals-cards">/);
+  assert.match(src, /<div class="health-overview__vitals-grid metric-rows">/);
+  const healthRules = [...eachRule(HEALTH_CSS)];
+  for (const grid of ['.health-vitals__cards', '.health-overview__vitals-grid']) {
+    const r = healthRules.find((x) => x.at.length === 0 && x.selector.trim() === grid);
+    assert.match(r.body, /container:\s*metric-grid \/ inline-size/, `${grid}: ohne die Reihe stuende "116/74 mmHg" auf dem Telefon in 28px und braeche um`);
+  }
+  // Das Label: Satzschreibung, eine Zeile hoch gedacht - nicht mehr im Versal-Block.
+  const label = body('.metric-card__label', plain);
+  assert.match(label, /letter-spacing:\s*var\(--tracking-normal\)/);
+  assert.doesNotMatch(label, /text-transform/);
+  const versal = [...eachRule(typo)].find((r) => /text-transform:\s*uppercase/.test(r.body) && /letter-spacing:\s*var\(--tracking-label\)/.test(r.body));
+  assert.ok(versal, 'der Versal-Block steht noch');
+  assert.ok(!versal.selector.split(',').map((s) => s.trim()).includes('.metric-card__label'), 'das Kennzahl-Label steht nicht mehr im Versal-Block');
+  // Wert und Einheit: eine Grundlinie.
+  assert.match(body('.metric-card__body', plain), /align-items:\s*baseline/);
+
+  // Die Karte selbst: Teile in der Reihenfolge der Zeilen.
+  await imBlatt(() => {
+    const weight = vitalMetric('weight');
+    const series = computeVitalSeries([
+      { id: 1, type: 'weight', value_num: 65, measured_at: '2026-09-22T07:00' },
+      { id: 2, type: 'weight', value_num: 66, measured_at: '2026-09-12T07:00' },
+    ], { type: 'weight', range: 'month', anchor: '2026-09-27' });
+    const html = health.cardMarkup(weight, series);
+    const order = ['metric-card__head', 'metric-card__body', 'metric-card__spark', 'metric-card__meta'].map((cls) => html.indexOf(`class="${cls}"`));
+    assert.ok(order.every((at, i) => at > 0 && (i === 0 || at > order[i - 1])), `Kopf, Wert, Trendlinie, Meta: ${order}`);
+    // Trendlinie: Flaeche unter der Linie, Endpunkt als Linie der Laenge null (kein gestreckter Kreis).
+    const spark = html.slice(html.indexOf('<svg class="metric-card__spark"'), html.indexOf('</svg>'));
+    assert.match(spark, /<linearGradient id="metric-spark-weight"/);
+    assert.match(spark, /<polygon class="metric-card__spark-area" fill="url\(#metric-spark-weight\)"/);
+    assert.match(spark, /<line class="metric-card__spark-end" x1="([\d.]+)" x2="\1" y1="([\d.]+)" y2="\2" vector-effect="non-scaling-stroke" \/>/);
+    assert.doesNotMatch(spark, /<circle/, 'preserveAspectRatio="none" streckte den Kreis zur Ellipse');
+    assert.doesNotMatch(spark, /stroke="var\(|fill="var\(/, 'die Farbe steht am geteilten Bauteil, nicht im Markup');
+    assert.match(spark, /aria-hidden="true"/);
+  });
+  // Farbe: Modulton mit Rueckfall, Flaeche laeuft auf 0, Endpunkt in Label-Farbe.
+  assert.match(body('.metric-card__spark', plain), /color:\s*var\(--module-accent, var\(--color-text-secondary\)\)/);
+  assert.match(body('.metric-card__spark-to'), /stop-opacity:\s*0\b/);
+  assert.match(body('.metric-card__spark-end'), /stroke:\s*var\(--color-text-primary\)/);
+  // Grafikkontrast 3:1 der Linie gegen Karte und Well, beide Themes (Gesundheitston).
+  const { contrastRatio } = await import('../public/utils/contrast.js');
+  const tokens = readFileSync(new URL('../public/styles/tokens.css', import.meta.url), 'utf8');
+  for (const [name, ink, surface] of [['hell/Karte', '#9E1E88', '#FFFFFF'], ['hell/Well', '#9E1E88', '#EDEAE3'], ['dunkel/Karte', '#DB60CB', '#2B2825'], ['dunkel/Well', '#DB60CB', '#37332E']]) {
+    assert.ok(contrastRatio(ink, surface) >= 3, `${name}: ${contrastRatio(ink, surface)}`);
+  }
+  for (const hex of ['--_family-health:   #9E1E88', '--_family-health:   #DB60CB']) assert.ok(tokens.includes(hex), hex);
+  // Zeiten, Daten und Betraege unter dem Wert stehen tabellarisch.
+  for (const part of ['note', 'meta', 'trend', 'unit']) {
+    assert.match(body(`.metric-card__${part}`), /font-variant-numeric:\s*tabular-nums/, `.metric-card__${part}`);
+  }
+});

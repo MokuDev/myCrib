@@ -26,6 +26,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 globalThis.HTMLElement = globalThis.HTMLElement ?? class {};
 globalThis.customElements = globalThis.customElements ?? { define() {}, get() {} };
@@ -286,49 +287,85 @@ function baseState(overrides = {}) {
   });
 }
 
-test('Filter (n): die Zahl nennt jeden wirkenden Filter, im Kanban ohne den Status', () => {
+test('Filter (n): die Zahl nennt nur ABWEICHUNGEN vom Standard (R16)', () => {
+  // „Filter 1" brannte im Ruhezustand: der Startwert „Offen" zaehlte mit, der
+  // Knopf trug also immer eine Zahl und die Aktiv-Farbe - und sagte damit
+  // nichts mehr (Critique 2026-10-05, R16).
   baseState();
-  assert.equal(tasks.activeFilterCount(), 1, 'der Standardfilter „Offen" ist ein Filter - vorher stand er als Chip da');
+  assert.equal(tasks.activeFilterCount(), 0, 'der Standard ist kein Filter');
   tasks.state.filters.priority = ['high', 'urgent'];
   tasks.state.filters.tags = ['garten'];
-  assert.equal(tasks.activeFilterCount(), 4, 'jeder Wert jeder Achse zaehlt (#671)');
+  assert.equal(tasks.activeFilterCount(), 3, 'jeder Wert jeder Achse zaehlt (#671)');
   tasks.state.showFuture = true;
-  assert.equal(tasks.activeFilterCount(), 5,
+  assert.equal(tasks.activeFilterCount(), 4,
     '„Geplante anzeigen" hatte einen eigenen Chip - ohne ihn traegt allein die Zahl, dass er an ist');
   tasks.state.viewMode = 'kanban';
   assert.equal(tasks.activeFilterCount(), 4,
     'im Brett wirkt der Status nicht (die Spalten SIND er) - mitgezaehlt behauptete die Zahl einen unsichtbaren Filter');
 });
 
-test('das Blatt bietet an, was vorher in der Chipzeile stand - je nach Ansicht', () => {
+test('Filter (n): ein Status abseits von „Offen" ist eine Abweichung - auch der leere (R16)', () => {
   baseState();
-  const headingsOf = () => tasks.filterSheetGroups().map((g) => g.heading);
-  const htmlOf = (heading) => tasks.filterSheetGroups().find((g) => g.heading === heading)?.html ?? '';
+  tasks.state.filters.status = [];
+  assert.equal(tasks.activeFilterCount(), 1, '„alle Status" zeigt mehr als der Standard und ist damit ein Filterzustand');
+  tasks.state.filters.status = ['done'];
+  assert.equal(tasks.activeFilterCount(), 1);
+  tasks.state.filters.status = ['open', 'in_progress'];
+  assert.equal(tasks.activeFilterCount(), 2, 'jeder gewaehlte Wert zaehlt');
+  // „Bis heute faellig" weitet den Status selbst: das ist EIN Filter, nicht drei.
+  baseState();
+  tasks.setDueToday(true);
+  assert.deepEqual(tasks.state.filters.status, ['open', 'in_progress']);
+  assert.equal(tasks.activeFilterCount(), 1);
+  tasks.setDueToday(false);
+  assert.equal(tasks.activeFilterCount(), 0);
+});
+
+test('das Blatt: Filter zuerst, Kategorie und Tag eingeklappt, „Ansicht" abgesetzt am Ende (R16)', () => {
+  baseState();
+  const groups = () => tasks.filterSheetGroups();
+  const headingsOf = () => groups().map((g) => g.heading);
+  const groupOf = (heading) => groups().find((g) => g.heading === heading) ?? {};
+  const htmlOf = (heading) => groupOf(heading).html ?? '';
 
   assert.deepEqual(headingsOf(), [
-    'tasks.filterGroupShow', 'tasks.groupToggleLabel', 'tasks.filterGroupStatus', 'tasks.filterGroupPriority',
-    'tasks.filterGroupPerson', 'tasks.categoryLabel', 'tasks.filterGroupTag',
+    'tasks.filterGroupShow', 'tasks.filterGroupStatus', 'tasks.filterGroupPriority',
+    'tasks.filterGroupPerson', 'tasks.categoryLabel', 'tasks.filterGroupTag', 'tasks.viewToggleLabel',
   ]);
   const show = htmlOf('tasks.filterGroupShow');
   assert.match(show, /type="checkbox"[^>]*data-filter-mine/, '„Mir zugewiesen" ist ein Schalter im Blatt');
-  assert.match(show, /type="checkbox"[^>]*data-filter-future/, '„Geplante anzeigen" ist ein Schalter im Blatt');
-  const group = htmlOf('tasks.groupToggleLabel');
-  assert.match(group, /role="radiogroup"/, 'die Gruppierung ist EINE Wahl aus zwei, kein Paar von Schaltern');
-  assert.match(group, /data-tab-id="category"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-tab-id="category"/);
+  assert.doesNotMatch(show, /data-filter-future/, '„Geplante anzeigen" ist eine Ansichtsoption, kein Filter der ersten Gruppe');
+
+  // „Ansicht": Gruppierung und „Geplante anzeigen", abgesetzt.
+  const view = groupOf('tasks.viewToggleLabel');
+  assert.equal(view.variant, 'view');
+  assert.match(view.html, /role="radiogroup"/, 'die Gruppierung ist EINE Wahl aus zwei, kein Paar von Schaltern');
+  assert.match(view.html, /data-tab-id="category"[^>]*aria-checked="true"|aria-checked="true"[^>]*data-tab-id="category"/);
+  assert.match(view.html, /type="checkbox"[^>]*data-filter-future/);
   assert.match(htmlOf('tasks.filterGroupStatus'), /data-filter="status" data-value="open" aria-pressed="true"/,
     'der gewaehlte Status traegt seinen Zustand als aria-pressed');
 
-  // Das Brett: kein Status (die Spalten sind er), keine Gruppierung.
+  // Kategorie und Tag: eingeklappt, solange nichts gewaehlt ist - offen, sobald etwas wirkt.
+  assert.deepEqual([groupOf('tasks.categoryLabel').fold, groupOf('tasks.filterGroupTag').fold], ['closed', 'closed']);
+  assert.equal(groupOf('tasks.filterGroupStatus').fold, undefined, 'die haeufigen Achsen bleiben offen');
+  tasks.state.filters.category = ['haushalt'];
+  tasks.state.filters.tags = ['garten'];
+  assert.deepEqual([groupOf('tasks.categoryLabel').fold, groupOf('tasks.filterGroupTag').fold], ['open', 'open'],
+    'eine gesetzte Wahl ist nie hinter einem Aufklapper versteckt');
+
+  // Das Brett: kein Status (die Spalten sind er), keine Gruppierung - „Geplante" bleibt.
+  baseState();
   tasks.state.viewMode = 'kanban';
   assert.ok(!headingsOf().includes('tasks.filterGroupStatus'));
-  assert.ok(!headingsOf().includes('tasks.groupToggleLabel'));
+  assert.doesNotMatch(htmlOf('tasks.viewToggleLabel'), /radiogroup/);
+  assert.match(htmlOf('tasks.viewToggleLabel'), /data-filter-future/);
 
   // Allein im Haushalt: keine Personenachse und kein „Mir zugewiesen".
   baseState();
   tasks.state.users = [{ id: 1, display_name: 'U1' }];
   assert.ok(!headingsOf().includes('tasks.filterGroupPerson'));
   assert.doesNotMatch(htmlOf('tasks.filterGroupShow'), /data-filter-mine/);
-  assert.match(htmlOf('tasks.filterGroupShow'), /data-filter-future/, '„Geplante" bleibt - es haengt an niemandem');
+  assert.match(htmlOf('tasks.viewToggleLabel'), /data-filter-future/, '„Geplante" bleibt - es haengt an niemandem');
 });
 
 test('gemerkte Sets stehen zuerst im Blatt, als Aktion ohne Ein/Aus-Zustand', () => {
@@ -403,6 +440,41 @@ test('ein Chip im Blatt schaltet seinen Wert und bleibt DERSELBE Knoten (Lehre a
   assert.equal(high.getAttribute('aria-pressed'), 'false');
 });
 
+// Review PR #1673: Kategorie und Tag stehen im Blatt eingeklappt, solange
+// nichts gewaehlt ist. Ein gemerktes Set setzt sie bei OFFENEM Blatt - der Chip
+// wurde aktiv, seine Falte blieb zu, und ein wirkender Filter war verborgen.
+test('ein gemerktes Set klappt die Falte seiner Achse auf - derselbe Knoten, nichts klappt zu', async () => {
+  baseState();
+  const { chips, panel, container } = mountSheet();
+  const fold = (open) => ({ open });
+  const withFold = (dataset, f) => {
+    const chip = new SheetEl({ dataset });
+    chip.closest = (sel) => (sel === 'details.filter-sheet__fold' ? f : SheetEl.prototype.closest.call(chip, sel));
+    return chip;
+  };
+  const tagFold = fold(false);
+  const catFold = fold(false);
+  const tagChip = withFold({ filter: 'tag', value: 'Garten' }, tagFold);
+  const catChip = withFold({ filter: 'category', value: 'household' }, catFold);
+  chips.push(tagChip, catChip);
+  tasks.state.filterSheet = panel;
+
+  const recent = new SheetEl({ dataset: {
+    recentFilter: JSON.stringify({ status: ['open'], priority: [], assigned_to: [], category: [], tags: ['garten'] }),
+  } });
+  await tasks.onFilterSheetClick({ target: recent }, container);
+  assert.deepEqual(tasks.state.filters.tags, ['garten']);
+  assert.equal(tagChip.getAttribute('aria-pressed'), 'true');
+  assert.equal(tagFold.open, true, 'die Falte mit dem wirkenden Tag steht offen');
+  assert.equal(catFold.open, false, 'eine Achse ohne Wahl bleibt zu');
+
+  // Faellt die Wahl wieder weg, bleibt die Falte offen: zuklappen naehme dem
+  // Chip, auf dem der Fokus steht, den Boden.
+  await tasks.onFilterSheetClick({ target: tagChip }, container);
+  assert.deepEqual(tasks.state.filters.tags, []);
+  assert.equal(tagFold.open, true);
+});
+
 test('die Schalter im Blatt: „Mir zugewiesen" ist die eigene ID in der Personenachse', async () => {
   baseState({ filters: { status: ['open'], priority: [], assigned_to: ['2'], category: [], tags: [] } });
   const { mine, future, container } = mountSheet();
@@ -417,11 +489,16 @@ test('die Schalter im Blatt: „Mir zugewiesen" ist die eigene ID in der Persone
   assert.equal(store.get('yuvomi:taskShowFuture'), '1', 'pro Geraet gemerkt wie vorher der Chip');
 });
 
-test('„Alle Filter aufheben" laesst keine Zahl am Knopf stehen', async () => {
+test('„Filter zuruecksetzen" stellt den Standard her, keinen dritten Zustand (R16)', async () => {
+  // „Alle Filter aufheben" leerte auch den Status: das zeigte Erledigtes mit,
+  // war also weder der Ruhezustand noch das, was vorher eingestellt war.
   baseState({ showFuture: true });
   tasks.state.filters.priority = ['high'];
+  tasks.state.filters.status = ['done'];
   const { container } = mountSheet();
   await tasks.resetTaskFilters(container);
+  assert.deepEqual(tasks.state.filters, { status: ['open'], priority: [], assigned_to: [], category: [], tags: [] });
+  assert.equal(tasks.state.showFuture, false);
   assert.equal(tasks.activeFilterCount(), 0);
 });
 
@@ -489,7 +566,7 @@ test('„Bis heute faellig" zeigt Offenes von heute UND Ueberfaelliges, sonst ni
   assert.equal(tasks.filteredTasks().length, 5, 'ohne den Filter alles');
   tasks.state.dueToday = true;
   assert.deepEqual(tasks.filteredTasks().map((task) => task.id), [1, 2]);
-  assert.equal(tasks.activeFilterCount(), 2, 'Standard „Offen" plus dieser - die Zahl am Knopf sagt, dass er wirkt');
+  assert.equal(tasks.activeFilterCount(), 1, 'nur dieser zaehlt - der Standard „Offen" ist seit R16 kein Filter mehr');
   tasks.state.searchQuery = 'gest';
   assert.deepEqual(tasks.filteredTasks().map((task) => task.id), [1], 'die Suche engt weiter ein');
   tasks.state.searchQuery = '';
@@ -628,4 +705,341 @@ test('„Bis heute faellig": Blatt und Adresse ergeben denselben Status und dies
     tasks.state.dueTodayWidened = false;
     tasks.state.filterSheet = null;
   }
+});
+
+// ---------------------------------------------------------------------------
+// E13 (Critique R17): am Desktop ein Popover am Filterknopf statt des Blatts
+// ---------------------------------------------------------------------------
+// Das Blatt ist eine Modal-Schicht (Overlay, Unschaerfe, zentriert) und
+// verdeckte am Desktop die Liste, die ein Chip darin live filtert. Ab 1024px
+// haengen die Filter am Knopf, schmaler bleibt das Blatt. GEFAHREN am echten
+// Baustein (utils/filter-sheet.js), mit einem Popover-Knoten, der mitschreibt.
+
+class PopEl {
+  constructor() { this.attrs = {}; this.style = {}; this.listeners = {}; this.html = ''; this.calls = []; this.offsetWidth = 360; this.inside = true; this.isConnected = true; this.resetBtn = new PopEl.Btn(); }
+  static Btn = class { constructor() { this.listeners = {}; } addEventListener(type, fn) { this.listeners[type] = fn; } focus() { this.focused = true; } };
+  set id(v) { this.attrs.id = v; }
+  get id() { return this.attrs.id; }
+  setAttribute(k, v) { this.attrs[k] = String(v); }
+  insertAdjacentHTML(_pos, html) { this.html += html; }
+  addEventListener(type, fn) { (this.listeners[type] ??= []).push(fn); }
+  fire(type, event) { for (const fn of this.listeners[type] ?? []) fn(event); }
+  querySelector(sel) { return sel === '[data-filter-sheet-reset]' ? this.resetBtn : (sel === 'button, input, summary' ? this.resetBtn : null); }
+  contains() { return this.inside; }
+  showPopover() { this.calls.push('show'); }
+  hidePopover() { this.calls.push('hide'); this.fire('beforetoggle', { newState: 'closed' }); this.fire('toggle', { newState: 'closed' }); }
+  remove() { this.calls.push('remove'); this.isConnected = false; }
+}
+
+async function withFilterEnv({ wide, popoverApi = true }, fn) {
+  const saved = {
+    HTMLElement: globalThis.HTMLElement, window: globalThis.window, document: globalThis.document,
+    openModal: globalThis.__openModal, closeModal: globalThis.__closeModal, setTimeout: globalThis.setTimeout,
+  };
+  const pop = new PopEl();
+  const env = { pop, appended: [], modals: [], closes: 0, queries: [], modalPanel: new PopEl() };
+  globalThis.HTMLElement = class {};
+  if (popoverApi) globalThis.HTMLElement.prototype.popover = null;
+  // `env.wide` laesst sich im Test umstellen (Fenster schmaler ziehen), und
+  // die Fenster-Lauscher schreiben mit, damit ein Test `resize` feuern kann.
+  env.wide = wide;
+  env.windowListeners = {};
+  globalThis.window = {
+    innerWidth: 1280, innerHeight: 800,
+    matchMedia: (q) => { env.queries.push(q); return { matches: env.wide }; },
+    addEventListener: (type, fn) => { (env.windowListeners[type] ??= new Set()).add(fn); },
+    removeEventListener: (type, fn) => { env.windowListeners[type]?.delete(fn); },
+  };
+  env.resize = () => { for (const fn of [...(env.windowListeners.resize ?? [])]) fn(); };
+  globalThis.document = {
+    activeElement: {},
+    getElementById: () => null,
+    createElement: () => pop,
+    body: { appendChild: (el) => env.appended.push(el) },
+    querySelector: (sel) => (sel === '#shared-modal-overlay .modal-panel' ? env.modalPanel : null),
+  };
+  globalThis.__openModal = (opts) => { env.modals.push(opts); };
+  globalThis.__closeModal = () => { env.closes += 1; };
+  // Das Aufraeumen des Knotens haengt an einem Timer; der Test wartet nicht darauf.
+  globalThis.setTimeout = (cb) => { env.timer = cb; return 0; };
+  try { return await fn(env); } finally {
+    globalThis.HTMLElement = saved.HTMLElement;
+    globalThis.window = saved.window;
+    globalThis.document = saved.document;
+    globalThis.__openModal = saved.openModal;
+    globalThis.__closeModal = saved.closeModal;
+    globalThis.setTimeout = saved.setTimeout;
+  }
+}
+
+const filterAnchor = () => {
+  const el = { attrs: {}, focused: 0, setAttribute(k, v) { this.attrs[k] = v; }, focus() { this.focused += 1; },
+    getBoundingClientRect: () => ({ right: 1057, bottom: 54, left: 966, top: 14 }) };
+  return el;
+};
+
+test('E13: ab 1024px oeffnen die Filter als Popover am Knopf - keine Modal-Schicht, die Liste bleibt frei', async () => {
+  const { openFilterSheet } = await import('/utils/filter-sheet.js');
+  await withFilterEnv({ wide: true }, async (env) => {
+    const anchor = filterAnchor();
+    const changes = [];
+    let resets = 0;
+    const panel = openFilterSheet({
+      anchor: () => anchor,
+      groups: [{ heading: 'Status', html: '<button data-filter="status">Offen</button>' }],
+      onChange: (target) => changes.push(target),
+      onReset: () => { resets += 1; },
+    });
+    assert.equal(panel, env.pop, 'der Aufrufer bekommt das Popover als Panel (derselbe Vertrag wie das Blatt)');
+    assert.deepEqual(env.modals, [], 'kein openModal: kein Overlay, keine Unschaerfe');
+    assert.deepEqual(env.queries, ['(min-width: 1024px)'], 'die Desktop-Schwelle des Kopfs');
+    assert.equal(env.pop.attrs.popover, 'auto', 'natives Popover: Esc und Tipp daneben schliessen');
+    assert.equal(env.pop.attrs.role, 'dialog');
+    assert.equal(env.pop.attrs.class ?? env.pop.className, 'filter-popover');
+    assert.match(env.pop.html, /class="filter-sheet"/, 'dieselben Gruppen wie im Blatt');
+    assert.match(env.pop.html, /data-filter-sheet-reset/);
+    assert.deepEqual(env.appended, [env.pop]);
+    assert.equal(env.pop.calls[0], 'show');
+    // Verankert: rechtsbuendig unter dem Knopf, 4px Abstand.
+    assert.equal(env.pop.style.left, `${1057 - 360}px`);
+    assert.equal(env.pop.style.top, '58px');
+    assert.equal(env.pop.style.transformOrigin, '360px 0', 'es waechst aus der Ecke am Knopf');
+    assert.equal(anchor.attrs['aria-expanded'], 'true');
+    assert.equal(env.pop.resetBtn.focused, true, 'der Fokus geht ins Popover');
+
+    // Live: ein Schalter meldet sich, das Popover bleibt offen.
+    const input = new globalThis.HTMLElement();
+    env.pop.fire('change', { target: input });
+    assert.deepEqual(changes, [input]);
+    assert.ok(!env.pop.calls.includes('hide'));
+
+    // Zuruecksetzen schliesst das POPOVER (nicht ein Modal), der Fokus geht
+    // VOR dem Schliessen an den Knopf zurueck.
+    env.pop.resetBtn.listeners.click();
+    assert.equal(resets, 1);
+    assert.ok(env.pop.calls.includes('hide'));
+    assert.equal(env.closes, 0, 'closeModal schloesse ein fremdes Blatt');
+    assert.equal(anchor.focused, 1, 'Fokus zurueck zum Filterknopf');
+    assert.equal(anchor.attrs['aria-expanded'], 'false');
+    assert.ok(!env.pop.calls.includes('remove'), 'der Knoten bleibt fuer den Ausgang im Baum');
+    env.timer();
+    assert.ok(env.pop.calls.includes('remove'));
+
+    // Der Knopf ist ein Umschalter: der Klick, der per Light-Dismiss gerade
+    // geschlossen hat, oeffnet nicht im selben Zug wieder.
+    assert.equal(openFilterSheet({ anchor: () => anchor, groups: [{ heading: 'x', html: 'y' }] }), null);
+  });
+});
+
+/* #1775: das Popover wurde EINMAL platziert. Beim Schmalerziehen aenderte sich
+ * seine Breite per CSS, `left` blieb stehen - rechts verankert ragte es aus
+ * dem Fenster. Gefahren am echten Baustein: Fenster und Knopf wandern, dann
+ * `resize`. */
+test('#1775: das Filter-Popover zieht bei einer Fensteraenderung mit, unter der Schwelle schliesst es', async () => {
+  const { openFilterSheet } = await import('/utils/filter-sheet.js');
+  const groups = [{ heading: 'Status', html: '<button data-filter="status">Offen</button>' }];
+  const realNow = Date.now;
+  let clock = realNow() + 60_000;
+  Date.now = () => clock;          // der Umschalter-Riegel der Nachbartests ist abgelaufen
+  try {
+    await withFilterEnv({ wide: true }, async (env) => {
+      const rect = { right: 1257, bottom: 54, left: 1166, top: 14 };
+      const anchor = { ...filterAnchor(), getBoundingClientRect: () => rect };
+      openFilterSheet({ anchor: () => anchor, groups });
+      assert.equal(env.pop.style.left, `${1257 - 360}px`, 'Vorbedingung: rechtsbuendig unter dem Knopf');
+      assert.equal(env.windowListeners.resize?.size, 1, 'solange es offen ist, hoert es auf das Fenster');
+
+      // Das Fenster wird schmaler (bleibt ueber der Schwelle), der Knopf wandert mit.
+      globalThis.window.innerWidth = 1040;
+      globalThis.window.innerHeight = 600;
+      Object.assign(rect, { right: 1017, left: 926 });
+      env.resize();
+      assert.equal(env.pop.style.left, `${1017 - 360}px`, 'neu platziert: wieder unter dem Knopf');
+      assert.ok(Number.parseInt(env.pop.style.left, 10) + 360 <= 1040 - 8, 'und ganz im Fenster');
+      assert.equal(env.pop.style.maxHeight, `${600 - 58 - 8}px`, 'die Hoehe folgt dem Fenster');
+      assert.ok(!env.pop.calls.includes('hide'), 'ueber der Schwelle bleibt es offen');
+
+      // Unter 1024px gibt es das Popover nicht - es schliesst, der Lauscher geht.
+      globalThis.window.innerWidth = 900;
+      env.wide = false;
+      env.resize();
+      assert.ok(env.pop.calls.includes('hide'), 'unter der Schwelle schliesst es');
+      assert.equal(env.windowListeners.resize.size, 0, 'geschlossen hoert nichts mehr auf das Fenster');
+    });
+
+    // Der Seitenwechsel entfernt den Knoten OHNE `toggle` (dismissFilterPopovers):
+    // der Lauscher geht SOFORT mit, nicht erst beim naechsten `resize` - sonst
+    // hielte das Fenster das abgehaengte Popover samt der alten Seite fest
+    // (Review auf #1779).
+    clock += 60_000;
+    await withFilterEnv({ wide: true }, async (env) => {
+      const { dismissFilterPopovers } = await import('/utils/filter-sheet.js');
+      const anchor = filterAnchor();
+      openFilterSheet({ anchor: () => anchor, groups });
+      const before = env.pop.style.left;
+      assert.equal(env.windowListeners.resize.size, 1);
+      dismissFilterPopovers();
+      assert.equal(env.windowListeners.resize.size, 0, 'der Seitenwechsel haengt den Lauscher ab, ohne auf ein resize zu warten');
+      env.pop.isConnected = false;
+      globalThis.window.innerWidth = 1100;
+      env.resize();
+      assert.equal(env.pop.style.left, before, 'ein abgehaengtes Popover wird nicht mehr platziert');
+      assert.ok(!env.pop.calls.includes('hide'));
+      assert.equal(env.windowListeners.resize.size, 0);
+      // Der Umschalter-Riegel merkt sich die Schliesszeit im Modul. Dieser Test
+      // hat sie mit seiner vorgestellten Uhr gesetzt - zurueck auf "lange her",
+      // sonst oeffnete das Popover des naechsten Tests nicht.
+      Date.now = () => 0;
+      env.pop.fire('toggle', { newState: 'closed' });
+    });
+  } finally {
+    Date.now = realNow;
+  }
+});
+
+test('E13: unter der Schwelle, ohne Anker oder ohne Popover-API bleibt es das Blatt', async () => {
+  const { openFilterSheet } = await import('/utils/filter-sheet.js');
+  const groups = [{ heading: 'Status', html: '<button>Offen</button>' }];
+  await withFilterEnv({ wide: false }, async (env) => {
+    const panel = openFilterSheet({ anchor: () => filterAnchor(), groups });
+    assert.equal(env.modals.length, 1, 'mobil das Blatt');
+    assert.equal(panel, env.modalPanel);
+    assert.deepEqual(env.appended, []);
+    env.modalPanel.resetBtn.listeners.click();
+    assert.equal(env.closes, 1, 'Zuruecksetzen schliesst das Blatt');
+  });
+  await withFilterEnv({ wide: true }, async (env) => {
+    openFilterSheet({ groups });
+    assert.equal(env.modals.length, 1, 'ohne Anker gibt es nichts, woran es haengen koennte');
+  });
+  await withFilterEnv({ wide: true, popoverApi: false }, async (env) => {
+    openFilterSheet({ anchor: () => filterAnchor(), groups });
+    assert.equal(env.modals.length, 1, 'ein Browser ohne `popover` behaelt das Blatt');
+  });
+});
+
+test('E13: die Aufgaben reichen ihren Filterknopf als Anker herein', async () => {
+  await withFilterEnv({ wide: true }, async (env) => {
+    const btn = filterAnchor();
+    const container = { querySelector: (sel) => (sel === '#tasks-filter-btn' ? btn : null) };
+    // Der Umschalter-Riegel des vorigen Tests ist abgelaufen, sobald die Uhr weiter ist.
+    const realNow = Date.now;
+    Date.now = () => realNow() + 1000;
+    let panel;
+    try { panel = tasks.openTaskFilters(container); } finally { Date.now = realNow; tasks.state.filterSheet = null; }
+    assert.equal(panel, env.pop, 'openTaskFilters oeffnet am Desktop das Popover');
+    assert.equal(btn.attrs['aria-expanded'], 'true', 'am Knopf #tasks-filter-btn');
+    assert.deepEqual(env.modals, []);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R17: die neue Aufgabe kommt an
+// ---------------------------------------------------------------------------
+// Nach dem Anlegen zeichnete die Liste hart neu; die Zeile stand irgendwo, bei
+// einer langen Liste unter dem Falz, in einer zugeklappten Gruppe gar nicht,
+// und rechts blieb die vorher gewaehlte Aufgabe stehen.
+
+function revealEnv({ rowFor = () => true } = {}) {
+  const env = { expanded: [], scrolled: [], selected: [] };
+  const row = { dataset: { swipeId: '9' }, scrollIntoView: (opts) => env.scrolled.push(opts) };
+  env.row = row;
+  env.container = {
+    querySelector: () => null,
+    querySelectorAll: (sel) => (sel === '#task-list .swipe-row' && rowFor() ? [row] : []),
+  };
+  env.md = { split: true, isSplit() { return this.split; }, select: (id, opts) => env.selected.push([id, opts]) };
+  return env;
+}
+
+async function withReveal(fn) {
+  const prev = { expand: globalThis.__expandIn, tasks: tasks.state.tasks, search: tasks.state.searchQuery, collapsed: tasks.state.collapsedGroups };
+  baseState();
+  tasks.state.tasks = [
+    { id: 1, title: 'Alt', category: 'haushalt', status: 'open', priority: 'none', tags: [] },
+    { id: 9, title: 'Neu', category: 'haushalt', status: 'open', priority: 'none', tags: [] },
+  ];
+  tasks.state.searchQuery = '';
+  tasks.state.collapsedGroups = new Set();
+  try { return await fn(); } finally {
+    globalThis.__expandIn = prev.expand;
+    tasks.state.tasks = prev.tasks;
+    tasks.state.searchQuery = prev.search;
+    tasks.state.collapsedGroups = prev.collapsed;
+    tasks.useTaskMd(null);
+  }
+}
+
+test('R17: die neue Aufgabe zieht ein, rollt ins Bild und ist in der Spaltenform ausgewaehlt', async () => {
+  await withReveal(() => {
+    const env = revealEnv();
+    globalThis.__expandIn = (el) => env.expanded.push(el);
+    tasks.useTaskMd(env.md);
+    assert.equal(tasks.revealCreatedTask(env.container, 9), true);
+    assert.deepEqual(env.expanded, [env.row], 'die Zeile tritt mit der Listenbewegung ein (expandIn)');
+    assert.deepEqual(env.scrolled, [{ block: 'nearest' }], 'und rollt ins Bild');
+    assert.deepEqual(env.selected, [['9', { history: 'push' }]], 'die Detailspalte zeigt die neue Aufgabe');
+  });
+});
+
+test('R17: mobil (keine Spalte) wird nichts ausgewaehlt - Zeile und Bild folgen trotzdem', async () => {
+  await withReveal(() => {
+    const env = revealEnv();
+    globalThis.__expandIn = (el) => env.expanded.push(el);
+    env.md.split = false;
+    tasks.useTaskMd(env.md);
+    assert.equal(tasks.revealCreatedTask(env.container, 9), true);
+    assert.equal(env.expanded.length, 1);
+    assert.equal(env.scrolled.length, 1);
+    assert.deepEqual(env.selected, []);
+  });
+});
+
+test('R17: eine zugeklappte Gruppe geht fuer ihre neue Aufgabe auf', async () => {
+  await withReveal(() => {
+    tasks.state.collapsedGroups = new Set(['category:haushalt']);
+    // Die Zeile steht erst im Bestand der Liste, wenn die Gruppe offen ist.
+    const env = revealEnv({ rowFor: () => !tasks.state.collapsedGroups.has('category:haushalt') });
+    tasks.useTaskMd(env.md);
+    assert.equal(tasks.revealCreatedTask(env.container, 9), true);
+    assert.equal(tasks.state.collapsedGroups.has('category:haushalt'), false, 'die Gruppe ist offen');
+    assert.equal(env.selected.length, 1);
+  });
+});
+
+test('R17: erreicht die neue Aufgabe die Ansicht nicht (Filter, Brett, fremde Seite), bleibt es beim Toast', async () => {
+  await withReveal(() => {
+    const env = revealEnv();
+    tasks.useTaskMd(env.md);
+    // Was der Server-Filter ausschliesst, steht gar nicht im Bestand; die Suche filtert hier.
+    tasks.state.searchQuery = 'zahnarzt';
+    assert.equal(tasks.revealCreatedTask(env.container, 9), false, 'die Suche schliesst sie aus');
+    tasks.state.searchQuery = '';
+    assert.equal(tasks.revealCreatedTask(env.container, 77), false, 'nicht im (gefilterten) Bestand');
+    tasks.state.viewMode = 'kanban';
+    assert.equal(tasks.revealCreatedTask(env.container, 9), false, 'das Brett hat keine Zeilen');
+    tasks.state.viewMode = 'list';
+    assert.equal(tasks.revealCreatedTask(null, 9), false, 'ohne Container steht diese Seite nicht');
+    assert.deepEqual(env.selected, []);
+    assert.deepEqual(env.scrolled, []);
+  });
+});
+
+test('R17: das Formular ruft die Ankunft nur nach dem ANLEGEN, nach dem Neuzeichnen', () => {
+  const src = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
+  const start = src.indexOf('async function handleFormSubmit(');
+  const body = src.slice(start, src.indexOf('\n}\n', start));
+  const redraw = body.lastIndexOf('await onChanged();');
+  const tail = body.slice(redraw);
+  assert.ok(redraw > 0);
+  // Erst die Liste, dann - nur ohne taskId (Anlegen) - die neue Zeile; und die
+  // erst, wenn der Dialog zu ist und seinen History-Marker zurueckgegeben hat:
+  // sonst schriebe die Auswahl `?open=` auf den Marker-Eintrag.
+  // R18: der Dialog schliesst schon VOR dem Neuzeichnen - die Reihenfolge der
+  // Enthuellung bleibt, und nach ihr zieht der Fokus nach (sie kann die Gruppe
+  // aufklappen und die Liste noch einmal zeichnen).
+  assert.match(tail, /if \(!taskId && savedTaskId\) \{\s*whenModalClosed\(\)\s*\.then\(\(\) => whenHistorySettled\(\)\)\s*\.then\(\(\) => \{\s*(?:\/\/[^\n]*\n\s*)*revealCreatedTask\(container, savedTaskId\);\s*refocusAfterRender\(\);\s*\}\);/);
+  // Ins Bild VOR dem Einziehen: danach ist die Zeile 0px hoch.
+  const fn = src.slice(src.indexOf('function revealCreatedTask('), src.indexOf('\n}\n', src.indexOf('function revealCreatedTask(')));
+  assert.ok(fn.indexOf("row.scrollIntoView?.({ block: 'nearest' });") < fn.indexOf('expandIn(row);'));
 });

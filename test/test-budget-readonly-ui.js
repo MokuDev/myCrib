@@ -331,6 +331,31 @@ test('leerer Monat: ein Satz und der Knopf, keine dreifache Null (Critique 2026-
   assert.doesNotMatch(BUDGET_CODE, /budget\.loansEmptyDescription/, 'auch der Darlehen-Leerzustand verweist nicht mehr auf die +-Schaltflaeche');
 });
 
+test('Darlehenskarte mit `budget: read` und Faelligkeitstag: das volle Datum bleibt, das Buchen geht (#1631)', () => {
+  const mitTag = darlehen({ due_day: 27, next_due_month: '2026-07', next_due_date: '2026-07-27' });
+  withAccess({ budget: 'read' }, () => {
+    const html = budget.renderLoanCard(mitTag);
+    assert.match(html, /<span>budget\.loanNextDue\{"month":"2026-07-27"\}<\/span>/, 'die Faelligkeit ist Auskunft');
+    assert.doesNotMatch(html, /loan-pay|budget-loan-card__actions/);
+  });
+  withAccess({ budget: 'write' }, () => {
+    const html = budget.renderLoanCard(mitTag);
+    assert.match(html, /budget\.loanNextDue\{"month":"2026-07-27"\}/);
+    assert.match(html, /data-action="loan-pay"/);
+  });
+});
+
+test('Darlehenskarte ohne Faelligkeitstag: eine ueberfaellige Rate nennt den Monat, nicht das Buchungsdatum (#1741)', () => {
+  const alt = darlehen({ due_day: null, next_due_month: '2022-01', next_due_date: '2022-01-01' });
+  for (const level of ['read', 'write']) {
+    withAccess({ budget: level }, () => {
+      const html = budget.renderLoanCard(alt);
+      assert.match(html, /budget\.loanNextDue\{"month":"[^"]*2022[^"]*"\}/);
+      assert.doesNotMatch(html, /2022-01-01/, 'der Erste ist eine Buchungskonvention, keine Faelligkeit');
+    });
+  }
+});
+
 test('Keine Darlehen mit `budget: read`: kein Anlegen-CTA und keine Anleitung dazu', () => {
   const vorher = budget.state.loans;
   budget.state.loans = { loans: [], summary: {} };
@@ -569,7 +594,7 @@ test('Gruppe mit `budget: read`: keine Handlung, aber Salden, Ausgaben und Verla
     const html = splitHauptteil();
     assert.doesNotMatch(html, /split-header-actions|data-expense-id/);
     // Die Ausgabe oeffnet die Leseansicht, nicht das Bearbeiten.
-    assert.match(html, /<button type="button" class="split-expense" data-expense-view="40">/);
+    assert.match(html, /<button type="button" class="split-expense" data-expense-view="40" data-row-key="expense-40">/);
     assert.doesNotMatch(html, /splitExpenses\.editExpense/);
     assert.match(html, /Urlaub Ostsee/);
     assert.match(html, /Ferienwohnung/);
@@ -739,10 +764,10 @@ test('Regel 6: `renderExpenses` traegt nicht mehr den Namen des Modulrechts', ()
   // utils/module-access.js warnt. Jetzt heisst er nach seiner Wirkung, und der
   // Aufrufer nennt beide Gruende ausdruecklich.
   assert.match(SPLIT_CODE, /function renderExpenses\(asList = false\)/);
-  assert.match(fn(SPLIT_CODE, 'renderMain'), /renderExpenses\(archived \|\| ro\)/);
+  assert.match(fn(SPLIT_CODE, 'drawMain'), /renderExpenses\(archived \|\| ro\)/);
   // Der Listen-Handler liest `data-expense-view` in die Leseansicht und nur
   // `data-expense-id` ins Bearbeiten.
-  assert.match(fn(SPLIT_CODE, 'renderMain'), /if \(btn\.dataset\.expenseView\) openExpenseReadView\(expense\);\n\s*else openExpenseModal\(expense\);/);
+  assert.match(fn(SPLIT_CODE, 'drawMain'), /if \(btn\.dataset\.expenseView\) openExpenseReadView\(expense\);\n\s*else openExpenseModal\(expense\);/);
 });
 
 test('Keine Gruppe mit `budget: read`: der Titel bleibt, „Erstelle eine Gruppe" geht', () => {
@@ -784,8 +809,8 @@ test('Geteilte Ausgaben: Kopfknopf und Gruppe-Anlegen haengen am Recht', () => {
 // -------------------------------------------------------------------------
 
 test('READ_SAFE_ACTIONS ist eine Positivliste und enthaelt nur lesende Aktionen', () => {
-  assert.deepEqual([...budget.READ_SAFE_ACTIONS], ['loan-filter'],
-    'der Raten-Filter ist die einzige lesende `data-action` dieser Seite');
+  assert.deepEqual([...budget.READ_SAFE_ACTIONS], ['loan-filter', 'toggle-planned'],
+    'der Raten-Filter und der Aufklapper von "Geplant" (R17/E4) sind die lesenden `data-action` dieser Seite');
   const alle = new Set([...BUDGET_CODE.matchAll(/data-action="([a-z-]+)"/g)].map((m) => m[1]));
   // Untergrenze nur als Blindheits-Probe: seit R14 P8 stehen Loeschen und
   // Bearbeiten in den Blaettern, die Seite traegt 7 Aktionsnamen.
@@ -965,11 +990,13 @@ test('der Riegel sitzt an BEIDEN Enden: jedes Speichern im offenen Dialog fragt 
     ['umbenennen', /'\[data-act="save"\]'\)\.forEach\(\(button\) => \{\n\s*button\.addEventListener\('click', async \(\) => \{\n\s*if \(readOnly\(\)\) return;/],
     ['loeschen', /'\[data-act="delete"\]'\)\.forEach\(\(button\) => \{\n\s*button\.addEventListener\('click', async \(\) => \{\n\s*if \(readOnly\(\)\) return;/],
   ]) assert.match(ABOS_CODE, re, `Abo-Metadaten: ${name} fragt nicht`);
-  // Geteilte Ausgaben: fuenf Formulare und das Loeschen einer Ausgabe.
+  // Geteilte Ausgaben: sechs Formulare (seit #1647 mit dem der Serie) und das
+  // Loeschen einer Ausgabe und einer Serie.
   const submits = [...SPLIT_CODE.matchAll(/addEventListener\('submit', async \(e\) => \{\n\s*e\.preventDefault\(\);\n\s*(.*)\n/g)];
-  assert.equal(submits.length, 5, `fuenf Formulare erwartet, ${submits.length} gefunden`);
+  assert.equal(submits.length, 6, `sechs Formulare erwartet, ${submits.length} gefunden`);
   for (const m of submits) assert.equal(m[1], 'if (readOnly()) return;');
   assert.match(SPLIT_CODE, /'#split-delete-expense'\)\?\.addEventListener\('click', async \(\) => \{\n\s*if \(readOnly\(\)\) return;/);
+  assert.match(SPLIT_CODE, /'#split-delete-recurring'\)\?\.addEventListener\('click', async \(\) => \{\n\s*if \(readOnly\(\)\) return;/);
 });
 
 // -------------------------------------------------------------------------
@@ -1405,18 +1432,22 @@ function berichtKacheln(html) {
 test('Darlehen: der Bericht zeigt jeden Wert des Darlehens-Dialogs, den Karte und Kennzahlen nicht tragen', () => {
   mitKonten([konto()], () => {
     const loan = darlehen({
-      account_id: 4, start_month: '2026-01', notes: 'Sondertilgung <jaehrlich>', currency: 'EUR',
+      account_id: 4, start_month: '2026-01', due_day: 27, notes: 'Sondertilgung <jaehrlich>', currency: 'EUR',
       interest: { mode: 'fixed', principal: 20000, fixed_rate: 3.2, initial_repayment_rate: 2, monthly_payment: 850 },
     });
     const werte = {
       'budget.loanAccountLabel': [[/<option value="4" selected>Girokonto</], /^Girokonto$/],
       'budget.loanDetailStartMonthLabel': [[/id="lm-start" value="2026-01"/], /2026/],
+      // #1631: der Faelligkeitstag steht im Dialog als Feld, im Bericht als Wert.
+      'budget.loanDueDayLabel': [[/id="lm-due-day"[^>]*value="27"/], /^27$/],
       'budget.loanInitialRepaymentLabel': [[/id="lm-initial-repayment"[^>]*value="2"/], /^2$/],
       'budget.loanInterestModeLabel': [[/<option value="fixed" selected>/, /id="lm-fixed-rate"[^>]*value="3\.2"/],
         /^budget\.loanMonthlyRate\{"amount":"850,00\s€"\} · budget\.loanRateFixed\{"rate":"3,2\s%"\}$/],
       'budget.loanNotesLabel': [[/Sondertilgung &lt;jaehrlich&gt;<\/textarea>/], /^Sondertilgung <jaehrlich>$/],
     };
     const editor = withAccess({ budget: 'write' }, () => modalOptionen(() => budget.openLoanModal(loan)));
+    // R17 (E6): achtzehn Felder gehoeren ins 520er-Panel, nicht ins 400er-Blatt.
+    assert.equal(editor.size, 'md', 'der Darlehen-Dialog oeffnet im 520px-Panel');
     const html = budget.loanReportDetails(loan);
     jederWert(werte, editor.content, berichtKacheln(html), 'Darlehen');
     assert.match(html, /Sondertilgung &lt;jaehrlich&gt;/, 'die Notiz geht durch esc()');
@@ -1426,6 +1457,14 @@ test('Darlehen: der Bericht zeigt jeden Wert des Darlehens-Dialogs, den Karte un
     // Der erste Faelligkeitsmonat steht als Monatsname, nicht als Schluessel.
     assert.notEqual(berichtKacheln(html)['budget.loanDetailStartMonthLabel'], '2026-01');
     assert.equal(budget.loanReportDetails(darlehen()), '', 'ohne Angaben keine leere Kachelreihe');
+    // Ohne Faelligkeitstag keine Kachel dafuer - die Antwort folgt dem Datensatz.
+    assert.ok(!('budget.loanDueDayLabel' in berichtKacheln(budget.loanReportDetails({ ...loan, due_day: null }))));
+    // Und der Bericht zeigt den Tag mit `budget: read` genauso, ohne Bedienung.
+    withAccess({ budget: 'read' }, () => {
+      const lesen = budget.loanReportDetails(loan);
+      assert.equal(berichtKacheln(lesen)['budget.loanDueDayLabel'], '27');
+      assert.doesNotMatch(lesen, /<input|<button|lm-due-day/);
+    });
   });
 });
 

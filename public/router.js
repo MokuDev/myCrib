@@ -4,11 +4,11 @@
  * Abhängigkeiten: api.js
  */
 
-import { api, auth } from '/api.js';
+import { api, auth, isAbortError } from '/api.js';
 import { canAccessNavModule, navModuleAccess, setExtensionNavMap } from '/permissions.js';
 import { setExtensionModules, selectThirdPartyModuleList } from '/utils/extension-widgets.js';
 import { initExtensionI18n, moduleDisplayLabel, reloadExtensionLocales } from '/utils/extension-i18n.js';
-import { clearApiCache } from '/sw-register.js';
+import { clearApiCache, onServiceWorkerUpdate, UPDATE_RELOAD_DELAY_MS } from '/sw-register.js';
 import { forgetLayoutHint } from '/utils/dashboard-layout-hint.js';
 import { initI18n, getLocale, t, formatDate, formatTime } from '/i18n.js';
 import { esc } from '/utils/html.js';
@@ -18,8 +18,11 @@ import { wireScrollFade, wireCollapsingHeader, watchNavCapsuleHeight } from '/ut
 import { TOAST_SURFACES } from '/utils/toast-surface.js';
 import { showToast } from '/utils/toast-show.js';
 import { unknownPathDetour, publicPathDetour, detourPaths } from '/utils/unknown-route.js';
+import { createNavigate } from '/utils/router-navigate.js';
+import { pageMountTarget } from '/utils/page-mount.js';
 import { friendlyError } from '/utils/friendly-error.js';
 import { BULK_PILL_LAYER, clearBulkPill } from '/utils/bulk-pill.js';
+import { dismissFilterPopovers } from '/utils/filter-sheet.js';
 import { watchToastPlacement } from '/utils/toast-placement.js';
 import { COMPOSITION_MODES } from '/utils/page-layout.js';
 import { init as initReminders, stop as stopReminders } from '/reminders.js';
@@ -28,8 +31,9 @@ import { numberLocaleFor } from '/settings/region-presets.js';
 import { setDisplayTimeZone, zonedDateKey } from '/utils/timezone.js';
 import { rememberZonePrefs, forgetZonePrefs, noteZoneDecision } from '/utils/household-zone-hint.js';
 import { isKitchenRoute, getLastKitchenRoute } from '/utils/kitchen-tabs.js';
-import { swapPage } from '/utils/view-transition.js';
+import { swapPage, swapTheme } from '/utils/view-transition.js';
 import { moduleAccentToken, moduleAccentVar } from '/utils/module-accent.js';
+import { brandMarkSvg } from '/utils/brand-mark.js';
 import { getLastHealthRoute, HEALTH_ROUTES } from '/utils/health-tabs.js';
 import { SCHEDULE_ROUTES } from '/utils/schedule-tabs.js';
 import { activityType } from '/utils/health-activity.js';
@@ -41,10 +45,12 @@ import { renderSkeletonList } from '/utils/skeleton.js';
 import { wirePaletteCombobox } from '/utils/palette-combobox.js';
 import { triggerPageFab } from '/utils/fab.js';
 import { hasLeaveGuard, mayLeave } from '/utils/leave-guard.js';
+import { createUpdateFlow, isUserBusy } from '/utils/app-update.js';
+import { createStartHandoff } from '/utils/start-handoff.js';
 import { wireSheetDrag } from '/utils/sheet-drag.js';
 import {
   handleBackNavigation, closeAllOverlays, consumeOverlayMarker,
-  pushOverlay, dropOverlay, attachOverlay, whenHistorySettled,
+  pushOverlay, dropOverlay, attachOverlay, whenHistorySettled, hasOpenOverlay,
 } from '/utils/overlay-history.js';
 import {
   applyNavBadges, setNavBadge, resetNavBadges, navBadgeRoutes,
@@ -414,7 +420,7 @@ function warmPrimaryRoutes() {
   const run = () => {
     try {
       navItems().forEach((item) => {
-        if (item.path && item.path !== currentPath) prefetchRoute(item.path);
+        if (item.path && item.path !== routerState.currentPath) prefetchRoute(item.path);
       });
     } catch { /* Prefetch ist rein spekulativ — Fehler nie eskalieren. */ }
   };
@@ -428,23 +434,34 @@ function warmPrimaryRoutes() {
 // --------------------------------------------------------
 // Globaler App-State
 // --------------------------------------------------------
-let currentUser = null;
+// Der Zustand, den navigate() liest UND schreibt (utils/router-navigate.js,
+// #1657). EIN Objekt, das der Router und createNavigate() teilen: es gibt keine
+// zweite Fassung dieser Felder, auch hier laeuft jeder Zugriff ueber
+// `routerState.<name>`. Die Namen sind NAVIGATE_STATE im Modul.
+const routerState = {
+  currentUser: null,
+  currentPath: null,
+  isNavigating: false,
+  // Zuletzt erfolgreich gerendertes Seiten-Modul. Erlaubt Soft-Navigation
+  // innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt): Statt das Modul
+  // komplett neu zu rendern (Teardown + Slide-Transition), tauscht das Modul über
+  // seine optionale update()-Funktion nur den betroffenen Detailbereich aus.
+  _renderedModule: null,
+  _renderedModuleName: null,
+  _preferencesLoaded: false,
+  _disabledModules: new Set(),
+  // Gesetzt wenn auth:expired waehrend einer laufenden Navigation feuert.
+  // Die Weiterleitung zu /login wird nach Abschluss der Navigation nachgeholt.
+  _pendingLoginRedirect: false,
+  // First-Run: true wenn noch kein Account existiert (aus /version beim Boot).
+  _setupRequired: false,
+};
 // Für welchen Nutzer wurde die Nav zuletzt gebaut? Bei Nutzerwechsel (Logout →
 // Login als anderes Konto im selben Tab) bleibt die alte Shell im DOM; die Nav
 // muss dann mit den Rechten des neuen Nutzers neu gefiltert werden (#467).
 let _navBuiltForUserId = null;
-let currentPath = null;
-let isNavigating = false;
-// Zuletzt erfolgreich gerendertes Seiten-Modul. Erlaubt Soft-Navigation
-// innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt): Statt das Modul
-// komplett neu zu rendern (Teardown + Slide-Transition), tauscht das Modul über
-// seine optionale update()-Funktion nur den betroffenen Detailbereich aus.
-let _renderedModule = null;
 /** AbortController des laufenden Seitenaufbaus; abgebrochen, sobald die Route ersetzt wird (#976). */
 let _pageController = null;
-let _renderedModuleName = null;
-let _preferencesLoaded = false;
-let _disabledModules = new Set();
 // Persoenlich ausgeblendete Module (#673). Bewusst eine ZWEITE Menge neben
 // `_disabledModules` und nicht mit ihr vereinigt: die haushaltweite Abschaltung
 // wirkt auch im Routen-Guard weiter unten, diese hier NUR in der Navigation.
@@ -456,11 +473,6 @@ let _thirdPartyModules = [];
 let _moduleOrder = [];
 let _mobileNavOrder = [];
 let _moduleRefreshTimer = null;
-// Gesetzt wenn auth:expired waehrend einer laufenden Navigation feuert.
-// Die Weiterleitung zu /login wird nach Abschluss der Navigation nachgeholt.
-let _pendingLoginRedirect = false;
-// First-Run: true wenn noch kein Account existiert (aus /version beim Boot).
-let _setupRequired = false;
 
 // --------------------------------------------------------
 // Router
@@ -548,7 +560,7 @@ function routeTitle(path) {
   return getAppName();
 }
 
-function updateBranding(path = currentPath) {
+function updateBranding(path = routerState.currentPath) {
   const appName = getAppName();
   const sidebarLogoName = document.querySelector('.nav-sidebar__brand-name');
   if (sidebarLogoName) sidebarLogoName.textContent = appName;
@@ -627,455 +639,128 @@ function createFocusTrap(container) {
   };
 }
 
+// Was der Start schon angefragt hat, reicht er weiter (utils/start-handoff.js):
+// `/auth/me` an den Auth-Guard, `/version` an syncPreferencesOnce(), das
+// laufende `/preferences` an die Seite, die gleich zeichnet.
+const startHandoff = createStartHandoff({
+  auth,
+  dispatchExpired: () => window.dispatchEvent(new CustomEvent('auth:expired')),
+});
+
 /**
- * Der Umweg fuer eine Adresse ohne Route (#1607), oder null. Regeln in
- * utils/unknown-route.js. Bekannt ist, was allRoutes() kennt - also erst
- * verlaesslich, wenn die Erweiterungsrouten geladen sind (nach der Anmeldung).
- * Landeplatz ist jede Route ausser einem abgeschalteten oder gesperrten Modul
- * und den zwei Seiten, von denen eine angemeldete Sitzung sofort wieder
- * wegfuehrt. Die Route eines solchen Moduls SELBST ist bekannt und bleibt den
- * Modul-Guards in navigate().
+ * Navigiert zu einem Pfad und rendert die entsprechende Seite. Die Funktion
+ * selbst steht in utils/router-navigate.js (#1657), damit Tests sie importieren
+ * koennen; hier bekommt sie den Zustand und die echten Abhaengigkeiten. Die
+ * Namen sind der Vertrag (NAVIGATE_DEPS): fehlt einer, wirft createNavigate()
+ * schon beim Laden.
+ */
+const navigate = createNavigate(routerState, {
+  ROUTES, allRoutes, unknownPathDetour, publicPathDetour, detourPaths, canAccessNavModule,
+  location, history, window, document,
+  hasLeaveGuard, mayLeave, whenHistorySettled, consumeOverlayMarker,
+  auth: startHandoff.auth, syncPreferencesOnce, startThirdPartyModulePolling, loadReminderStyles, initReminders, initPush,
+  rememberScrollPosition, scrollPositionFor, renderPage, adoptPageFab, updateNav, topLevelSection,
+  syncWallMode, applyModuleAccentForRoute, updateThemeColorForRoute, updateBranding,
+  focusMainContentAfterNavigation, showToast, t,
+});
+
+/**
+ * Laedt, was jede Sitzung vor ihrer ersten Seite braucht: Praeferenzen,
+ * Versionsangaben, Erweiterungsmodule.
  *
- * OHNE SITZUNG (#1640) urteilt nur der oeffentliche Teil der Tabelle: `/pair`
- * und `/join` sind bekannt, bevor sich jemand angemeldet hat, also fuehrt
- * `/pair/extra` auf `/pair` statt ueber die Uebersicht auf die Anmeldung. Alles
- * andere bleibt offen bis hinter den Auth-Guard - dort erst stehen die
- * Erweiterungsrouten und die Rechte.
+ * DIE DREI LAUFEN GLEICHZEITIG (Critique R18). Sie hingen nie voneinander ab,
+ * liefen aber nacheinander: am gedrosselten Telefon (CPU 4x, Fast 4G) drei
+ * Rundreisen von je rund 175 ms, bevor die Uebersicht ihre Daten ueberhaupt
+ * anfragte. Was BLEIBT, ist die Reihenfolge nach aussen: navigate() wartet auf
+ * alle drei, bevor es die Route aufloest - die Erweiterungsrouten aus
+ * `/modules` und die abgeschalteten Module aus `/preferences` muessen dann
+ * stehen (takeDetour, Modul-Guard).
  */
-function unknownDetourFor(path) {
-  const routes = allRoutes();
-  const known = routes.map((r) => r.path);
-  const landable = routes
-    .filter((r) => r.path === '/' || (r.path !== '/login' && r.path !== '/setup'
-      && !(r.module && (_disabledModules.has(r.module) || !canAccessNavModule(r.module)))))
-    .map((r) => r.path);
-  if (!currentUser) {
-    return publicPathDetour(path, {
-      known,
-      open: routes.filter((r) => !r.requiresAuth).map((r) => r.path),
-      landable,
-    });
-  }
-  return unknownPathDetour(path, { known, landable });
-}
-
-/**
- * Navigiert zu einem Pfad und rendert die entsprechende Seite.
- * @param {string} path
- * @param {Object|boolean} userOrPushState - Direkt ein User-Objekt nach Login,
- *   oder boolean (pushState) für interne Navigation
- * @param {boolean} pushState - false beim initialen Load und popstate
- */
-async function navigate(path, userOrPushState = true, pushState = true) {
-  if (isNavigating) return;
-  // UNBEKANNTE ADRESSE (#1607): statt still die Uebersicht unter der toten
-  // Adresse zu zeichnen, laeuft DIESE Navigation mit dem naechsten bekannten
-  // Vorfahren weiter. Bewusst kein zweites navigate(): das gab im finally die
-  // Sperre frei, waehrend das innere noch lud, und fragte den Verlassen-Schutz
-  // zweimal (Review #1638). takeDetour berichtigt nur den Pfad; Adresse und
-  // Hinweis folgen erst hinter Schutz und Sperre.
-  let detourAddress = null;
-  let unknownNotice = false;
-  const takeDetour = (push) => {
-    const detour = unknownDetourFor(path);
-    if (!detour) return false;
-    const corrected = detourPaths(detour, path, { pushState: push, location });
-    path = corrected.path;
-    detourAddress = corrected.address;
-    unknownNotice = detour.notify;
-    return true;
-  };
-  // Kaltstart und Zurueck/Vor: die tote Adresse IST der laufende Eintrag und
-  // wird ersetzt, Zurueck fuehrt danach nicht wieder auf sie. Bei einem Wechsel
-  // in der App schreibt der regulaere Eintrag weiter unten die berichtigte.
-  const commitDetourAddress = (push) => {
-    if (!push && detourAddress) history.replaceState({ path }, '', detourAddress);
-  };
-  // In einer laufenden Sitzung steht die Modulliste schon (sie kommt mit den
-  // Praeferenzen) - dann VOR dem Verlassen-Schutz, damit er nach dem Ziel
-  // fragt, auf dem die Navigation endet. Sonst nach dem zweiten Lookup unten.
-  // Ohne Sitzung (#1640) ebenfalls hier, aber nur fuer oeffentliche Vorfahren:
-  // der Lookup unten fiele sonst auf die Uebersicht zurueck, die eine Sitzung
-  // verlangt, und `/pair/extra` endete auf der Anmeldung statt auf `/pair`.
-  if (typeof userOrPushState !== 'object' && (!currentUser || _preferencesLoaded)) takeDetour(userOrPushState);
-  // VERLASSEN-SCHUTZ (utils/leave-guard.js, Re-Critique 2026-09-28 A7 P2-1):
-  // eine Seite mit ungespeicherter Arbeit - der Anpassen-Modus der Uebersicht -
-  // fragt, bevor sie verschwindet. Jeder Weg endet hier: Seitenleiste,
-  // Tab-Leiste, Mehr-Blatt, Befehlspalette, Zurueck (popstate). Nur fuer
-  // Wechsel einer angemeldeten Sitzung: das Anmelden (Objekt) und ein
-  // Sitzungsablauf fragen nicht. Ohne Waechter kein await: zwischen der
-  // Pruefung oben und `isNavigating = true` darf keine Luecke entstehen.
-  if (currentUser && typeof userOrPushState !== 'object' && hasLeaveGuard() && !(await mayLeave(path))) {
-    // Ein Zurueck hat die Adresse schon gewechselt - sie gehoert wieder der
-    // Seite, die stehen bleibt.
-    // Erst wenn die Rueckfrage ihren History-Eintrag zurueckgegeben hat
-    // (whenHistorySettled in utils/overlay-history.js) - sonst truege deren
-    // spaetes back() die Adresse gleich wieder weg.
-    if (userOrPushState === false && currentPath) {
-      const stay = currentPath;
-      await whenHistorySettled();
-      history.pushState({ path: stay }, '', stay);
-    }
-    return;
-  }
-  isNavigating = true;
-  commitDetourAddress(userOrPushState);
-
-  // Offenes „Mehr“-Sheet beim Navigieren immer schließen — robust und
-  // unabhängig vom Klick-Bubbling (das reißt, wenn die Navigation
-  // zwischendurch rebuildNavigation() auslöst, z. B. beim Settings-Ziel).
-  if (window._closeMoreSheet) window._closeMoreSheet({ restoreFocus: false });
-
-  try {
-    // Überlastung: navigate(path, user) nach Login vs navigate(path, false) beim Init
-    if (typeof userOrPushState === 'object' && userOrPushState !== null) {
-      currentUser = userOrPushState;
-      _setupRequired = false;
-      await syncPreferencesOnce();
-      startThirdPartyModulePolling();
-      // currentUser kann während des await oben auf null gesetzt worden sein
-      // (auth:expired bei 401 von /preferences), daher Guard gegen null.
-      if (currentUser && !['split_guest', 'display'].includes(currentUser.access_scope)) {
-        loadReminderStyles();
-        initReminders();
-        initPush();
-      }
-    } else {
-      pushState = userOrPushState;
-    }
-
-    // Alten Pfad merken, bevor currentPath aktualisiert wird - Kaltstart oder Wechsel
-    const previousPath = currentPath;
-    let basePath = path.split('?')[0];
-    currentPath = basePath;
-
-    // Scrollstand der Seite festhalten, die gerade verlassen wird - er ist die
-    // Antwort auf ein späteres Browser-Zurück. Bewusst vor den Guards: was hier
-    // sichtbar ist, gilt unabhängig davon, ob die Navigation gleich umgeleitet
-    // wird. Der Scrollport ist #main-content selbst (== .app-content).
-    if (previousPath) {
-      rememberScrollPosition(previousPath, document.getElementById('main-content')?.scrollTop ?? 0);
-    }
-    // Vorwärts heißt oben anfangen, Zurück/Vor heißt weitermachen. Details und
-    // die Begründung gegen eine Nav-Reihenfolge in utils/scroll-restore.js.
-    let scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
-
-    // First-Run-Weiche: Solange kein Account existiert und niemand eingeloggt ist,
-    // alle Routen außer /setup auf /setup umleiten.
-    if (_setupRequired && !currentUser && basePath !== '/setup') {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/setup');
-      return;
-    }
-    // Setup bereits erledigt -> /setup ist nicht mehr erreichbar.
-    if (!_setupRequired && basePath === '/setup') {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/login');
-      return;
-    }
-
-    let route = allRoutes().find((r) => r.path === basePath) ?? ROUTES.find((r) => r.path === '/');
-
-    // DIESE Navigation laeuft auf einem anderen Pfad weiter (#1640), wie beim
-    // Umweg oben: kein zweites navigate(). Das gab im finally die Sperre frei,
-    // waehrend das innere noch lud, und liess den Eintrag der Adresse stehen,
-    // von der die Weiche gleich wieder wegfuehrt - Zurueck landete in ihr.
-    // Kaltstart und Zurueck/Vor ersetzen den laufenden Eintrag, ein Wechsel in
-    // der App schreibt weiter unten das berichtigte Ziel.
-    const continueOn = (target) => {
-      path = target;
-      basePath = target;
-      currentPath = target;
-      scrollTarget = scrollPositionFor(target, { restore: !pushState });
-      route = allRoutes().find((r) => r.path === target) ?? route;
-      detourAddress = target;
-      commitDetourAddress(pushState);
-    };
-
-    // Split-Guest-Weiche: Gäste einer Ausgabenteilung sehen nur das Budget-Modul.
-    // ABER: hat der Nutzer zusätzlich eine Familienrolle OHNE Budget-Recht, würde
-    // ein bedingungsloser Wechsel auf '/budget' vom Modul-Guard (canAccessNavModule)
-    // sofort wieder auf '/' geworfen — und '/' schickt zurück auf '/budget':
-    // Endlosschleife bis Stack-Overflow (#480). Daher nur umleiten, wenn Budget
-    // tatsächlich zugänglich ist; sonst greift der reguläre Rechte-Guard und der
-    // Nutzer landet auf einer für ihn erlaubten Seite.
-    // Zugaenglich heisst auch: im Haushalt nicht abgeschaltet (#1640). Der
-    // Modul-Guard wirft von einem abgeschalteten '/budget' auf '/', die Weiche
-    // von '/' wieder zurueck - dieselbe Schleife - und hinter dem Auth-Guard
-    // prueft nach der Weiche niemand mehr die Abschaltung.
-    if (currentUser?.access_scope === 'split_guest'
-        && route.path !== '/budget'
-        && canAccessNavModule('budget')
-        && !_disabledModules.has('budget')) {
-      continueOn('/budget');
-    }
-
-    // Modul-Guard: deaktivierte ODER per Rechte gesperrte Module leiten auf das
-    // Dashboard um (Rechte-Guard #467; die verbindliche 403-Sperre liegt am Server).
-    if (route.module
-        && route.path !== '/'
-        && (_disabledModules.has(route.module) || !canAccessNavModule(route.module))) {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/');
-      return;
-    }
-
-    // Auth-Guard
-    if (route.requiresAuth && !currentUser) {
-      try {
-        const result = await auth.me();
-        currentUser = result.user;
-        await syncPreferencesOnce();
-        startThirdPartyModulePolling();
-        // currentUser kann während des await oben auf null gesetzt worden sein
-        // (auth:expired bei 401 von /preferences), daher Guard gegen null.
-        if (currentUser && !['split_guest', 'display'].includes(currentUser.access_scope)) {
-          loadReminderStyles();
-          initReminders();
-          initPush();
-        }
-      } catch {
-        currentPath = null; // Reset damit navigate('/login') nicht geblockt wird
-        isNavigating = false;
-        // _pendingLoginRedirect leeren: der catch ruft navigate('/login') direkt auf,
-        // der finally soll keinen zweiten Aufruf starten (würde isNavigating=true setzen,
-        // während die Login-Seite rendert, und so post-login navigate blockieren).
-        _pendingLoginRedirect = false;
-        navigate(_setupRequired ? '/setup' : '/login');
-        return;
-      }
-    }
-
-    route = allRoutes().find((r) => r.path === basePath) ?? route;
-
-    // Unbekannte Adresse, zweite Stelle (Kaltstart, Anmeldung): ERST HIER
-    // sind die Erweiterungsrouten geladen (syncThirdPartyModules im Auth-Guard),
-    // davor waere jede "unbekannt". Einen Verlassen-Schutz gibt es auf diesem
-    // Weg nicht - es steht noch keine Seite. Die Guards danach urteilen ueber
-    // die berichtigte Route.
-    if (takeDetour(pushState)) {
-      basePath = path.split('?')[0];
-      currentPath = basePath;
-      scrollTarget = scrollPositionFor(basePath, { restore: !pushState });
-      route = allRoutes().find((r) => r.path === basePath) ?? route;
-      commitDetourAddress(pushState);
-    }
-
-    // Split-Guest-Weiche: Gäste einer Ausgabenteilung sehen nur das Budget-Modul.
-    // ABER: hat der Nutzer zusätzlich eine Familienrolle OHNE Budget-Recht, würde
-    // ein bedingungsloser Wechsel auf '/budget' vom Modul-Guard (canAccessNavModule)
-    // sofort wieder auf '/' geworfen — und '/' schickt zurück auf '/budget':
-    // Endlosschleife bis Stack-Overflow (#480). Daher nur umleiten, wenn Budget
-    // tatsächlich zugänglich ist; sonst greift der reguläre Rechte-Guard und der
-    // Nutzer landet auf einer für ihn erlaubten Seite.
-    // Zugaenglich heisst auch: im Haushalt nicht abgeschaltet (#1640). Der
-    // Modul-Guard wirft von einem abgeschalteten '/budget' auf '/', die Weiche
-    // von '/' wieder zurueck - dieselbe Schleife - und hinter dem Auth-Guard
-    // prueft nach der Weiche niemand mehr die Abschaltung.
-    if (currentUser?.access_scope === 'split_guest'
-        && route.path !== '/budget'
-        && canAccessNavModule('budget')
-        && !_disabledModules.has('budget')) {
-      continueOn('/budget');
-    }
-
-    // Modul-Guard, zweite Stelle: nach frisch geladenen Rechten UND Praeferenzen
-    // (Deep-Link auf ein gesperrtes oder abgeschaltetes Modul → Dashboard). #467
-    //
-    // Dieselbe Regel wie am Modul-Guard oben. Die Abschaltung fehlte hier: beim
-    // Kaltstart laeuft der Guard oben, bevor die Praeferenzen geladen sind -
-    // `_disabledModules` ist dann noch leer - und hier pruefte nur das Recht.
-    // Der Direktlink auf ein abgeschaltetes Modul wurde gezeichnet.
-    //
-    // Wie die Gast-Weiche darueber laeuft DIESE Navigation weiter, statt eine
-    // zweite zu starten (#1640). Das Ziel '/' nimmt die Bedingung selbst aus:
-    // es kann weder abgeschaltet noch gesperrt sein, eine Schleife gibt es nicht.
-    if (route.module
-        && route.path !== '/'
-        && (_disabledModules.has(route.module) || !canAccessNavModule(route.module))) {
-      continueOn('/');
-    }
-
-    if (!route.requiresAuth && currentUser && path === '/login') {
-      currentPath = null;
-      isNavigating = false;
-      navigate('/');
-      return;
-    }
-
-    if (pushState) {
-      /* EIN DIALOG UEBERLEBT KEINE NAVIGATION (#871). Er stuende sonst ueber
-       * der falschen Seite - genau der gemeldete Zustand, nur andersherum
-       * erreicht. `consumeOverlayMarker()` schliesst deshalb, was noch offen
-       * ist, und meldet zurueck, ob der aktuelle History-Eintrag unser
-       * Platzhalter war.
-       *
-       * WAR ER ES, TRITT DIE NEUE SEITE AN SEINE STELLE. Laege sie darueber,
-       * zeigte der Rueckweg zuerst auf einen Eintrag mit derselben Adresse -
-       * eine Geste, die sichtbar nichts tut. */
-      if (consumeOverlayMarker()) history.replaceState({ path }, '', detourAddress ?? path);
-      else history.pushState({ path }, '', detourAddress ?? path);
-    }
-
-    // Soft-Navigation innerhalb desselben Moduls (z. B. Settings-Blatt → Blatt
-    // oder Browser-Zurück innerhalb der Einstellungen): Das bereits gerenderte
-    // Modul tauscht nur seinen Detailbereich aus — keine App-Shell-Teardown,
-    // keine Slide-Transition, kein erneuter Auth-Refresh. Gibt update() false
-    // zurück (z. B. Redirect nötig), fällt die Navigation auf das volle Rendern
-    // zurück.
-    if (
-      route.module
-      && route.module === _renderedModuleName
-      && typeof _renderedModule?.update === 'function'
-    ) {
-      let handled = false;
-      try {
-        handled = await _renderedModule.update({
-          user: currentUser,
-          path: basePath,
-          query: new URLSearchParams(path.split('?')[1] ?? ''),
-        });
-      } catch (error) {
-        console.error('[Router] Soft-Update fehlgeschlagen, vollständiges Rendern folgt:', error);
-        handled = false;
-      }
-      if (handled) {
-        // Auch die Soft-Navigation wechselt den Inhalt (Settings-Blatt, Health-Tab)
-        // und muss den Scrollport nachziehen - hier zwangsläufig NACH dem Render,
-        // weil kein Teardown existiert, an den man sich hängen könnte.
-        const main = document.getElementById('main-content');
-        if (main) main.scrollTop = scrollTarget;
-        // Ein Tabwechsel kann einen neuen FAB anlegen (Health-Tabs) - der muss
-        // denselben Weg aus dem Scrollport nehmen wie beim vollen Rendern.
-        adoptPageFab();
-        updateNav(topLevelSection(basePath));
-        return;
-      }
-    }
-
-    // Der Wand-Modus ist ein Zustand DES DASHBOARDS, kein eigener Eintrag in
-    // dieser Tabelle - er muss die Route also von hier erfahren. Vor dem
-    // Modul-Akzent, weil er nachts das Theme auf dunkel zwingt und der Akzent
-    // als aufgeloeste Farbe im Inline-Style landet: umgekehrt truege die Shell
-    // den Hellmodus-Wert in eine dunkle Nacht (dieselbe Reihenfolge-Falle wie
-    // bei applyTheme).
-    syncWallMode(basePath);
-
-    // Küchen-Routen lösen auf --module-kitchen auf, nicht auf ihr eigenes
-    // --module-*: die Küche ist im Routing vier Module, in Navigation, Akzent
-    // und Statusbar eines (kitchenGroup). Sonst wechselte der 3px-Streifen der
-    // Tab-Leiste und der FAB beim Tabwechsel die Farbe - dieselbe Botschaft wie
-    // ein echter Modulwechsel (Critique 2026-07-29). Begründung am Token in
-    // tokens.css, Wortlaut bei moduleAccentToken().
-    applyModuleAccentForRoute(route);
-
-    // Optimistisches Chrome-Feedback: aktive Nav-Markierung + Indikator-Pille und
-    // Statusbar-Farbe schon VOR dem Modul-Render setzen, sobald die Shell existiert.
-    // So quittiert der Tap sofort (Pille gleitet, Akzent wechselt), während Modul-
-    // CSS und -Daten noch laden — statt erst nach Abschluss des Renders. Beim aller-
-    // ersten Laden wird die Shell erst in renderPage gebaut; dann greift allein die
-    // autoritative Aktualisierung danach.
-    if (document.querySelector('.nav-bottom')) {
-      updateNav(topLevelSection(basePath));
-      updateThemeColorForRoute(route);
-    }
-
-    await renderPage(route, previousPath, scrollTarget);
-    // Autoritative Aktualisierung nach dem Render: deckt den Erstlade-Fall ab und
-    // markiert ggf. seiten-interne [data-route]-Links (idempotent).
-    // Settings-Blätter teilen sich den /settings Nav-Eintrag (aria-current).
-    updateNav(topLevelSection(basePath));
-    updateThemeColorForRoute(route);
-    updateBranding(basePath);
-    focusMainContentAfterNavigation(basePath);
-  } finally {
-    isNavigating = false;
-    // Im finally, weil auch die Soft-Navigation (Settings-Blatt) frueh
-    // zurueckkehrt - und nach dem Rendern, weil es die Toast-Flaeche beim
-    // Kaltstart erst mit der Shell gibt. Deshalb leitet die Gast-Weiche oben
-    // nicht mehr ueber ein zweites navigate() weiter (#1640): dieses finally
-    // lief dann VOR dessen Rendern, und der Hinweis fand keine Flaeche.
-    if (unknownNotice) showToast(t('common.unknownAddress'), 'default', 5000);
-    // auth:expired kann waehrend einer Navigation gefeuert haben (z.B. wenn ein
-    // paralleler API-Call 401 zurueckgab). Jetzt wo die Navigation abgeschlossen
-    // ist, holen wir die Login-Weiterleitung nach.
-    if (_pendingLoginRedirect) {
-      _pendingLoginRedirect = false;
-      navigate('/login');
-    }
-  }
-}
-
 async function syncPreferencesOnce() {
-  if (_preferencesLoaded) return;
-  _preferencesLoaded = true;
-  try {
-    const res = await api.get('/preferences');
-    const dateFormat = res?.data?.date_format;
-    if (dateFormat) {
-      localStorage.setItem('yuvomi-date-format', dateFormat);
-    }
-    const timeFormat = res?.data?.time_format;
-    if (timeFormat) {
-      localStorage.setItem('yuvomi-time-format', timeFormat);
-    }
-    // Die Haushaltszone in die Anzeige spiegeln (#829 Teil 3). Bewusst
-    // `timezone` und nicht `timezone_effective`: letzteres ist nie leer und
-    // traegt ohne Einstellung die `TZ` des Containers - ein Compose-Schalter,
-    // der nichts darueber aussagt, wo dieser Haushalt lebt. Ohne getroffene
-    // Wahl bleibt die Anzeige also beim Browser, so wie bisher.
-    setDisplayTimeZone(res?.data?.timezone ?? null);
-    // Der Zonen-Hinweis der Uebersicht (#1607) liest genau diese Antwort: sie
-    // ist da, bevor die erste Seite zeichnet, also steht er schon neben dem
-    // Skelett und schiebt nichts nach.
-    rememberZonePrefs(res?.data);
-    // Region als Formatier-Locale für Zahlen/Währung spiegeln (z. B. de-CH →
-    // 123'456.78). getFormatLocale() in i18n.js liest diesen Wert.
-    const numberLocale = numberLocaleFor({
-      region: res?.data?.region,
-      currency: res?.data?.currency,
-      date_format: res?.data?.date_format,
-      time_format: res?.data?.time_format,
-    });
-    if (numberLocale) {
-      localStorage.setItem('yuvomi-number-locale', numberLocale);
-    } else {
-      localStorage.removeItem('yuvomi-number-locale');
-    }
-    if (res?.data?.app_name) {
-      setAppName(res.data.app_name);
-      updateBranding();
-    }
-    if (Array.isArray(res?.data?.disabled_modules)) {
-      _disabledModules = new Set(res.data.disabled_modules);
-    }
-    if (Array.isArray(res?.data?.hidden_modules)) {
-      _hiddenModules = new Set(res.data.hidden_modules);
-    }
-    if (Array.isArray(res?.data?.module_order)) {
-      _moduleOrder = res.data.module_order;
-    }
-    if (Array.isArray(res?.data?.mobile_nav_order)) {
-      _mobileNavOrder = res.data.mobile_nav_order;
-    }
-  } catch {
+  if (routerState._preferencesLoaded) return;
+  routerState._preferencesLoaded = true;
+  // Wessen Sitzung ist das? Eine Antwort, die nach einem Sitzungsende eintrifft
+  // (401 auf einem der Nachbarn -> auth:expired -> forgetSessionState), darf
+  // nichts mehr setzen: sonst erbte das naechste Mitglied am selben Geraet die
+  // ausgeblendeten Module. Nacheinander konnte das nicht passieren, gleichzeitig
+  // schon.
+  const session = routerState.currentUser;
+  const sameSession = () => routerState.currentUser === session;
+
+  const preferences = api.get('/preferences');
+  // Die Uebersicht braucht dieselbe Antwort fuer ihre Kacheln und holte sie ein
+  // zweites Mal (gemessen: zweimal `/preferences` je Kaltstart).
+  startHandoff.holdPreferences(preferences);
+  const preferencesApplied = preferences
+    .then((res) => { if (sameSession()) applyStartPreferences(res); })
     // Non-critical. The settings page can refresh this later.
-  }
-  try {
-    const res = await api.get('/version');
-    if (res?.version) setAppVersion(res.version);
-    if (res?.app_name) setAppName(res.app_name);
-    // Die Upload-Grenze kommt vom Server, damit Hinweis und Pruefung im Browser
-    // dieselbe Zahl nennen wie er (#806).
-    setMaxUploadBytes(res?.max_upload_bytes);
-    updateBranding();
-  } catch {
+    .catch(() => {});
+
+  // Die Versionsangaben NACH den Praeferenzen anwenden, wie bisher: beide
+  // tragen `app_name`, und die Reihenfolge soll nicht vom Netz abhaengen.
+  const versionApplied = Promise.all([startHandoff.takeVersion() ?? api.get('/version'), preferencesApplied])
+    .then(([res]) => {
+      if (res?.version) setAppVersion(res.version);
+      if (res?.app_name) setAppName(res.app_name);
+      // Die Upload-Grenze kommt vom Server, damit Hinweis und Pruefung im Browser
+      // dieselbe Zahl nennen wie er (#806).
+      setMaxUploadBytes(res?.max_upload_bytes);
+      updateBranding();
+    })
     // Non-critical. The login page and settings page can refresh branding later.
+    .catch(() => {});
+
+  await Promise.all([preferencesApplied, versionApplied, syncThirdPartyModules()]);
+}
+
+function applyStartPreferences(res) {
+  const dateFormat = res?.data?.date_format;
+  if (dateFormat) {
+    localStorage.setItem('yuvomi-date-format', dateFormat);
   }
-  await syncThirdPartyModules();
+  const timeFormat = res?.data?.time_format;
+  if (timeFormat) {
+    localStorage.setItem('yuvomi-time-format', timeFormat);
+  }
+  // Die Haushaltszone in die Anzeige spiegeln (#829 Teil 3). Bewusst
+  // `timezone` und nicht `timezone_effective`: letzteres ist nie leer und
+  // traegt ohne Einstellung die `TZ` des Containers - ein Compose-Schalter,
+  // der nichts darueber aussagt, wo dieser Haushalt lebt. Ohne getroffene
+  // Wahl bleibt die Anzeige also beim Browser, so wie bisher.
+  setDisplayTimeZone(res?.data?.timezone ?? null);
+  // Der Zonen-Hinweis der Uebersicht (#1607) liest genau diese Antwort: sie
+  // ist da, bevor die erste Seite zeichnet, also steht er schon neben dem
+  // Skelett und schiebt nichts nach.
+  rememberZonePrefs(res?.data);
+  // Region als Formatier-Locale für Zahlen/Währung spiegeln (z. B. de-CH →
+  // 123'456.78). getFormatLocale() in i18n.js liest diesen Wert.
+  const numberLocale = numberLocaleFor({
+    region: res?.data?.region,
+    currency: res?.data?.currency,
+    date_format: res?.data?.date_format,
+    time_format: res?.data?.time_format,
+  });
+  if (numberLocale) {
+    localStorage.setItem('yuvomi-number-locale', numberLocale);
+  } else {
+    localStorage.removeItem('yuvomi-number-locale');
+  }
+  if (res?.data?.app_name) {
+    setAppName(res.data.app_name);
+    updateBranding();
+  }
+  if (Array.isArray(res?.data?.disabled_modules)) {
+    routerState._disabledModules = new Set(res.data.disabled_modules);
+  }
+  if (Array.isArray(res?.data?.hidden_modules)) {
+    _hiddenModules = new Set(res.data.hidden_modules);
+  }
+  if (Array.isArray(res?.data?.module_order)) {
+    _moduleOrder = res.data.module_order;
+  }
+  if (Array.isArray(res?.data?.mobile_nav_order)) {
+    _mobileNavOrder = res.data.mobile_nav_order;
+  }
 }
 
 async function syncThirdPartyModules() {
@@ -1101,7 +786,7 @@ function moduleSnapshot() {
 }
 
 function startThirdPartyModulePolling() {
-  if (_moduleRefreshTimer || ['split_guest', 'display'].includes(currentUser?.access_scope)) return;
+  if (_moduleRefreshTimer || ['split_guest', 'display'].includes(routerState.currentUser?.access_scope)) return;
   _moduleRefreshTimer = setInterval(async () => {
     const before = moduleSnapshot();
     await syncThirdPartyModules();
@@ -1135,7 +820,7 @@ function allRoutes() {
  * Overlay) - dort gibt es kein `route`-Objekt aus navigate() mehr.
  */
 function currentRoute() {
-  return allRoutes().find((r) => r.path === currentPath);
+  return allRoutes().find((r) => r.path === routerState.currentPath);
 }
 
 /**
@@ -1341,16 +1026,16 @@ function syncSidebarAccount(root = document.querySelector('.nav-sidebar__account
   const trigger = root.querySelector('.nav-sidebar__account-trigger');
   const avatar = root.querySelector('.nav-sidebar__avatar');
   const nameEl = root.querySelector('.nav-sidebar__account-name');
-  const displayName = currentUser?.display_name || currentUser?.username || '';
+  const displayName = routerState.currentUser?.display_name || routerState.currentUser?.username || '';
   nameEl.textContent = displayName;
-  const color = currentUser?.avatar_color || '';
+  const color = routerState.currentUser?.avatar_color || '';
   avatar.style.backgroundColor = color;
   const ink = Boolean(color) && prefersInkText(color);
   avatar.classList.toggle('nav-sidebar__avatar--ink', ink);
   avatar.classList.toggle('nav-sidebar__avatar--on-color', Boolean(color) && !ink);
-  if (currentUser?.avatar_data) {
+  if (routerState.currentUser?.avatar_data) {
     const img = document.createElement('img');
-    img.src = currentUser.avatar_data;
+    img.src = routerState.currentUser.avatar_data;
     img.alt = '';
     avatar.replaceChildren(img);
   } else {
@@ -1524,7 +1209,7 @@ function invalidateModuleCounts() {
 function primeModuleCountsFrom(data, { filtered = false } = {}) {
   if (filtered || !data) return;
   _moduleCounts = moduleCountsFrom(data, {
-    isAdmin: currentUser?.role === 'admin',
+    isAdmin: routerState.currentUser?.role === 'admin',
     shoppingVisible: navItems().some((item) => item.module === 'shopping'),
   });
   _moduleCountsAt = Date.now();
@@ -1564,7 +1249,7 @@ async function refreshModuleCounts() {
     const res = await api.get('/dashboard');
     if (gen !== _moduleCountsGen) return false;
     _moduleCounts = moduleCountsFrom(res, {
-      isAdmin: currentUser?.role === 'admin',
+      isAdmin: routerState.currentUser?.role === 'admin',
       // `navItems()` ist bereits nach Zugang gefiltert und damit die richtige
       // Quelle fuer die Frage, ob der Einkauf diesem Mitglied offensteht.
       shoppingVisible: navItems().some((item) => item.module === 'shopping'),
@@ -1785,9 +1470,9 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     // App-Shell einmalig aufbauen BEVOR render() aufgerufen wird -
     // main-content muss im DOM existieren damit document.getElementById()
     // in Seiten-Modulen funktioniert.
-    else if (!document.querySelector('.nav-bottom') && currentUser) {
+    else if (!document.querySelector('.nav-bottom') && routerState.currentUser) {
       renderAppShell(app);
-      _navBuiltForUserId = currentUser.id;
+      _navBuiltForUserId = routerState.currentUser.id;
       // Nebenläufig und still: der Hinweis darf das erste Rendern nicht aufhalten.
       checkForUpdate();
       /* Und die Zahlen an den Nav-Zielen (#868).
@@ -1804,18 +1489,20 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
        * Badges - das war bis hierher der Normalfall. */
       applyNavBadges();
       refreshModuleCountsUnlessPageProvides(route.path);
-    } else if (currentUser && _navBuiltForUserId !== currentUser.id) {
+    } else if (routerState.currentUser && _navBuiltForUserId !== routerState.currentUser.id) {
       // Shell besteht bereits, aber der Nutzer hat gewechselt → Nav mit den
       // Modul-Rechten des aktuellen Nutzers neu aufbauen (#467).
       rebuildNavigation();
-      _navBuiltForUserId = currentUser.id;
+      _navBuiltForUserId = routerState.currentUser.id;
       // Die Zahlen gehoeren dem Mitglied, nicht dem Geraet: `forgetSessionState`
       // hat sie geleert, hier kommen die des neuen Mitglieds (#868).
       applyNavBadges();
       refreshModuleCountsUnlessPageProvides(route.path);
     }
 
-    const content = document.getElementById('main-content') || app;
+    // Eine Seite ohne Anmeldung haengt an der App-Wurzel, nie im `main` ihrer
+    // Vorgaengerin (utils/page-mount.js).
+    const content = pageMountTarget(route, app);
 
     // Seitenwechsel (Critique 2026-09-26, P2-1): der Tausch laeuft als View
     // Transition, wo der Browser sie kann - alter Inhalt blendet in den neuen,
@@ -1835,6 +1522,11 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     // also keinen leeren Frame mehr dazwischen. Die Daten wartet er NICHT ab:
     // das Bild stuende sonst fuer die Dauer eines Abrufs.
     const swap = () => {
+      // ZUERST festhalten, ob die alte Seite einen FAB hatte - schwebend in der
+      // Ebene oder (Desktop) angedockt in ihrem Kopf, der mit dem Inhalt gleich
+      // faellt: der naechste poppt dann nicht neu herein, und die Kapsel haelt
+      // seine Reserve (holdFabAcrossSwap).
+      holdFabAcrossSwap();
       // Alter Inhalt ist jetzt weg - altes Stylesheet kann entfernt werden
       pageWrapper = document.createElement('div');
       pageWrapper.className = 'page-transition';
@@ -1863,6 +1555,9 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
       // bleiben. Sie hat kein Gegenstück zu adoptPageFab() - wer sie braucht,
       // setzt sie beim Rendern.
       clearBulkPill();
+      // Und die Filter-Popover (Aufgaben, Kalender): sie haengen an
+      // `document.body` und schliessen nur per Light-Dismiss von selbst.
+      dismissFilterPopovers();
       style.cleanup();
       // Lebenszyklus-Vertrag (#976): der Router besitzt EIN AbortController je
       // Seitenaufbau und bricht ihn hier ab, wo die Route ersetzt wird. Die
@@ -1878,8 +1573,8 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
 
       // Teardown abgeschlossen: ein evtl. gemerktes Soft-Update-Ziel ist jetzt
       // ungültig, bis das neue Modul erfolgreich gerendert hat.
-      _renderedModule = null;
-      _renderedModuleName = null;
+      routerState._renderedModule = null;
+      routerState._renderedModuleName = null;
 
       // render() synchron starten: Der synchrone Teil (Grundgerüst + Lade-Skeleton)
       // ist danach bereits im DOM. Den Wrapper SOFORT einblenden - so wird das
@@ -1897,8 +1592,8 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
         ? mountExtensionPage(pageWrapper, route.thirdPartyModule)
         : pageWrapper;
       const context = route.thirdPartyModule
-        ? { user: currentUser, page: { ...route.thirdPartyModule.page }, signal: _pageController.signal }
-        : { user: currentUser, signal: _pageController.signal };
+        ? { user: routerState.currentUser, page: { ...route.thirdPartyModule.page }, signal: _pageController.signal }
+        : { user: routerState.currentUser, signal: _pageController.signal };
       renderPromise = module.render(target, context);
 
       // Schon jetzt umziehen, nicht erst nach den Daten: die meisten Seiten legen
@@ -1945,13 +1640,14 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     if (scrollTarget > 0) content.scrollTop = scrollTarget;
 
     // Ab hier kann das Modul Soft-Navigationen bedienen (sofern es update() bietet).
-    _renderedModule = module;
-    _renderedModuleName = route.module;
+    routerState._renderedModule = module;
+    routerState._renderedModuleName = route.module;
 
     wirePageToolbars();
 
     // FAB Long Loop: Einstiegsanimation nach FAB_SEEN_MAX Views pro Modul deaktivieren
     const pageFab = adoptPageFab();
+    releaseFabHold();
     if (pageFab) {
       // Shortcut-Discoverability (Audit P3): der 'n'-Chord öffnet den FAB — als
       // Tooltip-Titel + aria-keyshortcuts sichtbar bzw. vorlesbar machen.
@@ -1982,6 +1678,7 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
 
   } catch (err) {
     document.documentElement.classList.remove('navigating');
+    releaseFabHold();
     console.error('[Router] Seiten-Render-Fehler:', err);
     if (route.thirdPartyModule?.id) {
       await disableFailedThirdPartyModule(route.thirdPartyModule.id);
@@ -1992,6 +1689,9 @@ async function renderPage(route, previousPath = null, scrollTarget = 0) {
     // die Seite ist dann nur noch per Reload verlassbar. Erst wenn noch keine
     // Shell steht (Auth-Seiten, früher Fehler), ist #app der richtige Ort.
     renderError(document.getElementById('main-content') ?? app, err);
+  } finally {
+    // Die Uebergabe gilt der Seite, die DIESER Start zeichnet (utils/start-handoff.js).
+    startHandoff.expirePage();
   }
 }
 
@@ -2007,8 +1707,8 @@ function renderAppShell(container) {
   // Nicht-Mitglieder mit einer festen, kleinen Erlaubnis, und beide haben
   // nichts von Mehr-Menue, Suchleiste und System-Reihe. Was sie
   // UNTERSCHEIDET, steht in navItems() - die Liste, nicht das Geruest.
-  const isGuest = currentUser?.access_scope === 'split_guest';
-  const isDisplayShell = currentUser?.access_scope === 'display';
+  const isGuest = routerState.currentUser?.access_scope === 'split_guest';
+  const isDisplayShell = routerState.currentUser?.access_scope === 'display';
   const isMinimalNav = isGuest || isDisplayShell;
   const skipLink = document.createElement('a');
   skipLink.href = '#main-content';
@@ -2021,14 +1721,12 @@ function renderAppShell(container) {
   const sidebarLogo = document.createElement('div');
   sidebarLogo.className = 'nav-sidebar__logo';
 
-  // Logomark: eigenes Icon-Artwork aus /icons/icon-192.png
+  // Die Bildmarke kommt aus EINER Quelle (utils/brand-mark.js) - dieselbe wie
+  // auf den Zugangsseiten, in beiden Themes dieselbe.
   const logomark = document.createElement('div');
   logomark.className = 'nav-sidebar__logomark';
   logomark.setAttribute('aria-hidden', 'true');
-  const logoImg = document.createElement('img');
-  logoImg.src = '/icons/icon-192.png';
-  logoImg.alt = '';
-  logomark.appendChild(logoImg);
+  logomark.insertAdjacentHTML('beforeend', brandMarkSvg());
   sidebarLogo.appendChild(logomark);
 
   const sidebarBrandText = document.createElement('div');
@@ -2369,26 +2067,6 @@ function renderAppShell(container) {
   routeAnnouncer.setAttribute('aria-live', 'polite');
   routeAnnouncer.setAttribute('aria-atomic', 'true');
 
-  // Lebender Backdrop — driftende, getönte Blobs (Liquid Glass).
-  // Erstes Shell-Kind: liegt via z-index: -1 (glass.css Section 40) hinter
-  // dem transluzenten Content, aber über dem app-shell-Basis-Gradient.
-  // Blob 1 folgt --active-module-accent → rekoloriert pro Sektion.
-  const lgBackdrop = document.createElement('div');
-  lgBackdrop.className = 'lg-backdrop';
-  lgBackdrop.setAttribute('aria-hidden', 'true');
-  // Zwei Knoten je Blob: die Hülle driftet, die Farbwolke darin steht still und
-  // trägt den Blur. Solange beides auf EINEM Element sass, rasterte der Browser
-  // den blur(90px) pro Frame neu - im Leerlauf 60 → 20 fps (Issue #716). Die
-  // Begründung samt Messung steht bei .lg-blob in glass.css.
-  for (let i = 1; i <= 4; i++) {
-    const blob = document.createElement('div');
-    blob.className = `lg-blob lg-blob--${i}`;
-    const ink = document.createElement('div');
-    ink.className = 'lg-blob__ink';
-    blob.appendChild(ink);
-    lgBackdrop.appendChild(blob);
-  }
-
   // `bottomStack` steht VOR der Nav und nicht am Ende der Shell (Critique
   // 2026-08-13). Die Pille darin ist eine Bedienung für die Liste, die gerade
   // darüber steht - in der Tabfolge lag sie aber hinter der Liste, hinter dem
@@ -2403,7 +2081,7 @@ function renderAppShell(container) {
   //
   // Sichtbar ändert das nichts: der Stapel ist `position: fixed` und trägt
   // `--z-toast`, seine Lage kommt aus der Regel, nicht aus der Reihenfolge.
-  const shellNodes = [skipLink, lgBackdrop, sidebar, main, fabLayer, bottomStack, bottomNav];
+  const shellNodes = [skipLink, sidebar, main, fabLayer, bottomStack, bottomNav];
   if (backdrop)   shellNodes.push(backdrop);
   if (moreSheet)  shellNodes.push(moreSheet);
   shellNodes.push(searchOverlay, routeAnnouncer);
@@ -2417,7 +2095,7 @@ function renderAppShell(container) {
   // sonst am verworfenen (siehe observeNavCapsule weiter unten).
   observeNavCapsule();
   applySidebarCollapsed(localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1');
-  updateBranding(currentPath || '/');
+  updateBranding(routerState.currentPath || '/');
 
   // Klick-Handler für alle Nav-Links
   container.querySelectorAll('[data-route]').forEach((el) => {
@@ -2720,6 +2398,33 @@ function clearPageFab() {
   document.getElementById('fab-layer')?.replaceChildren();
 }
 
+/**
+ * DER FAB STEHT UEBER DEN SEITENWECHSEL (Critique R18, Bewegung). Der Knopf ist
+ * je Seite ein neuer Knoten - gemessen poppte er deshalb bei JEDEM Tab-Wechsel
+ * neu herein (`fab-in`, 4 von 4), und Seiten, die ihn erst nach den Daten
+ * anlegen, liessen die FAB-Reserve der Kapsel dazwischen fallen: die Tabs
+ * sprangen zweimal um rund 11px.
+ *
+ * Gefragt wird VOR `clearPageFab()` - danach gibt es den Vorgaenger nicht mehr:
+ *   - `fab-steady`: irgendwo stand ein sichtbarer FAB (schwebend oder im Kopf
+ *     angedockt). Der naechste faehrt nicht ein, er steht (layout.css). Gilt,
+ *     bis der naechste Wechsel neu fragt - also auch fuer einen Nachzuegler.
+ *   - `fab-holding`: der FAB schwebte in der Ebene, die Kapsel haelt seine
+ *     Reserve. Faellt mit `releaseFabHold()`, sobald die neue Seite gebaut ist
+ *     und ihre eigene `:has()`-Bedingung wieder die Wahrheit sagt.
+ * Beim Kaltstart steht kein Vorgaenger: beide Klassen fallen, der FAB faehrt ein.
+ */
+function holdFabAcrossSwap() {
+  const root = document.documentElement;
+  const floating = document.querySelector('#fab-layer .page-fab:not([hidden])');
+  root.classList.toggle('fab-steady', Boolean(floating || document.querySelector('#main-content .page-fab:not([hidden])')));
+  root.classList.toggle('fab-holding', Boolean(floating));
+}
+
+function releaseFabHold() {
+  document.documentElement.classList.remove('fab-holding');
+}
+
 const FAB_SEEN_KEY = (module) => `yuvomi:fabSeen:${module}`;
 const FAB_SEEN_MAX = 5;
 const SIDEBAR_COLLAPSED_KEY = 'yuvomi.sidebar.collapsed';
@@ -2963,7 +2668,7 @@ const UPDATE_CHECKED_AT_KEY = 'yuvomi.update.checkedAt';
  * Zwischenspeicher für eine Auskunft des Servers, kein Zustand einer Person.
  */
 function changelogSeen() {
-  return currentUser?.changelog_seen || { version: null, latest: null };
+  return routerState.currentUser?.changelog_seen || { version: null, latest: null };
 }
 // Der Server hält GitHub-Releases 30 Minuten im Cache; häufigeres Fragen wäre
 // reiner Verkehr für eine Information, die sich um Wochen bewegt.
@@ -3277,8 +2982,8 @@ function renderChangelog(panel, payload) {
  */
 function markChangelogSeen(latestVersion) {
   const seen = changelogSeen();
-  if (currentUser) {
-    currentUser.changelog_seen = {
+  if (routerState.currentUser) {
+    routerState.currentUser.changelog_seen = {
       version: getAppVersion() || seen.version,
       latest: latestVersion || seen.latest,
     };
@@ -3434,6 +3139,8 @@ function initMoreSheet(container, openSearch) {
     scroller: () => sheet.querySelector('.more-sheet__body'),
     onDismiss: () => closeSheet(),
     resetAfterDismiss: true,
+    // Die Abdunklung folgt dem Zug (R18): der Backdrop ist ein eigenes Element.
+    dim: () => backdrop,
   });
 
   sheet.addEventListener('click', (e) => {
@@ -3472,8 +3179,8 @@ function paletteLocal(q) {
     label: item.label, route: item.navHref ?? item.path, module: item.module, icon: item.icon,
   }));
   const settings = [];
-  if (currentUser && targets.some((item) => item.module === 'settings')) {
-    const found = searchSettings(q, { user: currentUser, translate: t });
+  if (routerState.currentUser && targets.some((item) => item.module === 'settings')) {
+    const found = searchSettings(q, { user: routerState.currentUser, translate: t });
     const settingsLabel = t('nav.settings');
     found.leaves.forEach((leaf) => settings.push({
       label: t(leaf.labelKey), route: leaf.path, context: settingsLabel, module: 'settings',
@@ -3885,7 +3592,7 @@ function applyModuleReadonly(moduleName, pageWrapper) {
   // wie ein Fehler des Geraets, waehrend die Zeile darunter sich abhaken laesst
   // (im Browser gemessen). Ein widerspruechlicher Hinweis ist schlechter als
   // keiner; das Band bleibt ueberall sonst, auch am Display.
-  if (readOnly && currentUser?.access_scope === 'display'
+  if (readOnly && routerState.currentUser?.access_scope === 'display'
     && DISPLAY_ACTING_MODULES.includes(moduleName)) {
     document.documentElement.toggleAttribute('data-module-readonly', true);
     return;
@@ -3904,7 +3611,7 @@ function applyModuleReadonly(moduleName, pageWrapper) {
 }
 
 function navItems({ catalog = false } = {}) {
-  if (currentUser?.access_scope === 'split_guest') {
+  if (routerState.currentUser?.access_scope === 'split_guest') {
     return [
       { path: '/budget', label: t('splitExpenses.tabLabel'), icon: MODULE_ICON['split-expenses'], module: 'budget' },
     ];
@@ -3916,7 +3623,7 @@ function navItems({ catalog = false } = {}) {
   // Tueren, die nicht aufgehen. Dieselbe Weiche wie beim Ausgaben-Gast darueber,
   // nur mit vier Eintraegen statt einem; die Liste spiegelt DISPLAY_SCOPES in
   // server/services/display-accounts.js.
-  if (currentUser?.access_scope === 'display') {
+  if (routerState.currentUser?.access_scope === 'display') {
     return [
       { path: '/',         label: t('nav.dashboard'), icon: MODULE_ICON.dashboard, module: 'dashboard' },
       { path: '/calendar', label: t('nav.calendar'),  icon: MODULE_ICON.calendar,  module: 'calendar' },
@@ -3929,7 +3636,7 @@ function navItems({ catalog = false } = {}) {
       // beim Antippen zurueck auf die Uebersicht. Der gewoehnliche Zweig unten
       // filtert dieselbe Menge; das Dashboard bleibt immer, es ist die
       // Startseite und laesst sich nicht abschalten.
-    ].filter((item) => item.module === 'dashboard' || !_disabledModules.has(item.module));
+    ].filter((item) => item.module === 'dashboard' || !routerState._disabledModules.has(item.module));
   }
   /* DAS ZEICHEN STEHT NICHT HIER, SONDERN IN MODULE_ICON (nav-icons.js).
    *
@@ -3997,7 +3704,7 @@ function navItems({ catalog = false } = {}) {
   const sortable = [
     ...baseItems.filter((item) =>
       item.module !== 'settings'
-      && !_disabledModules.has(item.module)
+      && !routerState._disabledModules.has(item.module)
       && !_hiddenModules.has(item.module)
       && canAccessNavModule(item.module)),
     ...thirdPartyItems,
@@ -4141,7 +3848,7 @@ function sidebarNavItems() {
 }
 
 function isModuleDisabled(moduleName) {
-  return _disabledModules.has(moduleName);
+  return routerState._disabledModules.has(moduleName);
 }
 
 function applySidebarCollapsed(collapsed) {
@@ -4161,7 +3868,7 @@ function setHiddenModules(modules) {
 }
 
 function setDisabledModules(modules) {
-  _disabledModules = new Set(Array.isArray(modules) ? modules : []);
+  routerState._disabledModules = new Set(Array.isArray(modules) ? modules : []);
   /* Die Zaehlstaende haengen an der Modulliste, nicht nur an der Sitzung: die
    * Kuechenkachel fasst vier Module zusammen, und ob ihr Einkaufszaehler gilt,
    * entscheidet `navItems()`. Schaltet eine Adminin den Einkauf ab, waere die
@@ -4433,7 +4140,7 @@ function sidebarKitchenEl() {
   };
   const a = navItemEl(item);
   a.id = 'sidebar-kitchen-nav';
-  a.setAttribute('aria-label', kitchenNavAriaLabel(currentPath));
+  a.setAttribute('aria-label', kitchenNavAriaLabel(routerState.currentPath));
   a.setAttribute('title', t('nav.kitchen'));
   return a;
 }
@@ -4690,26 +4397,44 @@ window.addEventListener('error', (e) => {
 window.addEventListener('unhandledrejection', (e) => {
   // Auth-Fehler werden bereits von auth:expired behandelt
   if (e.reason?.status === 401) return;
+  // Ein Abruf, den sein Aufrufer selbst abgebrochen hat (`api.get(path,
+  // { signal })`), ist kein Fehler und bekommt weder Toast noch Konsolenzeile.
+  if (isAbortError(e.reason)) {
+    e.preventDefault();
+    return;
+  }
   console.error('[myCrib] Unbehandeltes Promise-Rejection:', e.reason);
   showToast(friendlyError(e.reason), 'danger');
   e.preventDefault(); // Konsolenfehler unterdrücken (bereits geloggt)
 });
 
-// SW-Update: neue Version im Hintergrund installiert → Toast anzeigen
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type === 'SW_UPDATED') {
-      // Ab hier keine Seitenmodule mehr nachladen. Früher wurde an dieser Stelle
-      // der Modul-Cache dieses Routers geleert, damit die nächste Navigation
-      // frische Module lädt - wirkungslos: geleert wurde nur die eigene Map,
-      // während die Modul-Map des Dokuments die alten Abhängigkeiten weiter
-      // auflöst. Genau daraus entstand der Mischzustand aus #616.
-      shellStale = true;
-      showToast(t('common.updateAvailable'), 'default', 8000);
-      setTimeout(() => location.reload(), 8000);
-    }
-  });
-}
+// SW-Update: EIN Weg (utils/app-update.js). sw-register.js meldet den Wechsel
+// von einem alten auf einen neuen Controller, hier wird die Shell als alt
+// markiert und neu geladen, sobald es niemanden unterbricht.
+//
+// Ab `onStale` keine Seitenmodule mehr nachladen. Früher wurde an dieser Stelle
+// der Modul-Cache dieses Routers geleert, damit die nächste Navigation frische
+// Module lädt - wirkungslos: geleert wurde nur die eigene Map, während die
+// Modul-Map des Dokuments die alten Abhängigkeiten weiter auflöst. Genau
+// daraus entstand der Mischzustand aus #616.
+//
+// Die Nachricht `SW_UPDATED` des Workers liest hier niemand mehr: sie kommt
+// auch beim Erstinstall, und ihr Hinweis kündigte 8 s lang einen Reload an,
+// den sw-register.js längst nach 200 ms gefahren hatte (Critique R18). Der
+// Worker schickt sie weiter, für Shells bis v2.75, die beim Update noch laufen.
+const updateFlow = createUpdateFlow({
+  document,
+  isBusy: () => isUserBusy({ document, hasLeaveGuard, hasOpenOverlay }),
+  reload: reloadOnce,
+  onStale: () => { shellStale = true; },
+  // Der Knopf lädt ohne Schleifenbremse: wer ihn drückt, hat entschieden.
+  notify: () => showToast(t('common.updateAvailable'), 'default', 8000, {
+    label: t('common.reload'),
+    onClick: () => location.reload(),
+  }),
+  delayMs: UPDATE_RELOAD_DELAY_MS,
+});
+onServiceWorkerUpdate(() => updateFlow.announce());
 
 // Browser zurück/vor
 //
@@ -4751,8 +4476,8 @@ window.addEventListener('popstate', (e) => {
  * die Praeferenzen nachlaedt. Ihn zu leeren gewaenne nichts und oeffnete ein
  * Fenster, in dem eine abgeschaltete Route wieder erreichbar waere. */
 function forgetSessionState() {
-  currentUser = null;
-  _preferencesLoaded = false;
+  routerState.currentUser = null;
+  routerState._preferencesLoaded = false;
   forgetZonePrefs();
   _hiddenModules = new Set();
   _moduleOrder = [];
@@ -4783,10 +4508,10 @@ function forgetSessionState() {
 // Session abgelaufen
 window.addEventListener('auth:expired', () => {
   forgetSessionState();
-  if (isNavigating) {
+  if (routerState.isNavigating) {
     // navigate('/login') kann nicht sofort aufgerufen werden - wird im finally-Block
     // der laufenden Navigation nachgeholt.
-    _pendingLoginRedirect = true;
+    routerState._pendingLoginRedirect = true;
   } else {
     navigate('/login');
   }
@@ -4873,8 +4598,8 @@ function rebuildNavigation({ updateLabels = true } = {}) {
     });
   });
 
-  updateNav(currentPath);
-  updateBranding(currentPath || '/');
+  updateNav(routerState.currentPath);
+  updateBranding(routerState.currentPath || '/');
   // Die Einstiege zum Änderungsverlauf sind gerade neu entstanden - ein noch
   // offener Hinweis muss ihnen folgen, sonst fällt er beim Sprachwechsel weg.
   applyUpdateBadge();
@@ -4890,8 +4615,8 @@ function rebuildNavigation({ updateLabels = true } = {}) {
 // Profil geaendert (Name, Farbe, Bild): die Kontozeile der Seitenleiste zieht
 // nach, ohne Neuaufbau der Shell. personal-account.js meldet den neuen Stand.
 window.addEventListener('yuvomi:profile-changed', (e) => {
-  if (currentUser && e.detail && typeof e.detail === 'object') {
-    currentUser = { ...currentUser, ...e.detail };
+  if (routerState.currentUser && e.detail && typeof e.detail === 'object') {
+    routerState.currentUser = { ...routerState.currentUser, ...e.detail };
   }
   syncSidebarAccount();
 });
@@ -4903,14 +4628,14 @@ window.addEventListener('locale-changed', () => {
 });
 
 window.addEventListener('app-name-changed', () => {
-  updateBranding(currentPath || '/');
+  updateBranding(routerState.currentPath || '/');
 });
 
 function refreshCurrentRoute() {
-  if (!currentPath) return;
+  if (!routerState.currentPath) return;
   setTimeout(() => {
-    if (!currentPath) return;
-    navigate(currentPath, false);
+    if (!routerState.currentPath) return;
+    navigate(routerState.currentPath, false);
   }, 0);
 }
 
@@ -5081,17 +4806,42 @@ if (/iPhone|iPad|iPod/.test(navigator.userAgent)) {
       refreshThemeColorForTheme();
     });
 
+    // GLEICHZEITIG MIT DEN SPRACHDATEIEN (Critique R18): `/version`, die
+    // Sitzungsfrage und das Seitenmodul haengen weder von der Sprache noch
+    // voneinander ab. Vorher lief alles nacheinander - am gedrosselten Telefon
+    // fuenf Rundreisen, rund 870 ms, bevor die Uebersicht ihre Daten anfragte.
+    // Die Sitzungsfrage nur fuer eine Adresse, die eine Sitzung verlangt: die
+    // Anmeldeseite hat nie `/auth/me` gefragt und tut es weiter nicht.
+    const version = api.get('/version');
+    // Der Abnehmer steht SOFORT: zwischen hier und dem Warten auf die Antwort
+    // weiter unten liegt das Warten auf die Sprachdateien. Scheitert `/version` in dieser Zeit, haette
+    // das Versprechen sonst keinen - der Browser meldet `unhandledrejection`,
+    // und der globale Behandler zeigt einen roten Toast fuer einen Abruf, den
+    // der catch unten ausdruecklich als unkritisch behandelt. Wer spaeter auf
+    // die Antwort wartet, sieht den Fehler trotzdem.
+    version.catch(() => {});
+    const startRoute = ROUTES.find((r) => r.path === location.pathname);
+    if (!startRoute || startRoute.requiresAuth) {
+      startHandoff.askSession();
+    }
+    // Nur ein Hinweis an den Browser (modulepreload): ausgefuehrt wird nichts,
+    // und nach einem angekuendigten Update unterlaesst prefetchRoute() ihn (#616).
+    prefetchRoute(location.pathname);
+
     await initI18n();
     initExtensionI18n();
     try {
-      const v = await api.get('/version');
-      _setupRequired = v?.setup_required === true;
+      const v = await version;
+      routerState._setupRequired = v?.setup_required === true;
       if (v?.version) setAppVersion(v.version);
       if (v?.app_name) setAppName(v.app_name);
+      startHandoff.holdVersion(v);
     } catch {
-      _setupRequired = false; // Fail-safe: kein Setup erzwingen
+      routerState._setupRequired = false; // Fail-safe: kein Setup erzwingen
     }
-    navigate(location.pathname, false);
+    // Was die erste Navigation nicht abgeholt hat, verfaellt mit ihr: eine
+    // spaetere Anmeldung faende sonst die Antwort einer frueheren Sitzung vor.
+    navigate(location.pathname, false).finally(() => startHandoff.expireStart());
   } catch (err) {
     console.error('[Router] Initialisierung fehlgeschlagen:', err);
     // renderError ersetzt den Inhalt von #app und nimmt den Ladebildschirm mit.
@@ -5124,6 +4874,9 @@ window.yuvomi = {
   // Die Uebersichtsseite reicht ihre `/dashboard`-Antwort herein, statt sie ein
   // zweites Mal holen zu lassen. Begruendung an `primeModuleCountsFrom`.
   primeModuleCountsFrom,
+  // Umgekehrt reicht der Router der Seite sein `/preferences` des Starts.
+  // Begruendung in utils/start-handoff.js.
+  takeStartPreferences: () => startHandoff.takePreferences(),
   // Fuer eine Seite, die sich SELBST neu aufbaut, ohne dass der Router
   // navigiert - die Uebersicht beim Betreten und Verlassen des Wand-Modus, nach
   // „erneut versuchen" oder einer Aenderung aus einer Kachel. renderPage()
@@ -5148,21 +4901,27 @@ window.yuvomi = {
     return fab;
   },
   applyTheme: (value) => {
-    if (value === 'dark') {
-      document.documentElement.setAttribute('data-theme', 'dark');
-    } else if (value === 'light') {
-      document.documentElement.setAttribute('data-theme', 'light');
-    } else {
-      document.documentElement.removeAttribute('data-theme');
-    }
-    // Der Modul-Akzent liegt als aufgelöste Farbe im Inline-Style von <html> und
-    // folgt der CSS-Kaskade daher NICHT. Ohne dieses Nachziehen behielte die
-    // ganze Shell (Buttons, Fokusringe, FAB, aktive Nav-Pille) den Akzent des
-    // vorherigen Themes. Begründung an applyModuleAccentForRoute.
-    applyModuleAccentForRoute(currentRoute());
-    // Die Statusbar im Standalone-Modus trägt dieselbe eingefrorene
-    // Momentaufnahme, siehe refreshThemeColorForTheme.
-    refreshThemeColorForTheme();
+    // DER GEWAEHLTE WECHSEL BLENDET (Critique R18): alles Sichtbare laeuft im
+    // Callback von swapTheme - als Blende ueber die Wurzel, wo der Browser sie
+    // kann, sonst synchron wie bisher. Der Nachtwechsel des Wandmodus ruft
+    // diese Funktion nie (utils/wall-mode.js) und bleibt ohne Blende.
+    swapTheme(() => {
+      if (value === 'dark') {
+        document.documentElement.setAttribute('data-theme', 'dark');
+      } else if (value === 'light') {
+        document.documentElement.setAttribute('data-theme', 'light');
+      } else {
+        document.documentElement.removeAttribute('data-theme');
+      }
+      // Der Modul-Akzent liegt als aufgelöste Farbe im Inline-Style von <html> und
+      // folgt der CSS-Kaskade daher NICHT. Ohne dieses Nachziehen behielte die
+      // ganze Shell (Buttons, Fokusringe, FAB, aktive Nav-Pille) den Akzent des
+      // vorherigen Themes. Begründung an applyModuleAccentForRoute.
+      applyModuleAccentForRoute(currentRoute());
+      // Die Statusbar im Standalone-Modus trägt dieselbe eingefrorene
+      // Momentaufnahme, siehe refreshThemeColorForTheme.
+      refreshThemeColorForTheme();
+    });
     // Persistenz zuletzt und fehlertolerant: ein werfendes localStorage (Safari
     // Privatmodus, Quota) darf das sichtbare Anwenden nicht abbrechen. Vorher
     // stand diese Zeile zuerst - warf sie, fiel der Aufrufer in den

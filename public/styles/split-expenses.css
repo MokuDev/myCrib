@@ -22,7 +22,7 @@
 
 .split-topbar,
 .split-panel-head,
-.split-card-head,
+.split-section-head,
 .split-group-header,
 .split-header-actions,
 .split-form-row {
@@ -37,7 +37,7 @@
 
 .split-title,
 .split-group-name,
-.split-card-title {
+.split-section-title {
   margin: 0;
   letter-spacing: var(--tracking-normal);
   color: var(--color-text-primary);
@@ -64,7 +64,7 @@
 .split-subtitle,
 .split-group-header p,
 .split-muted,
-.split-card-head span {
+.split-section-head span {
   margin: var(--space-1) 0 0;
   color: var(--color-text-secondary);
 }
@@ -85,7 +85,6 @@
  * (Begründung an .metric-card in budget.css). Diese Datei setzte auf
  * denselben Rollen --glass-bg-card und widersprach damit der Regel innerhalb
  * des eigenen Moduls. */
-.split-card,
 .split-groups-panel {
   background-color: var(--color-surface);
   border: 1px solid transparent;
@@ -116,6 +115,15 @@
   min-width: 0;
 }
 
+/* DIE EINE ZEILE DER GRUPPENWAHL (R16). Breit ausgeblendet: dort steht die
+ * Liste als eigene Spalte. Schmal (Regeln unten bei max-width: 639px) ist sie
+ * der Kopf des Panels und klappt die Liste auf. Sie traegt die Bauart der
+ * Gruppenzeile (.split-group), damit zu- und aufgeklappt dieselbe Zeile an
+ * derselben Stelle steht. */
+.split-group-switch {
+  display: none;
+}
+
 .split-panel-head {
   justify-content: space-between;
   flex-wrap: wrap;
@@ -128,6 +136,37 @@
  * Container, unten), bliebe ihr neben Titel und „+" nur ~80px - dort nimmt
  * sie die eigene Zeile darunter. */
 @container split-page (min-width: 976px) {
+  /* ZWEISPALTIG STEHT AUCH "GRUPPEN" AUF DER BUEHNE (R16 Schritt 2b): Titel,
+   * Suche und Aktiv/Archiviert sind der Kopf der Spalte, die Flaeche traegt
+   * nur noch die Gruppenzeilen - dieselbe Grammatik wie rechts daneben und in
+   * den anderen Reitern. Einspaltig bleibt das Panel die aufklappbare Zeile
+   * der Gruppenwahl (R16 1b) und damit selbst die Flaeche. */
+  .split-groups-panel {
+    padding: 0;
+    overflow: visible;
+    background-color: transparent;
+    box-shadow: none;
+  }
+
+  .split-groups-panel .split-panel-head {
+    min-height: var(--target-base);
+    padding: 0 0 var(--space-1);
+  }
+
+  .split-groups-panel .split-groups {
+    margin-inline: 0;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background-color: var(--color-surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .split-groups-panel .split-groups:has(> .empty-state),
+  .split-groups-panel .split-groups:empty {
+    background-color: transparent;
+    box-shadow: none;
+  }
+
   .split-panel-head.section-toolbar > label.split-search {
     order: 3;
     flex: 1 0 100%;
@@ -136,8 +175,13 @@
   }
 }
 
+/* GEWICHTE AUS DEN TOKENS (Critique 2026-10-05, R16). Hier standen 800, 800,
+ * 900, 700 und `600 !important` als Literale - fuenf Gewichte, von denen die
+ * Skala drei gar nicht kennt, und der Betrag einer geteilten Ausgabe stand
+ * fetter da als der Kontosaldo. Jetzt: Titel semibold, Zeilenname medium
+ * (Rolle Zeilentitel), Betrag semibold (die Betragsregel in budget.css). */
 .split-panel-title {
-  font-weight: 800;
+  font-weight: var(--font-weight-semibold);
 }
 
 /* Der Zaehler der Gruppenliste in der geteilten Zaehler-Tinte
@@ -249,7 +293,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-weight: 800;
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-primary);
 }
 
@@ -287,7 +331,7 @@
 .split-group-header {
   justify-content: space-between;
   padding: var(--space-4);
-  /* Arbeitsfläche, also opak - dieselbe Regel wie .split-card darüber. */
+  /* Arbeitsfläche, also opak - dieselbe Regel wie das Gruppen-Panel darüber. */
   background-color: var(--color-surface);
   border: 1px solid transparent;
   border-radius: var(--radius-lg);
@@ -323,33 +367,129 @@
   justify-content: flex-end;
 }
 
+/* DIE AUSGABEN TRAGEN DIE BREITE SPALTE (Critique R16, 2026-10-05). Bis hierhin
+ * standen Salden und Aktivitaetsprotokoll links in der breiten Spalte und die
+ * „Letzten Ausgaben" - das, wofuer man den Reiter oeffnet - rechts in der
+ * schmalen (305px bei 1280). Die Reihenfolge im Markup bleibt Salden, Ausgaben,
+ * Aktivitaet (einspaltig unveraendert); zweispaltig stehen die Ausgaben links
+ * ueber beide Zeilen, Salden und Aktivitaet rechts untereinander. */
 .split-content-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.9fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
   gap: var(--space-4);
+  align-items: start;
 }
 
-.split-card {
-  padding: var(--space-4);
+/* EIN ABSCHNITT = TITEL AUF DER BUEHNE + ZEILENTRAEGER (R16 Schritt 2b). Der
+ * Abschnitt selbst traegt keine Flaeche mehr (vorher `.split-card`: Flaeche,
+ * 16px Polster, Titel darin); die Zeilen liegen in einem `.row-carrier` und
+ * bringen ihr Polster selbst mit. */
+.split-section {
   min-width: 0;
 }
 
-.split-card:nth-child(2) {
-  grid-row: span 2;
+.split-content-grid > .split-section {
+  grid-column: 2;
 }
 
-.split-card-head {
+/* Die Ausgaben stehen links neben ALLEN Abschnitten der rechten Spalte - seit
+ * #1647 drei (Salden, Wiederkehrend, Verlauf). Reichte die Spanne nur ueber
+ * zwei, schoebe eine lange Ausgabenliste den Verlauf unter ihr Ende. */
+.split-content-grid > .split-section:nth-child(2) {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+}
+
+.split-section-head {
   justify-content: space-between;
-  margin-bottom: var(--space-3);
+  /* Ein volles Ziel hoch, wie der Listenkopf der Uebersicht - der Titel steht
+   * damit in jedem Reiter gleich weit ueber seiner Flaeche. */
+  min-height: var(--target-base);
+  margin-bottom: var(--space-1);
   /* Titel und Zusatz („vereinfachte Schulden") sind zwei eigenständige Zeilen,
    * sobald sie nebeneinander nicht mehr passen - ohne Umbruch schiebt der
    * Zusatz über den Kartenrand in die Nachbarkarte. */
   flex-wrap: wrap;
 }
 
-.split-card-head > * {
+.split-section-head > * {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.split-section-head > span {
+  margin-block-start: 0;
+}
+
+/* SALDEN: TITEL MIT ZUSATZ LINKS, DIE HANDLUNG RECHTS (Entscheidung R17, E5).
+ * "Ausgleichen" ist die Handlung an den Salden und steht in der Zeile des
+ * Titels; der Zusatz ("vereinfachte Schulden") steht darunter. */
+.split-section-head__lead {
+  /* DER ZUSATZ BEKOMMT SEINE EIGENE ZEILE UNTER TITEL UND KNOPF (R17). Als
+   * Spalte neben dem Knopf blieben ihm in der 300px-Spalte des Desktops rund
+   * 140px: „vereinfachte Schulden" brach auf zwei Zeilen und der Kopf stand
+   * 77 statt 44px hoch. Die Huelle loest sich auf (`contents`): Titel und
+   * Knopf teilen die erste Zeile, der Zusatz nimmt darunter die ganze Breite
+   * und bleibt einzeilig. Das DOM bleibt (die schmale Regel unten blendet den
+   * Zusatz weiter ueber diese Huelle aus). */
+  display: contents;
+}
+
+/* Zeile 2 (der Zusatz) haengt am Titel, nicht 12px darunter. */
+.split-section-head:has(> .split-section-head__lead) {
+  row-gap: 0;
+}
+
+.split-section-head__lead > .split-section-title {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.split-section-head__lead > span {
+  order: 1;
+  flex: 1 0 100%;
+  margin-block-start: 0;
+}
+
+.split-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+}
+
+/* EIN Werkzeugmenue, zwei Ausloeser: breit steht der im Gruppenkopf, schmal
+ * der in der Salden-Zeile (unten, Container-Regel). */
+.split-section-actions .split-group-tools {
+  display: none;
+}
+
+/* DIE SUMME UEBER ALLE GRUPPEN STEHT IN DER GRUPPENWAHL (Entscheidung R17,
+ * E5), ueber der Liste, die sie zusammenzaehlt - die Kurzzeile oben gehoert
+ * der gewaehlten Gruppe. Eine Zeile Sekundaertext, die Betraege im Gewicht der
+ * Zeilenbetraege. */
+.split-groups-total {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-0h) var(--space-3);
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: var(--text-sm);
+}
+
+.split-groups-total[hidden] {
+  display: none;
+}
+
+.split-groups-total__label {
+  flex-basis: 100%;
+  font-weight: var(--font-weight-medium);
+}
+
+.split-groups-total strong {
+  color: var(--color-text-primary);
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 
 .split-debt,
@@ -358,7 +498,9 @@
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) 0;
+  /* Das Zeilenpolster des Traegers (`.list-row`: --space-3 inline) - die
+   * Flaeche um die Zeile ist weg, also bringt die Zeile ihren Rand mit. */
+  padding: var(--space-3);
   border-top: 1px solid var(--color-border-subtle);
 }
 
@@ -375,7 +517,8 @@
 .split-debt strong,
 .split-expense__amount {
   flex: 0 0 auto;
-  font-weight: 900;
+  font-weight: var(--font-weight-semibold);
+  font-variant-numeric: tabular-nums;
   color: var(--color-text-primary);
 }
 
@@ -404,7 +547,8 @@ button.split-expense:hover {
 /* Storno einer Zahlung (#1309). Die Textspalte nimmt den Platz, der Knopf
  * bleibt so breit wie sein Wort. „Storniert" ist ein Zeichen, kein Knopf: es
  * steht bei jedem Recht, in der Form der Archiv-Marke, und die Zahlungszeile
- * darueber ist durchgestrichen - der Betrag zaehlt nicht mehr. */
+ * darueber ist durchgestrichen - der Betrag zaehlt nicht mehr. Eine geloeschte
+ * Ausgabe (#1382) traegt dieselben Klassen: Zeile und Zeichen sehen gleich aus. */
 .split-activity-item > div {
   flex: 1 1 auto;
 }
@@ -417,7 +561,8 @@ button.split-expense:hover {
   text-decoration: line-through;
 }
 
-.split-activity-item span.split-activity-reversed {
+.split-activity-item span.split-activity-reversed,
+.split-expense__body span.split-recurring__state {
   align-self: flex-start;
   padding: var(--space-0h) var(--space-2);
   border-radius: var(--radius-full);
@@ -432,9 +577,144 @@ button.split-expense:hover {
   outline: none;
 }
 
-.split-activity-more {
+.split-activity-more,
+.split-recurring-add {
   display: flex;
   margin: var(--space-2) auto 0;
+}
+
+/* Der Knopf endet an der Spaltenkante. Ein `.btn` bricht nicht um und kuerzt
+ * nicht; "Wiederkehrende Ausgabe hinzufuegen" war damit 306px in der
+ * 300px-Spalte (Critique R17). Mit dem engeren Seitenpolster passt der
+ * deutsche Text in eine Zeile (298px); eine laengere Sprache bricht um, wie
+ * die Antworten der Fortsetzen-Frage weiter unten, statt ueberzustehen. */
+.split-recurring-add {
+  max-width: 100%;
+  padding-inline: var(--space-3);
+  white-space: normal;
+  text-align: center;
+}
+
+/* Wiederkehrende Ausgaben (#1647). Die Zeile ist die Ausgabenzeile, daneben
+ * steht - nur wo gehandelt werden darf - der Umschalter Pausieren/Fortsetzen.
+ * Zwei Knoepfe nebeneinander statt eines im anderen: die Trennlinie und der
+ * rechte Rand wandern deshalb von der Zeile an ihren Rahmen. "Pausiert" ist ein
+ * Zeichen in der Form von "Storniert" und steht bei jedem Recht; der Grund,
+ * warum eine Serie nicht bucht, ist eine Warnung und kein Fehler der Eingabe.
+ *
+ * DREI ZEILEN STATT DREI SPALTEN (Critique R17). Der Abschnitt steht in der
+ * rechten Spalte des Gruppenrasters (`minmax(300px, 1fr)`), und nebeneinander
+ * blieben der Textspalte dort 68px: Titel "Mietan...", "Naechster Termin:
+ * 01.11.2026" dreizeilig, die Zeile 134px hoch und pausiert 98px. Jetzt:
+ *
+ *   Titel                        volle Breite, bricht um statt zu kappen
+ *   Betrag  Rhythmus             der Betrag fuehrt, der Rhythmus liest sich an
+ *   Termin ODER "Pausiert"       eine Zeile, in beiden Zustaenden gleich hoch
+ *   (Grund)                      nur wenn die Serie nicht bucht
+ *
+ * Das Markup bleibt die Ausgabenzeile (Marke, Textblock, Betrag): der
+ * Textblock loest sich per `display: contents` auf, und das Raster des Knopfes
+ * setzt seine Kinder. Der Umschalter ist die geteilte Zeilenaktion
+ * (`.row-action`, layout.css) und steht mittig daneben. */
+.split-recurring-row {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+.split-recurring-row:first-child {
+  border-top: 0;
+}
+
+.split-recurring-row > button.split-expense {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border-top: 0;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: baseline;
+  /* Kein `column-gap`: die Marken-Spalte ist schmal leer, und eine Luecke
+   * hinter einer leeren Spalte ruekte den Text um 8px von der Zeilenkante
+   * der Nachbarlisten weg. Die Abstaende tragen Marke und Betrag selbst. */
+  gap: var(--space-0h) 0;
+}
+
+/* Neben dem Umschalter endet das Polster am Knopf, nicht an der Traegerkante. */
+.split-recurring-row > button.split-expense:not(:last-child) {
+  padding-inline-end: var(--space-1);
+}
+
+.split-recurring-row .split-expense__icon {
+  grid-column: 1;
+  grid-row: 1 / span 4;
+  align-self: center;
+  margin-inline-end: var(--space-3);
+}
+
+.split-recurring-row .split-expense__body {
+  display: contents;
+}
+
+/* Der Titel bricht um, statt zu kappen: er ist der Name, an dem man die Serie
+ * wiedererkennt, und er hat hier die ganze Zeile. */
+.split-recurring-row .split-expense__body strong {
+  grid-column: 2 / -1;
+  grid-row: 1;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}
+
+.split-recurring-row .split-expense__amount {
+  grid-column: 2;
+  grid-row: 2;
+  margin-inline-end: var(--space-2);
+}
+
+/* Rhythmus: der erste `span` des Textblocks. */
+.split-recurring-row .split-expense__body strong + span {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+/* Termin oder Zustand: der `span` dahinter. Beide tragen dasselbe
+ * Blockpolster wie die "Pausiert"-Marke, damit die Zeile beim Pausieren und
+ * Fortsetzen ihre Hoehe haelt (vorher 134px gegen 98px). */
+.split-recurring-row .split-expense__body strong + span + span {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  justify-self: start;
+  padding-block: var(--space-0h);
+}
+
+.split-recurring-row .split-expense__body span.split-recurring__reason {
+  grid-column: 2 / -1;
+  grid-row: 4;
+}
+
+.split-recurring-toggle {
+  margin-inline-end: var(--space-1);
+}
+
+/* Die Kategorie-Marke braucht 54px. In der schmalen Spalte gehoeren die dem
+ * Termin, der sonst wieder umbricht; ab 400px Traegerbreite steht sie. */
+@container list-rows (max-width: 399px) {
+  .split-recurring-row .split-expense__icon {
+    display: none;
+  }
+}
+
+/* Die Frage beim Fortsetzen (#1647): zwei Antworten, jede mit ihrem Datum im
+ * Text. Ein Knopf kuerzt sonst nicht und bricht nicht um - hier muss die ganze
+ * Antwort lesbar sein, auch bei 375px, also bricht sie um. */
+.split-resume-choices .btn {
+  white-space: normal;
+  text-align: center;
+}
+
+.split-expense__body span.split-recurring__reason {
+  color: var(--color-warning);
 }
 
 .split-activity-dot {
@@ -451,18 +731,30 @@ button.split-expense:hover {
   gap: var(--space-3);
 }
 
-.split-form label,
+/* Die Felder tragen seit R17 (E6) den Kanon-Feldsatz (`.form-field` >
+ * `.form-label` + `.form-input`, layout.css): Label 14px sekundaer statt
+ * 16px primaer, Pflicht-Stern, Betrag als `.budget-amount-input`. Diese Regel
+ * gilt nur noch den Haken-Zeilen und den Gruppen. */
+.split-form .split-check,
 .split-participants,
 .split-defaults {
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  font-weight: 700;
+  font-weight: var(--font-weight-medium);
   color: var(--color-text-primary);
 }
 
 .split-form-row > label {
   flex: 1 1 0;
+  min-width: 0;
+}
+
+/* Der Betrag ist 48px hoch (`.budget-amount-input`); sein Nachbar in der
+ * Zeile (Bezahlt von, Waehrung) haelt dieselbe Hoehe, sonst stehen am Zeiger
+ * 48 neben 40px und die Labels auf zwei Linien. */
+.split-form-row:has(.budget-amount-input) .form-input {
+  min-height: var(--target-lg);
 }
 
 /* Abbrechen und Speichern bleiben ein Paar, wenn der Dialogfuss umbricht
@@ -484,10 +776,12 @@ button.split-expense:hover {
   background: var(--color-fill-well);
 }
 
-.split-check {
-  flex-direction: row !important;
+/* Zwei Klassen statt `!important`: (0,2,0) schlaegt `.split-form label`
+ * (0,1,1) auch ohne den Hammer. */
+.split-form .split-check {
+  flex-direction: row;
   align-items: center;
-  font-weight: 600 !important;
+  font-weight: var(--font-weight-medium);
 }
 
 .split-participant-row {
@@ -563,6 +857,140 @@ button.split-expense:hover {
     flex-direction: column;
   }
 
+  /* VERWALTUNG VOR INHALT (R16, Critique 2026-10-05 P1 mobil). Gemessen bei
+     390x844: Gruppen-Panel 284px, Gruppenkopf 197px, Salden 145px - die erste
+     Ausgabe stand bei y=975, unter dem Falz. Jetzt:
+     - die Gruppenwahl ist EINE Zeile (aktive Gruppe, Aufklapp-Pfeil); Suche,
+       „+", Aktiv/Archiviert und die Liste klappen darunter auf;
+     - der Gruppenkopf wiederholt Namen und Typ nicht (sie stehen in der Zeile
+       darueber) und ist nur noch die Aktionszeile; Name, Typ und Beschreibung
+       bleiben im Baum, Archiv-Marke und die Angaben bei `budget: read`
+       bleiben sichtbar;
+     - Salden und Karten ruecken zusammen. */
+  .split-layout,
+  .split-main {
+    gap: var(--space-3);
+  }
+
+  .split-groups-panel {
+    padding-block: 0;
+  }
+
+  .split-group-switch {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: calc(100% + 2 * var(--space-3));
+    min-height: 64px;
+    margin-inline: calc(var(--space-3) * -1);
+    padding: var(--space-2) var(--space-3);
+    border: none;
+    background: transparent;
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+  }
+
+  .split-group-switch__chevron {
+    flex-shrink: 0;
+    margin-inline-start: auto;
+    color: var(--color-text-secondary);
+    transition: rotate var(--duration-sm) var(--ease-out);
+  }
+
+  .split-groups-panel--open .split-group-switch__chevron {
+    rotate: 180deg;
+  }
+
+  .split-groups-panel:not(.split-groups-panel--open) > .split-groups-body {
+    display: none;
+  }
+
+  .split-groups-panel--open > .split-groups-body {
+    padding-block: var(--space-2) 0;
+    border-block-start: 1px solid var(--color-border-subtle);
+  }
+
+  .split-group-header {
+    padding: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    gap: var(--space-2);
+  }
+
+  .split-group-header .split-group-name,
+  .split-group-header .split-group-type,
+  .split-group-header .split-group-desc {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .split-group-header__text:not(:has(.split-archived-badge, .split-group-meta)) {
+    display: contents;
+  }
+
+  .split-header-actions .btn.split-group-tools {
+    flex: 0 0 auto;
+  }
+
+  /* DER GRUPPENKOPF TRITT GANZ ZURUECK, WENN ER NUR NOCH DAS WERKZEUG TRUEGE
+     (Entscheidung R17, E5). "Ausgleichen" steht in der Salden-Zeile, Name und
+     Typ in der Gruppenwahl darueber: die Zeile kostete 60px vor der ersten
+     Ausgabe fuer einen Drei-Punkte-Knopf. Der Kopf bleibt im Baum (Name, Typ
+     und Beschreibung fuer die Gliederung), sein Ausloeser weicht dem zweiten
+     in der Salden-Zeile. Mit Archiv-Marke, Wiederherstellen oder den Angaben
+     bei `budget: read` traegt er die Klasse nicht und bleibt stehen. */
+  .split-group-header--tools-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  .split-group-header--tools-only .split-header-actions {
+    display: none;
+  }
+
+  .split-section-actions .split-group-tools {
+    display: inline-flex;
+  }
+
+  /* Neben "Ausgleichen" und dem Werkzeug bleiben der Titelspalte bei 390px
+     155px: der Zusatz ("vereinfachte Schulden") braeche dort auf zwei Zeilen
+     und naehme der ersten Ausgabe die 29px wieder, die der Umzug bringt. Er
+     weicht schmal aus dem Bild und bleibt im Baum (geclippt, nie
+     `display: none`) - ohne Knoepfe daneben (Archiv, Nur-lesen) steht er. */
+  .split-section-head:has(> .split-section-actions) > .split-section-head__lead > span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .split-content-grid {
+    gap: var(--space-2);
+  }
+
+  /* Der Abschnittskopf traegt mobil kein Werkzeug, also kein volles Ziel. */
+  .split-section-head {
+    min-height: var(--target-md);
+  }
+
+  /* Salden kompakt: die Zeile traegt einen Satz und eine Zahl, kein Icon -
+     sie braucht nicht das Polster der Ausgabenzeile mit ihrer 42px-Marke. */
+  .split-debt {
+    padding-block: var(--space-2);
+  }
+
+
   .split-header-actions {
     justify-content: stretch;
   }
@@ -579,7 +1007,9 @@ button.split-expense:hover {
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .split-card:nth-child(2) {
+  .split-content-grid > .split-section,
+  .split-content-grid > .split-section:nth-child(2) {
+    grid-column: auto;
     grid-row: auto;
   }
 }

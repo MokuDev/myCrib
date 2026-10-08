@@ -794,6 +794,48 @@ test('eventWhenText: mehrtägiges Zeit-Event nennt Enddatum und Enduhrzeit', () 
   assert(whenRange(text).to === '2026-09-12 2026-09-12T11:00', `Enddatum steht vor der Uhrzeit: ${text}`);
 });
 
+// R18: der Kopf der Leseansicht nennt die Zeit in Worten. Relativ wird nur der
+// EINTAEGIGE Termin; eine Spanne behaelt die Fassung von eventWhenText.
+// (`test()` dieser Datei wartet nicht - die Importe stehen deshalb davor.)
+const { dayHeading, dayHeadingLabel } = await import('/utils/day-label.js');
+const { todayKey: headToday } = await import('/utils/timezone.js');
+const { addLocalDays: headAddDays } = await import('/utils/date.js');
+test('eventWhenRelative: der eintägige Termin nennt den Tag in Worten, die Spanne bleibt absolut', () => {
+  const { eventWhenRelative, eventDetailHead, agendaDayHeadHtml } = calendarHelpers;
+  const addLocalDays = headAddDays;
+  const today = headToday();
+  const tomorrow = addLocalDays(today, 1);
+  const far = addLocalDays(today, 16);
+  assert(dayHeadingLabel(today) === 'common.today', `heute: ${dayHeadingLabel(today)}`);
+  assert(dayHeadingLabel(tomorrow) === 'common.tomorrow', `morgen: ${dayHeadingLabel(tomorrow)}`);
+  assert(dayHeadingLabel(addLocalDays(today, -1)) === 'common.yesterday', 'gestern');
+  assert(!/common\./.test(dayHeadingLabel(far)) && dayHeadingLabel(far) === dayHeading(far).full, `sonst Wochentag mit Datum: ${dayHeadingLabel(far)}`);
+  assert(dayHeading(today).full && dayHeading(today).full !== 'common.today', 'auch heute kennt seinen Wochentag mit Datum');
+
+  const timed = eventWhenRelative({ start_datetime: `${today}T20:00`, end_datetime: `${today}T22:00`, all_day: 0 });
+  assert(timed.startsWith('common.today, calendar.dayRangeLabel'), `"Heute, 20:00 - 22:00": ${timed}`);
+  assert(whenRange(timed).from === `${today}T20:00` && whenRange(timed).to === `${today}T22:00`, timed);
+  assert(!timed.startsWith(today), 'kein Tagesschluessel vorn - der Tag steht in Worten');
+  const allDay = eventWhenRelative({ start_datetime: tomorrow, end_datetime: tomorrow, all_day: 1 });
+  assert(allDay === 'common.tomorrow · calendar.allDay', `ganztaegig: ${allDay}`);
+  const span = { start_datetime: `${today}T14:00`, end_datetime: `${addLocalDays(today, 2)}T11:00`, all_day: 0 };
+  assert(eventWhenRelative(span) === eventWhenText(span), 'ueber mehrere Tage bleibt die absolute Spanne');
+
+  // Der Kopf: Farbpunkt, Zeit, Personen - und "Wann" fuer Screenreader.
+  const head = eventDetailHead({ start_datetime: `${today}T20:00`, end_datetime: `${today}T22:00`, all_day: 0, color: '#00668F', assigned_users: [{ display_name: 'Emma' }] });
+  assert(head.subtitle === timed && head.subtitleLabel === 'calendar.detailWhen', JSON.stringify(head));
+  assert(typeof head.dot === 'string' && head.dot.length > 0, 'der Punkt traegt die Kalenderfarbe');
+  assert(head.people.length === 1 && head.peopleLabel === 'calendar.assignedLabel', 'Personen als Avatare');
+
+  // Agenda: das relative Wort fuehrt, dahinter Wochentag und Datum.
+  const heute = agendaDayHeadHtml(today);
+  assert(/<span class="agenda-day__date">common\.today<\/span>\s*<span class="agenda-day__weekday">[^<]+<\/span>/.test(heute), `"Heute - Donnerstag, 8. Oktober": ${heute}`);
+  assert(heute.includes(dayHeading(today).full), 'der volle Tag steht dahinter');
+  const spaeter = agendaDayHeadHtml(far);
+  assert(spaeter === `<span class="agenda-day__date">${dayHeading(far).full}</span>`, `ohne relatives Wort nur der volle Tag: ${spaeter}`);
+  assert(!/\d{4}-\d{2}-\d{2}|\d{2}\.\d{2}\.\d{4}/.test(spaeter), 'kein Zahlendatum mehr im Tageskopf');
+});
+
 test('eventWhenText: Zeit-Event bis 00:00 des Folgetags bleibt eintägig', () => {
   const text = eventWhenText({ start_datetime: '2026-09-10T21:00', end_datetime: '2026-09-11T00:00', all_day: 0 });
   assert(whenRange(text).to === '2026-09-11T00:00', `21:00-24:00 gehört dem Abend (#804): ${text}`);
@@ -2146,6 +2188,37 @@ test('Telefon-Monat: „+" legt fuer den gewaehlten Tag an, der Reset fuehrt zu 
   }
 });
 
+// PR #1673 Review: die Tagesansicht laedt seit R16 die Folgetage fuer die
+// Seitenspalte mit. syncTodayButton() las diese LADESPANNE als angezeigten
+// Zeitraum - stand der Cursor bis zu sieben Tage vor heute, galt die Ansicht
+// als aktuell und der Reset war weg; am Telefon (ohne Spalte) ohne Rueckweg.
+// Gegen den Stand davor rot gelaufen.
+test('Tagesansicht: der Reset ist nur am heutigen TAG aktuell, nicht in der Ladespanne der Seitenspalte', () => {
+  const { state, syncTodayButton, getRangeForView } = calendarHelpers;
+  const zuvor = { view: state.view, cursor: state.cursor, today: state.today };
+  const btn = fakeResetButton();
+  const root = { querySelector: (sel) => (sel === '#cal-today' ? btn : null), contains: () => false };
+  try {
+    Object.assign(state, { view: 'day', today: '2026-10-05', cursor: '2026-10-02' });
+    const { from, to } = getRangeForView('day', state.cursor);
+    assert(state.today >= from && state.today <= to, 'Vorbedingung: heute liegt in der Ladespanne des Tages');
+    syncTodayButton(root);
+    assert(btn.classList.contains('is-current') === false, 'drei Tage vor heute muss „Heute" erreichbar sein');
+    assert(btn.inert === false, 'drei Tage vor heute darf der Reset nicht inert sein');
+
+    state.cursor = '2026-10-05';
+    syncTodayButton(root);
+    assert(btn.classList.contains('is-current') === true, 'am heutigen Tag traegt der Reset .is-current');
+    assert(btn.inert === true, 'am heutigen Tag ist der Reset inert');
+
+    state.cursor = '2026-10-06';
+    syncTodayButton(root);
+    assert(btn.classList.contains('is-current') === false, 'einen Tag nach heute muss „Heute" erreichbar sein');
+  } finally {
+    Object.assign(state, zuvor);
+  }
+});
+
 // Schichtplan-Bloecke im Zeitraster: Ueberlappungs-Layout (#1043)
 //
 // Vorher bekam JEDER Schichtplan-Block dieselben festen Aussenraender
@@ -2358,6 +2431,58 @@ test('renderDayView: zwei ueberlappende Schichten am selben Tag bekommen untersc
       `renderDayView() muss das berechnete Layout an renderScheduleTimeBlock() weiterreichen, sonst liegen `
       + `beide Bloecke deckungsgleich uebereinander (#1043): ${lefts}`);
   });
+});
+
+// --------------------------------------------------------
+// Tagesansicht am Desktop: die Folgetage als Seitenspalte (Critique R16,
+// 2026-10-05). Der Tag war eine einzelne 932px breite Spalte; ab der
+// Split-Schwelle stehen rechts die naechsten sieben Tage als Agenda-Zeilen.
+// --------------------------------------------------------
+
+test('Tagesansicht: laedt die sieben Folgetage mit, die die Seitenspalte zeigt', () => {
+  const { from, to } = calendarHelpers.getRangeForView('day', '2026-03-28');
+  assert(from === '2026-03-28', `der Tag selbst bleibt der Anfang: ${from}`);
+  assert(to === '2026-04-04', `sieben Folgetage, auch ueber die Monatsgrenze: ${to}`);
+});
+
+test('renderDayView: die Seitenspalte zeigt Folgetage mit Eintrag als Agenda-Zeilen, nie den Tag selbst', () => {
+  const schicht = (tag, name) => ({ ...scheduleEntry({ start: '08:00', end: '12:00', name }), date_key: tag });
+  withOverlappingScheduleState({
+    scheduleEntries: [schicht('2026-09-07', 'Heute'), schicht('2026-09-09', 'Uebermorgen'), schicht('2026-09-15', 'Zu weit')],
+  }, () => {
+    const container = fakeContainer();
+    calendarHelpers.renderDayView(container);
+    const [grid, rail] = container.html.split('<aside class="day-rail"');
+    assert(rail, 'die Tagesansicht traegt eine Seitenspalte (.day-rail)');
+    assert(/<div class="day-layout">\s*<div class="day-view">/.test(grid), 'Raster und Spalte stehen in EINER Huelle (.day-layout)');
+    assert(/class="section-title-link day-rail__more"/.test(rail), 'der Titel ist der Weg in die Agenda');
+    assert((rail.match(/class="agenda-day"/g) || []).length === 1, 'nur Tage mit Eintrag bekommen einen Kopf');
+    assert(rail.includes('Uebermorgen'), 'ein Eintrag in zwei Tagen steht in der Spalte');
+    assert(!rail.includes('Heute'), 'der gezeigte Tag steht im Raster, nicht noch einmal daneben');
+    assert(!rail.includes('Zu weit'), 'nach sieben Tagen ist Schluss');
+  });
+  withOverlappingScheduleState({ scheduleEntries: [] }, () => {
+    const container = fakeContainer();
+    calendarHelpers.renderDayView(container);
+    const rail = container.html.split('<aside class="day-rail"')[1] ?? '';
+    assert(/agenda-day__empty/.test(rail), 'eine leere Spanne sagt, dass sie leer ist');
+    assert(!/class="agenda-day"/.test(rail));
+  });
+});
+
+test('Tagesansicht: die Seitenspalte gibt es erst ab der Split-Schwelle der Modulflaeche', () => {
+  const rules = [...eachRule(calendarCss)];
+  const base = rules.find((r) => r.selector.trim() === '.day-rail' && !r.at.length);
+  assert(/display:\s*none/.test(base?.body ?? ''), 'unter der Schwelle (mobil) ist die Spalte ausgeblendet');
+  const wide = (r) => r.at.some((a) => /@container module-surface \(min-width:\s*65rem\)/.test(a));
+  const shown = rules.find((r) => r.selector.trim() === '.day-rail' && wide(r));
+  assert(/display:\s*block/.test(shown?.body ?? ''), 'ab 65rem Modulflaeche steht sie');
+  const layout = rules.find((r) => r.selector.trim() === '.day-layout' && wide(r));
+  assert(/grid-template-columns:\s*minmax\(0,\s*1fr\)\s*var\(--layout-rail-min\)/.test(layout?.body ?? ''),
+    'Stundenraster flexibel, Spalte auf --layout-rail-min');
+  const src = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8');
+  assert(/classList\.toggle\('app-page--columns', state\.view === 'day'\)/.test(src),
+    'nur die Tagesansicht macht die Seitenwurzel zum Container der Spalte');
 });
 
 // --------------------------------------------------------
@@ -2700,6 +2825,141 @@ test('layoutOverlaps: am Starttag reicht der Nacht-Termin bis Mitternacht und te
     + `${JSON.stringify([layout.get(nacht), layout.get(anruf)])}`);
   assert(layout.get(nacht).colIndex !== layout.get(anruf).colIndex,
     'zwei ueberlappende Bloecke duerfen nicht deckungsgleich uebereinander liegen');
+});
+
+// --------------------------------------------------------
+// #1633: Ueberlappende Termine stehen nach PERSON nebeneinander, nicht nach
+// Ankunft. Die Regel selbst misst test-overlap-lanes.js an der reinen Funktion;
+// hier steht die VERDRAHTUNG: dass der Rang der Index in `state.users` ist (und
+// kein Namensvergleich), dass die Personen aus `assigned_users` kommen, dass
+// Tag und Woche dieselbe Platzierung zeigen und dass Schichtplan-Bloecke bei
+// der Packung nach Zeit bleiben.
+// --------------------------------------------------------
+
+// Die IDs laufen gegen die Listenreihenfolge, die Namen gegen beide.
+const LANE_USERS = [
+  { id: 30, display_name: 'Zora' },
+  { id: 20, display_name: 'Mika' },
+  { id: 10, display_name: 'Adam' },
+];
+
+function laneEvent(id, day, start, end, userIds = [], extra = {}) {
+  return {
+    id, title: `Termin ${id}`, all_day: 0,
+    assigned_users: userIds.map((userId) => ({ id: userId })),
+    start_datetime: `${day}T${start}`, end_datetime: `${day}T${end}`,
+    ...extra,
+  };
+}
+
+function withLaneUsers(users, fn) {
+  const previous = calendarHelpers.state.users;
+  try {
+    calendarHelpers.state.users = users;
+    return fn();
+  } finally {
+    calendarHelpers.state.users = previous;
+  }
+}
+
+function laneEqual(actual, expected, message = '') {
+  assert(JSON.stringify(actual) === JSON.stringify(expected),
+    `${message} - erwartet ${JSON.stringify(expected)}, bekommen ${JSON.stringify(actual)}`);
+}
+
+function laneSpots(layout, events) {
+  return events.map((ev) => {
+    const entry = layout.get(ev);
+    return entry ? `${entry.colIndex}/${entry.totalCols}` : 'fehlt';
+  });
+}
+
+test('layoutOverlaps: der Rang ist die Position in state.users, nicht ID und nicht Name (#1633)', () => {
+  const zora = laneEvent(1, '2026-06-15', '09:00', '10:00', [30]);
+  const mika = laneEvent(2, '2026-06-15', '09:00', '10:00', [20]);
+  const adam = laneEvent(3, '2026-06-15', '09:00', '10:00', [10]);
+  const ohne = laneEvent(4, '2026-06-15', '09:00', '10:00', []);
+  const geladen = [ohne, adam, mika, zora];
+
+  withLaneUsers(LANE_USERS, () => {
+    laneEqual(laneSpots(calendarHelpers.layoutOverlaps(geladen, '2026-06-15'), [zora, mika, adam, ohne]),
+      ['0/4', '1/4', '2/4', '3/4'],
+      'Zora steht in der Mitgliederliste vorn und deshalb links - nach ID oder Name staende sie hinten');
+  });
+  // Dieselben Termine, die Liste umgedreht: die Positionen drehen sich mit.
+  withLaneUsers([...LANE_USERS].reverse(), () => {
+    laneEqual(laneSpots(calendarHelpers.layoutOverlaps(geladen, '2026-06-15'), [zora, mika, adam, ohne]),
+      ['2/4', '1/4', '0/4', '3/4'],
+      'der Rang wird aus state.users GELESEN: wer die Liste anders reiht, reiht die Spalten');
+  });
+});
+
+test('layoutOverlaps: mehrere Zugewiesene zaehlen als die erste in der Mitgliederliste - nicht assigned_to, nicht assigned_users[0] (#1633)', () => {
+  // Adam (10) steht im Termin vorn UND ist die primaere Zuweisung; Zora (30)
+  // steht in der Mitgliederliste vor ihm und bestimmt den Platz.
+  const beide = laneEvent(1, '2026-06-15', '09:00', '10:00', [10, 30], { assigned_to: 10 });
+  const mika = laneEvent(2, '2026-06-15', '09:00', '10:00', [20]);
+  withLaneUsers(LANE_USERS, () => {
+    laneEqual(laneSpots(calendarHelpers.layoutOverlaps([mika, beide], '2026-06-15'), [beide, mika]),
+      ['0/2', '1/2']);
+  });
+});
+
+test('renderDayView/renderWeekView: dieselben Personen stehen an zwei Tagen an derselben Position, in beiden Ansichten (#1633)', () => {
+  // Montag beginnt Zora zuerst, Dienstag Mika. Der Termin ohne Person beginnt
+  // an beiden Tagen als Erster.
+  const events = [
+    laneEvent(11, '2026-06-15', '08:00', '10:00', []),
+    laneEvent(12, '2026-06-15', '09:00', '10:00', [30]),
+    laneEvent(13, '2026-06-15', '09:30', '10:30', [20]),
+    laneEvent(21, '2026-06-16', '08:00', '10:00', []),
+    laneEvent(22, '2026-06-16', '09:00', '10:00', [20]),
+    laneEvent(23, '2026-06-16', '09:30', '10:30', [30]),
+    // Ueberlappt nichts: volle Breite, an jedem Tag.
+    laneEvent(31, '2026-06-15', '14:00', '15:00', [10]),
+  ];
+  const blocks = (html) => Object.fromEntries(
+    [...html.matchAll(TIMED_BLOCK_RE)].map((m) => [Number(m[2]), `${m[5]} | ${m[6]}`]));
+  const third = (index, inset, total) => `calc(${(index / 3) * 100}% + ${inset}px) | calc(${100 / 3}% - ${total}px)`;
+
+  withOvernightState({ users: LANE_USERS, events, cursor: '2026-06-15' }, () => {
+    const week = fakeContainer();
+    calendarHelpers.renderWeekView(week);
+    const montag = blocks(weekColumnHtml(week.html, '2026-06-15'));
+    const dienstag = blocks(weekColumnHtml(week.html, '2026-06-16'));
+    laneEqual(montag, {
+      12: third(0, 2, 4), 13: third(1, 2, 4), 11: third(2, 2, 4), 31: 'calc(0% + 2px) | calc(100% - 4px)',
+    }, 'Woche, Montag: Zora, Mika, ohne Person');
+    laneEqual(dienstag, {
+      23: third(0, 2, 4), 22: third(1, 2, 4), 21: third(2, 2, 4),
+    }, 'Woche, Dienstag: Zora bleibt links, obwohl Mika zuerst beginnt');
+
+    const day = fakeContainer();
+    calendarHelpers.renderDayView(day);
+    laneEqual(blocks(day.html), {
+      12: third(0, 4, 14), 13: third(1, 4, 14), 11: third(2, 4, 14), 31: 'calc(0% + 4px) | calc(100% - 14px)',
+    }, 'Tag, Montag: dieselben Spalten wie in der Woche');
+  });
+  withOvernightState({ users: LANE_USERS, events, cursor: '2026-06-16' }, () => {
+    const day = fakeContainer();
+    calendarHelpers.renderDayView(day);
+    laneEqual(blocks(day.html), {
+      23: third(0, 4, 14), 22: third(1, 4, 14), 21: third(2, 4, 14),
+    }, 'Tag, Dienstag: dieselben Spalten wie in der Woche');
+  });
+});
+
+test('layoutScheduleBlocks: Schichtplan-Bloecke bleiben nach Zeit gepackt, die Person spielt keine Rolle (#1633)', () => {
+  // Die Kette aus dem Issue, je Block eine andere Person, in der Reihenfolge
+  // GEGEN die Mitgliederliste: nach Person gepackt waere sie drei breit und
+  // gespiegelt.
+  const a = { ...scheduleEntry({ start: '09:00', end: '10:00' }), user_id: 10 };
+  const b = { ...scheduleEntry({ start: '09:30', end: '11:00' }), user_id: 20 };
+  const c = { ...scheduleEntry({ start: '10:30', end: '12:00' }), user_id: 30 };
+  withLaneUsers(LANE_USERS, () => {
+    laneEqual(laneSpots(calendarHelpers.layoutScheduleBlocks([c, b, a]), [a, b, c]),
+      ['0/2', '1/2', '0/2']);
+  });
 });
 
 // --------------------------------------------------------
@@ -3489,6 +3749,93 @@ test('Zeitraum-Wisch: ein zweiter Finger mitten im Wisch setzt den Inhalt zuruec
     globalThis.document = zuvor.document;
   }
 });
+
+/* Ein zweiter Wisch, WAEHREND der erste noch laedt (#1775). Das Budget leitet
+ * das Ziel aus `state.month` ab, und der wandert erst nach den Anfragen: zwei
+ * schnelle Wische verlangten denselben Monat zweimal. Gemessen wird die Geste
+ * als Programm - ein onStep, das haengt, bis der Test es loslaesst. */
+// `test()` dieser Datei ist synchron: ein async-Rumpf waere gruen, bevor er
+// etwas gemessen hat. Deshalb hier ausgeschrieben und am Dateikopf abgewartet.
+await (async () => {
+  const name = 'Zeitraum-Wisch: waehrend ein Schritt laedt, beginnt keine zweite Geste';
+  const same = (a, b, msg) => assert(JSON.stringify(a) === JSON.stringify(b), `${msg} - ist ${JSON.stringify(a)}`);
+  try {
+  await (async () => {
+  const zuvor = { window: globalThis.window, document: globalThis.document };
+  try {
+    globalThis.window = { matchMedia: () => ({ matches: false }), innerWidth: 375 };
+    globalThis.document = { getElementById: () => null, documentElement: { dir: '' } };
+    const handlers = {};
+    const child = { style: {}, isConnected: true, classList: { add() {}, remove() {} } };
+    const surface = {
+      firstElementChild: child,
+      addEventListener: (type, fn) => { handlers[type] = fn; },
+      removeEventListener() {},
+      closest: () => null,
+    };
+    const steps = [];
+    let release = null;
+    periodSwipe.wirePeriodSwipe(surface, {
+      enabled: () => true,
+      onStep: (step) => { steps.push(step); return new Promise((resolve) => { release = resolve; }); },
+    });
+    const target = { closest: () => null };
+    const at = (x, y) => ({ clientX: x, clientY: y });
+    const swipe = (fromX, toX) => {
+      handlers.touchstart({ touches: [at(fromX, 300)], target });
+      handlers.touchmove({ touches: [at(toX, 302)], cancelable: true, preventDefault() {} });
+      return handlers.touchend({ touches: [] });
+    };
+
+    const first = swipe(250, 100);
+    same(steps, [1], 'Vorbedingung: der erste Wisch blaettert vor');
+
+    // Zweiter Wisch vor, dritter zurueck - beide, waehrend der erste haengt.
+    // Der alte Inhalt steht noch, wo der erste Finger ihn losliess - ein
+    // zweiter, kuerzerer Weg darf ihn nicht dorthin nachziehen.
+    const parked = child.style.transform;
+    swipe(250, 160);
+    same(steps, [1], 'der zweite Wisch darf keinen zweiten Schritt ausloesen');
+    assert(child.style.transform === parked, `der Inhalt folgt dem zweiten Finger nicht: ${parked} -> ${child.style.transform}`);
+    swipe(100, 250);
+    same(steps, [1], 'auch kein gegenlaeufiger');
+
+    release();
+    await first;
+    // Danach gilt die Geste wieder - die Sperre darf nicht kleben bleiben.
+    const next = swipe(250, 100);
+    same(steps, [1, 1], 'nach dem Laden blaettert der naechste Wisch wieder');
+    release();
+    await next;
+
+    // Auch ein Schritt, der SCHEITERT, gibt die Geste wieder frei.
+    let fail = true;
+    const handlers2 = {};
+    const surface2 = { ...surface, addEventListener: (type, fn) => { handlers2[type] = fn; } };
+    let calls = 0;
+    periodSwipe.wirePeriodSwipe(surface2, {
+      enabled: () => true,
+      onStep: async () => { calls++; if (fail) throw new Error('offline'); },
+    });
+    const swipe2 = () => {
+      handlers2.touchstart({ touches: [at(250, 300)], target });
+      handlers2.touchmove({ touches: [at(100, 302)], cancelable: true, preventDefault() {} });
+      return handlers2.touchend({ touches: [] });
+    };
+    let thrown = null;
+    try { await swipe2(); } catch (err) { thrown = err; }
+    assert(thrown?.message === 'offline', 'Vorbedingung: der Schritt scheitert');
+    fail = false;
+    await swipe2();
+    assert(calls === 2, `nach einem Fehler ist die Geste nicht tot (Aufrufe: ${calls})`);
+  } finally {
+    globalThis.window = zuvor.window;
+    globalThis.document = zuvor.document;
+  }
+})();
+    console.log(`  ✓ ${name}`); passed++;
+  } catch (err) { console.error(`  ✗ ${name}: ${err.message}`); failed++; }
+})();
 
 // --------------------------------------------------------
 // Tastatur und Screenreader (Critique 2026-09-24, P1, Schritt 3)
@@ -4841,6 +5188,33 @@ test('Zeitraum-Kopf (R17 Z1): Filter, Lupe und „..." tragen EINE Icon-Knopffor
   const own = [...eachRule(calendarCss)].filter((r) => r.selector.split(',').some((s) =>
     /^\.cal-toolbar__(?:filter|search|tools)-btn$/.test(s.trim())) && /(?:^|[;{\s])(?:color|background(?:-color)?|border(?:-color)?)\s*:/.test(r.body));
   assert(own.length === 0, `keine eigene Ruhe-Tinte fuer einen Kopfknopf: ${own.map((r) => r.selector.trim()).join(' | ')}`);
+});
+
+// R17 E11 (Critique 2026-10-07, A2 P2): mobil stand die Ansichtswahl hinter
+// "...", und der Kopf sagte nirgends, welche Ansicht offen ist.
+test('E11: der Ansichtswahl-Knopf traegt Glyphe und Namen der aktiven Ansicht, das Menue bleibt', () => {
+  const ICONS = { month: 'calendar-days', week: 'calendar-range', day: 'calendar-1', agenda: 'list' };
+  const names = new Set();
+  for (const [view, icon] of Object.entries(ICONS)) {
+    const html = calendarHelpers.viewMenuHtml(view);
+    const btn = buttonTag(html, 'cal-views-menu');
+    assert(btn.whole.includes(`data-lucide="${icon}"`), `${view}: der Knopf zeigt die Glyphe der Ansicht (${icon})`);
+    assert(!btn.whole.includes('data-lucide="ellipsis"'), `${view}: kein "..." mehr`);
+    const item = html.match(new RegExp(`data-cal-view="${view}"[\\s\\S]*?</button>`))[0];
+    assert(item.includes(`data-lucide="${icon}"`), `${view}: dieselbe Glyphe wie der Menue-Eintrag`);
+    const name = btn.tag.match(/aria-label="([^"]*)"/)[1];
+    assert(name.startsWith('calendar.viewSwitcher: ') && name.length > 'calendar.viewSwitcher: '.length, `${view}: der Name nennt die Ansicht (${name})`);
+    assert(btn.tag.includes(`title="${name}"`), 'Tooltip = Name');
+    assert(btn.tag.includes(`data-view="${view}"`));
+    names.add(name);
+    assert((html.match(/role="menuitemradio"/g) ?? []).length === 4, 'das Menue mit allen vier Ansichten bleibt');
+    assert(new RegExp(`aria-checked="true"[^>]*data-cal-view="${view}"`).test(html.replace(/\s+/g, ' ')), `${view}: der Eintrag ist gewaehlt`);
+  }
+  assert(names.size === 4, 'vier Ansichten, vier Namen');
+  // Der Wechsel zieht den Knopf nach, nicht nur den Haken.
+  const sync = readFileSync(new URL('../public/pages/calendar.js', import.meta.url), 'utf8').match(/function syncViewMenu\([\s\S]*?\n\}/)[0];
+  assert(/trigger\.setAttribute\('aria-label', label\)/.test(sync) && /trigger\.replaceChildren\(glyph\)/.test(sync),
+    'syncViewMenu() setzt Name und Glyphe des Ausloesers');
 });
 
 test('Zeitraum-Kopf (R17 Z1): der Filterknopf traegt den geteilten Zaehler und nennt ihn', () => {

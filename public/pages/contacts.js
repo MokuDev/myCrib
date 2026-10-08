@@ -9,11 +9,11 @@ import { openModal as openSharedModal, closeModal, advancedSection, refocusAfter
 import { openDetailView } from '/components/detail-view.js';
 import { stagger, vibrate, wireScrollFade, scheduleUndoableDelete } from '/utils/ux.js';
 import { t, formatDate } from '/i18n.js';
-import { esc } from '/utils/html.js';
+import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { initials } from '/utils/initials.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
-import { pageToolsMenuHtml, popoverMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
+import { pageToolsMenuHtml, pageToolsActionEl, popoverMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
 import { setBulkPill, clearBulkPill } from '/utils/bulk-pill.js';
 import { parseVCards } from '/utils/vcard.js';
 import { getReadableTextColor, AVATAR_FALLBACK_COLOR } from '/utils/color.js';
@@ -21,6 +21,7 @@ import { composeDisplayName, contactSortKey, splitDisplayName } from '/utils/con
 import { getPhoneFormatter, createAsYouType, countryFromRegion } from '/utils/phone.js';
 import { emptyStateHTML } from '/utils/empty-state.js';
 import { splitViewDetailHtml, mountMasterDetail } from '/utils/master-detail.js';
+import { redrawList, collapseRow } from '/utils/list-motion.js';
 import '/components/category-manager.js';
 import { findPageFab } from '/utils/fab.js';
 import { isNavModuleReadOnly } from '/permissions.js';
@@ -253,7 +254,7 @@ export async function render(container, { user, signal } = {}) {
   // Spalten fuer sich scrollen.
   container.insertAdjacentHTML('beforeend', `
     <div class="contacts-page app-page app-page--reading app-page--list-detail page-measure--narrow" data-composition="reading">
-      <div class="page-toolbar page-toolbar--wrap page-toolbar--narrow contacts-toolbar">
+      <div class="page-toolbar page-toolbar--wrap page-toolbar--narrow page-toolbar--title-tools contacts-toolbar">
         <h1 class="page-toolbar__title">${t('contacts.title')}</h1>
         ${renderPageSearch({ id: 'contacts-search', label: t('contacts.searchPlaceholder'), placeholder: t('contacts.searchPlaceholder'), value: state.searchQuery, clearLabel: t('common.searchClear'), className: 'contacts-toolbar__search page-toolbar__center' })}
         <div class="page-toolbar__actions">${toolbarActionsHtml()}</div>
@@ -387,7 +388,7 @@ export async function render(container, { user, signal } = {}) {
   installPopoverMenus(_container);
   const toolbar = _container.querySelector('.contacts-toolbar');
   toolbar.addEventListener('click', (e) => {
-    const item = e.target.closest('.popover-menu__item[data-action]');
+    const item = pageToolsActionEl(e.target);
     if (!item || item.disabled || readOnly()) return;
     const action = item.dataset.action;
     if (action === 'manage-categories') openContactCategoryManager();
@@ -663,11 +664,23 @@ function contactsEmptyStateHtml(filtered) {
   });
 }
 
-function renderList({ animate = false } = {}) {
+const CONTACT_ROW = '.contact-item[data-id]';
+
+/* `motion: true` setzt, wer die DATEN geaendert hat (Kontakt angelegt,
+ * gespeichert, geloescht, per "Rueckgaengig" zurueckgeholt): die neue Zeile
+ * zieht auf, und was dadurch die Stelle wechselt, gleitet
+ * (utils/list-motion.js). Suche, Filter und Auswahlmodus zeichnen ohne
+ * Bewegung neu - dort wechselt die Frage, nicht die Liste. */
+function renderList({ animate = false, motion = false } = {}) {
   // Die Zeilen stehen in `#contacts-rows`, damit die Chipreihe davor im Port
   // (`#contacts-list`) bei jedem Render stehen bleibt und mit wegscrollt.
   const container = _container.querySelector('#contacts-rows');
   if (!container) return;
+  if (motion) redrawList(container, () => drawList(container, { animate }), { selector: CONTACT_ROW, keyAttr: 'data-id' });
+  else drawList(container, { animate });
+}
+
+function drawList(container, { animate = false } = {}) {
   // Die Chipreihe folgt den BELEGTEN Kategorien: ein neuer Kontakt in einer
   // bisher leeren Kategorie bringt ihren Chip mit, der letzte nimmt ihn mit.
   renderCategoryFilters();
@@ -1188,6 +1201,10 @@ function openContactDetail(contact, { inPane = null } = {}) {
     edit: readOnly() ? null : {
       label: t('common.edit'),
       title: t('contacts.editContact'),
+      // Im Blatt ist Bearbeiten die Hauptaktion und steht unten am Ende des
+      // Fusses, wie im Termin und im Inventar (R17, E7: EINE Stelle). In der
+      // Detailspalte bleibt es die Kopfaktion - dort gibt es keine Daumenzone.
+      primary: true,
       ready,
       mount: (panel, pane) => {
         const form = buildContactForm({ mode: 'edit', contact: full });
@@ -1466,7 +1483,7 @@ function buildContactForm({ mode, contact = null }) {
 
   const content = `
     <fieldset class="contact-modal__name-group">
-      <legend class="form-label">${t('contacts.nameGroupLabel')}</legend>
+      <legend class="form-label">${t('contacts.nameGroupLabel')}${REQUIRED_MARK}</legend>
       <div class="modal-grid modal-grid--2 contact-modal__name-grid">
         <div class="form-group">
           <label class="form-label" for="cm-first-name">${t('contacts.firstNameLabel')}</label>
@@ -1496,7 +1513,7 @@ function buildContactForm({ mode, contact = null }) {
       </button>` : '<div></div>'}
       <div class="contact-modal__footer-actions">
         <button class="btn btn--secondary" id="cm-cancel">${t('common.cancel')}</button>
-        <button class="btn btn--primary" id="cm-save">${isEdit ? t('common.save') : t('common.create')}</button>
+        <button class="btn btn--primary" id="cm-save">${isEdit ? t('common.save') : t('common.add')}</button>
       </div>
     </div>`;
 
@@ -1616,7 +1633,7 @@ function buildContactForm({ mode, contact = null }) {
             if (idx !== -1) state.contacts[idx] = res.data;
           }
           closeModal({ force: true });
-          renderList();
+          renderList({ motion: true });
           // In der Spalte: das Gespeicherte steht rechts - das Bearbeitete neu
           // gezeichnet, das Neue ausgewaehlt (wie in Apples Kontakten), sofern
           // Suche und Filter seine Zeile zeigen. Den Fokus gibt das Schliessen
@@ -1631,7 +1648,7 @@ function buildContactForm({ mode, contact = null }) {
             ? t('common.emailInUse')
             : (err.data?.error ?? t('common.unknownError')), 'danger');
           saveBtn.disabled    = false;
-          saveBtn.textContent = isEdit ? t('common.save') : t('common.create');
+          saveBtn.textContent = isEdit ? t('common.save') : t('common.add');
         }
       });
     },
@@ -1770,7 +1787,14 @@ async function deleteContact(id) {
   if (readOnly()) return;
   const contact = state.contacts.find((c) => c.id === id);
   state.contacts = state.contacts.filter((c) => c.id !== id);
-  renderList();
+  // Die Zeile klappt aus (mit der letzten ihrer Gruppe die Gruppe), die
+  // Nachbarn ruecken nach - erst dann steht die Liste ohne sie neu. Der Zustand
+  // ist schon geaendert: ein Neuzeichnen, das dazwischenkommt, zeigt dasselbe
+  // Ergebnis nur ohne die Bewegung.
+  const owner = _container;
+  const row = owner?.querySelector(`#contacts-rows .contact-item[data-id="${id}"]`) ?? null;
+  collapseRow(row, { group: row?.closest('.contact-group'), selector: CONTACT_ROW })
+    .then(() => { if (_container === owner) renderList({ motion: true }); });
   vibrate([30, 50, 30]);
 
   scheduleUndoableDelete({
@@ -1779,7 +1803,7 @@ async function deleteContact(id) {
     restore: (err) => {
       if (contact) {
         state.contacts = [...state.contacts, contact].sort(byName);
-        renderList();
+        if (_container === owner) renderList({ motion: true });
       }
       if (err) window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
     },

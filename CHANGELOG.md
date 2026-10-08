@@ -13,6 +13,1188 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [Unreleased]
 
+- **Der fünfte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 49 weitere Commits bis zu deren
+  v2.75.0: Taschengeld, wiederkehrende Split-Ausgaben, Köchin oder Koch je Mahlzeit, Konto deaktivieren statt
+  löschen, Migrationen 231 bis 235 und der Gestaltungsdurchgang R18). Die Bildmarke bleibt unser eigenes Icon.
+
+### Added
+
+- **Rewards can hold pocket money: a money balance per child, credited on a schedule, paid out on
+  request** (#1734, from D#916, asked by @trinitrion). The parents are the bank: they set an amount
+  per week or per month and the day it is due, the child sees its balance, asks to withdraw a free
+  amount or to pay something in (birthday money handed over for safekeeping), and the balance
+  changes when a parent confirms - that confirmation is the moment the cash changes hands, so the
+  number always matches what the parents hold. Parents can also book a credit or a deduction
+  directly. It lives in Rewards and not in Budget because everything it needs is already there - a
+  ledger, a request one person files and another decides - and a budget account has no owner; a
+  payout creates no budget entry. Money and points are two balances that never meet: there is no
+  conversion, and no point total changes when money is booked. Only the child and the
+  administrators see a money balance and its history - not the siblings, not a wall tablet, and a
+  scoped API token only under the same rule; that is narrower than points, which everybody with
+  the module sees. There is no overdraft: a withdrawal above the balance is refused when it is
+  asked for and checked again when it is approved, and if the money is gone by then the request
+  stays open so a parent can credit first. A withdrawal always waits for a parent, also in a
+  household that has switched approval off for rewards. Due dates missed while the server was off
+  are booked afterwards, each exactly once; a paused plan books nothing and does not catch up when
+  it is resumed; the plan of a deactivated account is paused. A monthly plan on the 31st pays on
+  the last day of a shorter month and returns to the 31st. Parents open an account for a
+  member - no plan and no amount needed, the child then sees it with a balance of zero and can ask
+  to pay in - and can close it again once it is empty. An account keeps the currency the
+  household used on the day it was opened, written on every entry: if the household later switches
+  its currency, an existing balance, its plan and its open requests stay what they were (1.00 EUR
+  does not turn into 100 yen), a new account takes the new currency, and an emptied one does
+  after it was closed and opened again. When a child's account is deactivated, what was due until that
+  day is booked first, then its open requests are cancelled and its plan paused; what is left on it stays visible to the administrators, marked as
+  former, and can only be paid out. Two edges to know: an account closed and opened again on a day
+  its plan was due is not credited for that day a second time, and the history of a closed account
+  is kept but shown through the API only. No interest, no
+  savings goals, no second currency per child. With read access to Rewards the balance stays
+  visible and the requests are gone, as with redeeming. For API clients: `GET /api/v1/rewards/money`,
+  `GET /api/v1/rewards/money/ledger`, `POST /api/v1/rewards/money/entries`,
+  `POST /api/v1/rewards/money/accounts`, `DELETE /api/v1/rewards/money/accounts/{userId}`,
+  `PUT`/`DELETE /api/v1/rewards/money/plans/{userId}`; a request is `POST /api/v1/rewards/redemptions`
+  with `kind: "withdrawal"` or `"deposit"` and a decimal-string `amount`, and rows of
+  `GET /api/v1/rewards/redemptions` now carry `kind`. Existing fields keep their meaning: that list
+  answers reward requests only unless `?kind=money`, `withdrawal`, `deposit` or `all` asks for more,
+  `pendingCount` and the tile's `pending` still count reward requests, with money requests next to
+  them in `moneyPendingCount` and `moneyPending`, and `GET /api/v1/rewards/ledger` stays the points
+  history (migration 236).
+- **Recurring shared expenses have a place in the app: a group lists them, and they can be
+  created, edited, paused, resumed and deleted there** (#1647). Until now the app showed a
+  recurring expense nowhere. One that the hourly run had paused because it could not be booked
+  appeared as a line in the group's activity and could only be resumed, changed or removed
+  through the API. Each group now has a "Recurring" section between its expenses and its
+  activity, with title, amount, rhythm and next date. A paused one says so, and one that cannot
+  be booked says why in plain words - its split no longer adds up, or the payer or a participant
+  has left the group - also before the run pauses it. Tapping one opens the same form as an
+  expense, with rhythm and next date; expenses already booked keep their values, the next date
+  carries the new ones. Deleting stops future dates and leaves every booked expense, share and
+  balance alone. Resuming asks one question, and only when dates fell due during the pause:
+  continue from the next date (preselected) or book the missed ones. The activity entry "paused
+  automatically" leads to the recurring expense. Editing, pausing, resuming and deleting follow
+  the rule of an expense - the group's owner or admins and whoever created it; everyone else,
+  anyone with read access to the budget, and an archived group see the list and a read view
+  without actions. A recurring expense on the 31st keeps the 31st when it is edited while
+  standing on a shorter month's last day; changing its date or rhythm sets the day anew. A date
+  that was already booked cannot be booked a second time by moving the next date back onto it.
+  For API clients: `PUT` and `DELETE /api/v1/split-expenses/recurring/{id}`; the `PUT` is a
+  partial update (omitted fields stay), checks the result like creating one, and answers a
+  `next_run_date` that is not after the last booking with `400` and
+  `reason: "next_run_not_after_last_booking"`; `GET /api/v1/split-expenses/groups/{id}/recurring` additionally returns
+  `payer_name`, `participants`, `splits`, `blocked_reason`, `can_edit`, `missed_count` and
+  `resume_date`; activity types `recurring_edited` and `recurring_deleted`. No migration.
+- **The Singapore dollar is a currency a household can pick, and Singapore is a region** (#1697,
+  from D#982). SGD was missing from the list the household setting, subscriptions and shared
+  expenses all read, and the server checks a saved currency against that same list - so a
+  household in Singapore could not record its money in its own currency at all. Choosing
+  **English (Singapore)** as the region now sets the dollar together with the local date and time
+  format in one step (06/10/2026, twelve-hour clock), and amounts are grouped the way they are
+  written there.
+- **A meal can name the member who cooks it, and the week plan and the overview show who that
+  is** (#1679, from D#1661, asked by @matejhermanek for a shared flat that plans who cooks which
+  meal). A planned meal carried a date, a type, a title, notes and a recipe, and the only person on it was whoever
+  entered it. The meal dialog now offers the household members in the same person picker the task
+  dialog uses, limited to one person; the cook's avatar then stands on the meal in the week plan
+  and on today's meal on the overview. On a wall tablet, cooking counts under "Who's up today"
+  like a task does. A meal without a cook looks as it did. A repeating meal
+  keeps its cook: every meal the series creates starts with it, changing the cook of one meal
+  leaves the series alone, and choosing one for the whole series reaches all its meals. Saving
+  for the whole series changes the cook only when you picked one in that dialog: a new title for
+  the series leaves every cook where it is, including the ones set for single weeks, and while
+  nothing is picked the dialog shows the cook of the series there, not of the one meal.
+  A series whose cook is no longer a household member keeps running; its new meals start
+  without a cook, and the meals that already exist keep the name. Weeks created while the
+  account was deactivated stay without a cook; once it is a member again, the next new week
+  starts with it. The cook
+  is a responsibility, not ownership - the plan stays the household's, and who sees or edits a
+  meal still depends on the meal plan right alone; with read access the cook is shown and cannot
+  be chosen. Only household members can be picked, so housekeeping staff, guests of shared
+  expenses and wall tablets are not offered, while a meal that already carries such a cook still
+  saves. An account that cooks a meal is deactivated rather than deleted when it is removed, like
+  an account a task is assigned to, and the meal keeps the name. One cook per meal; meals in the
+  calendar, a reminder for the cook and a view per person are not part of this. For API clients:
+  `cook_user_id` on `POST /api/v1/meals`, `PUT /api/v1/meals/{id}` (with `?scope=series` for the
+  series) and on each assignment of `POST /api/v1/meals/apply-plan`; meals come back with
+  `cook_user_id`, `cook_name` and `cook_color`, also in `todayMeals` of the overview (migration
+  235); the cook's picture is not repeated on every meal, it is on the member
+  (`GET /api/v1/family/members`, which a scoped token reads with `family:read`). The id is a positive integer or `null`; an empty string or any other
+  form is refused with 400. A meal of a series also returns `recurrence_cook_user_id`, the cook
+  stored on the series.
+- **A household can put its members in an order of its own, and every list of people follows it**
+  (#1644, from D#1605, asked by @ChaCha500). Until now members were listed alphabetically
+  everywhere, so "parents first" or "oldest first" was not possible. Under Settings, Family, an
+  administrator now drags the members into the wanted order - or focuses a handle and presses
+  the arrow keys. There is one order per household, the same for everyone who looks: the
+  calendar's person filter, the timetable, the assignee pickers in tasks, budget and shared
+  expenses, rewards, the family card and the wall display all use it. A member who has not been
+  placed (a new one, and everyone in a household that never touches the setting) comes after
+  the placed ones, sorted by name, so a household that leaves it alone sees the order it had.
+  Not by age, as first suggested: birth dates are optional, and "parents first, then the
+  children" cannot be read from a date. Two things changed for everyone, placed or not. Lists
+  that sorted names by the language of the device now sort them the way the server does, so
+  two devices of one household agree; and a few lists that put a lower-case name after all
+  capitalised ones (the account list, the task filter and the overview among them) now ignore
+  letter case like the others. Housekeeping staff, guests of shared expenses, wall tablets and deactivated
+  accounts have no place in the order. For API clients: `PATCH /api/v1/family/members/reorder`
+  with `{ order }`, administrators only; `sort_order` on `GET /api/v1/family/members` and
+  `GET /api/v1/auth/users`, and `is_household_member` on every user object (migration 232).
+- **Each device chooses how long it waits before the photo screensaver starts** (#885). Settings →
+  Appearance, next to wall mode, offers 1, 2, 5, 10 or 15 minutes; five stays the default, so
+  nothing changes on a device that never touches it. The choice is stored in the browser like wall
+  mode, because the devices in one household want different delays: a photo frame on the wall
+  wants its pictures back after a minute, a kitchen tablet people work on should wait longer, and a
+  household value would also reach every phone. The value is applied before the page renders, so
+  the first idle period already uses it, and a change takes effect at once without a reload, in
+  other open tabs too. The settings search finds it under "screensaver", and the Immich page no
+  longer promises five minutes.
+- **Revoked and expired API tokens can be removed from the list** (D#1672, asked by @torbenvanassche). Under
+  Settings, API access, a revoked token stayed in the list for good, with a greyed-out button
+  next to it. The list now has two parts: the tokens that work, each with "Revoke", and below
+  them the ones that are revoked or expired, each with "Remove". Removing asks first and cannot
+  be undone. A token that still works cannot be removed, only revoked, so ending someone's
+  access always leaves a trace until you decide to clear it. The same goes for wall tablets:
+  every new pairing revokes the device before it, and those old entries can now be removed as
+  well. For API clients: `POST /api/v1/auth/api-tokens/{id}/remove` and
+  `POST /api/v1/displays/{id}/devices/{deviceId}/remove`; both answer 409 for a credential
+  that is still active, and `DELETE /api/v1/auth/api-tokens/{id}` keeps meaning "revoke".
+- **The Calendar tile on the overview can list 8 or 12 appointments instead of 5** (D#1676, #1680).
+  The tile always showed the next five, and a household with a full week had to open the
+  calendar for the rest. Its options in Customize mode - where "Which appointments?" and the
+  birthdays switch already live - now ask "How many appointments?" with three steps: 5, 8 and
+  12. Five stays the default, so a tile nobody touched looks as before. The choice belongs to
+  the person who made it, travels with a household default like the other tile options, and
+  applies on a phone as well. Appointments of today that are already over still stand above
+  the list and do not use up the number. The tile grows with its list instead of scrolling,
+  in every list size, and the tiles next to it in the grid grow with it: with 12 it is
+  roughly twice as tall as with 5. At "Wide (2x1)" the tile remains the week strip, and the
+  Today sheet and wall mode keep their own number of rows. For API clients:
+  `GET /api/v1/dashboard` takes `events_limit` with exactly `5`, `8` or `12`; any other value
+  means 5. "Set as household default" now shows the result at once when a tile option changed
+  what the overview asks for; until now the tile kept its old list until the next refresh.
+- **A loan can carry a due day, and "Mark paid" dates the installment on it** (#1631, #1741,
+  D#1481, asked by @iHatim1). A loan knew the month an installment is due but no day, so "Mark paid" dated the
+  entry on the day you tapped it: with a debit on the 27th, marking it on the 25th put it two days
+  early, and marking it on 2 November put October's installment into November's budget. The loan
+  dialog now has an optional "Due day" field, 1 to 31. With it set, the installment is dated on that
+  day in the month it is due, whether you mark it early or late, and a month that is shorter takes
+  its last day (the 31st becomes 30 April, or 28 or 29 February). The confirmation names the date
+  that was used, because the entry is booked without a dialog, and the loan card shows the full
+  date of the next installment instead of only the month. "Installments already paid" on a new
+  loan use the day as well. A loan without a due day keeps today's date for the installment of
+  the current month, and its card keeps naming the month. An installment whose month is already
+  over is dated on the 1st of that month instead of today (#1741, D#1021, reported by @mamo79):
+  catching up a loan that started in 2022 used to put every past installment, and its budget
+  entry, into the month you tapped in. The 1st is what "Installments already paid" already uses
+  for such a loan. Nothing that is already booked is moved: setting or changing the day later
+  leaves existing installments and their budget entries where they are. Marking early books an entry dated a few days ahead; it
+  counts in that month's totals at once and in the account's current balance from its date on. For
+  API clients: loans accept and return `due_day`, and return `next_due_date` next to
+  `next_due_month`. Without a due day it is the 1st of `next_due_month` once that month lies
+  before the household's current month, and `null` otherwise.
+  `POST /api/v1/budget/loans/{id}/payments` is unchanged, `paid_date` stays required and is
+  stored as sent.
+
+### Changed
+
+- **Rows show fewer buttons.** Lists no longer carry a pencil and a bin on every line. Editing,
+  deleting and anything further sit behind one "more" button per row that is always visible and
+  names what it does in words. This applies to shopping items, birthdays, tasks, loan payments
+  and the five lists of the shift planner, where "Edit" and a red-outlined "Delete" stood on
+  every row. Deleting stays undoable or asks first, exactly as before, and swiping still works.
+  Meal cards no longer show a bin at all: open the meal to delete it.
+- **Shopping rows are one line.** The amount now stands at the end of the line with the name
+  instead of underneath it, so amounts line up in a column and the list shows more at once. A
+  long name still wraps instead of being cut off.
+- **Fields are quieter and all look alike.** A field used to be drawn twice - a fill plus a
+  heavy outline - and in dark mode it was a near-black box with a bright edge. Fields now have
+  one skin everywhere: a thin outline that still meets the contrast needed to find it, on a fill
+  that carries it; in dark mode the field is a soft well instead of a black hole. Dropdowns are
+  as tall as the text fields beside them and show the same small arrow on every browser, number
+  fields no longer show the tiny up/down arrows, and the quick-add row of the shopping list
+  focuses in violet like every other field.
+- **Settings read like a list, not like a form.** A choice in a settings row was a bordered
+  box at the end of the line, anywhere between a third and the full width of the row. It is now
+  the plain value with a small arrow, the way phone settings show it - "Language ... German".
+- **Recording a measurement is quicker to read and fill in.** Blood pressure was three wide
+  boxes named "Systolic", "Diastolic" and "Pulse", none with a unit. It is now written the way
+  it is said: "120 / 80 mmHg", with the pulse on the line below, each with an example value and
+  its unit. Type, time and visibility stand as rows with the label on the left and the value on
+  the right; the note keeps its own field. Screen readers still announce every part by name, and
+  in right-to-left languages the reading keeps its order.
+- **Documents look like documents.** The preview shows the whole page as a sheet on a quiet
+  background instead of the cropped top of a white rectangle, and in dark mode it is no longer
+  the brightest thing on the screen. Cards are as tall as their content, with their buttons
+  right below the text, and there is room between the filter bar and the first row. The list
+  view shows the category symbol instead of a preview too small to read. On a desktop, opening a
+  PDF no longer shows the browser's own toolbar inside the viewer; "Open in new tab" and
+  "Download" remain the way to zoom and print (Safari keeps its toolbar).
+- **Reading a note looks like the note.** The text stood in a tinted box with a coloured edge,
+  which above the red "Delete" read like an error message. The whole reading view now takes the
+  colour of the note. "Edit" is one button instead of a button and a tab.
+- **One empty-state message per page.** Waste collection and the shift planner stacked two or
+  three large "nothing here yet" blocks. The main section keeps its message; the sections below
+  say it in one line with their button.
+- **The task board has depth.** Columns were as bright as the cards on them; they are now a
+  recessed lane with the cards lying on top, and an empty column no longer shows a dashed box.
+- **Opening an event, a task or a birthday shows what matters first.** The reading view listed
+  everything as rows of equal weight, people as a comma-separated line, under a thin colour
+  strip. An event now opens with its time in words ("Today, 20:00 - 22:00") beside a dot in the
+  calendar colour and the people as avatars with names. A task opens with its due date and its
+  people, and "Done" is the one main button. A birthday opens with the picture, "turns 41" and
+  "in 26 days". The popover on a desktop carries the title in the same size as the sheet on a
+  phone.
+- **A recipe without a picture opens with a head of its own.** Its details began with a list of
+  ingredients and nothing that said "recipe". They now open with a flat band in the kitchen
+  colour that carries the sign of the meal the recipe is for. Recipes with a picture keep it,
+  and the list stays as it is.
+- **Ingredient amounts line up.** "200 g", "1 tbsp" and "2" stood inside the same text as the
+  ingredient, so every line started somewhere else. Amounts now have their own right-aligned
+  column in front of the names.
+- **The agenda names its days in words.** "Today - Thursday, 8 October" and "Saturday, 10
+  October" instead of "08.10.2026 Thursday".
+- **Each money screen has one number that leads.** On a phone the largest thing on every budget
+  tab was the word "Budget"; the balance stood beside it in small type. Now one figure per tab
+  carries the screen: the balance in the overview, net worth in accounts, the remaining debt in
+  loans, the monthly cost in subscriptions. Income and expenses stand as a quiet line below it.
+  On a desktop the same figure leads its column and the others step back. Long amounts and long
+  currency signs take a smaller size instead of breaking.
+- **The budget trend reads at a glance.** The area under income is tinted, today carries a dot
+  with both values, and what has not happened yet is dotted - for both lines, where expenses
+  used to be dashed as well. "Today" no longer sits on a grid line, the axis says "1.", "16.",
+  "31." instead of three full dates under a header that names the month, and three grid lines
+  replace up to seven. Trend and ring now sit on a card like the lists beside them.
+- **The spending ring shows its total in the middle.** The sentence next to it ("7 segments,
+  largest: ...") is still read out by screen readers.
+- **Account balances are no longer green.** Nearly every balance and the net worth above them
+  were green merely for being above zero. A balance now stands in the text colour and only a
+  negative one is red; green is kept for income and for changes.
+- **Figure tiles line up.** In the vitals row the dates stood at three different heights. Label,
+  value, trend line and date now share the same four rows across a row of tiles, value and unit
+  share a baseline, and labels are written normally instead of in spaced capitals, so a long one
+  such as oxygen saturation fits on one line. On the vitals page "116/74 mmHg" stands on one
+  line; in the narrower tiles of the health overview the unit still moves below the value. This
+  holds for every tile of this kind: budget, health, housekeeping, inventory and the overview.
+- **The small trend lines in the vitals tiles are visible.** They were grey hairlines; they now
+  carry the colour of the health area with a soft fill, and the latest reading is marked.
+- **Hovering a figure tile no longer looks like selecting it.** The tile lifts slightly; the
+  coloured ring is kept for the selected one.
+- **The week of activity is easier to read.** Bars have a round top and a flat foot, today's
+  bar stands in full colour with its value while the other days step back, and three grid
+  lines replace five. On a phone the chart is taller, and the weekdays no longer run into the
+  feet of the bars.
+- **The overview uses fewer type sizes.** Weather, birthdays, rewards and the budget tile mixed
+  sizes one pixel apart; their content now reads on four steps.
+- **Numbers no longer jump sideways.** On the overview, times, amounts and counters now use
+  digits of equal width everywhere, not only in some tiles.
+- **Everything that floats has one shape, and the sidebar floats too.** Dialogs, the "More"
+  sheet and the search palette had tighter corners (16 px) than the event popover and the
+  toasts (26 px); they now share the larger radius, with fields, tiles and menu rows rounded to
+  match, and catch a fine line of light at the top. The dialog header is no longer a grey strip
+  above a white body. On a desktop the sidebar is a glass panel 8 px off the window edge instead
+  of a full-height bar; the content keeps its width. Light glass takes the warm tone of the
+  page instead of a cool white, and the icon wells in the sidebar are visible in the light
+  theme (they were 1.007:1 against the bar).
+- **Login, setup, invitation and password reset have a place.** The form stood as a small card
+  on a plain page. It is now a glass panel in front of a still field of soft light in the
+  colours of the Yuvomi mark, which also stands behind the loading screen. Everything on these
+  pages sits on the panel, where text keeps its contrast (label 5.4:1 light, 6.2:1 dark, in the
+  worst spot); with "reduce transparency" or "increase contrast" the light is off and the panel
+  is solid. A form taller than the window can now be scrolled by hand - on a small phone or in
+  landscape its lower end could only be reached with the Tab key.
+- **The app no longer animates a backdrop nobody could see.** Four blurred colour fields drifted
+  behind the content the whole time the app was open, and the content covered them completely.
+  They are gone, together with a gradient that was covered the same way. Nothing looks
+  different; the browser has four large layers less to carry.
+- **Rows and cards answer a tap.** List rows, task cards, the cards on the overview and the rows
+  in the settings now show that they are being pressed, instead of doing nothing until the next
+  screen arrives.
+- **"New task" closes right away.** After saving, the dialog showed a check mark for about
+  three quarters of a second before it closed. It now closes with the save, and the new task
+  pulls open in the list: visible after about 0.2 seconds instead of 0.9.
+- **A sheet you flick away travels out of the screen.** Dragging a sheet down and letting go made
+  it dissolve where the finger had left it. It now leaves the screen from there, as fast as the
+  flick was; let go too early and it springs back just as briskly. Behind the "More" sheet the
+  dimming fades with the pull.
+- **Going one level deeper has a direction.** On a phone, opening a settings page or a health
+  area slides in from the side you are heading to, and going back comes from the other; both
+  used to cut or only fade. Switching between light and dark fades instead of flipping, the
+  blood pressure and weight curves draw themselves once, and a few menus that appeared or
+  vanished in one frame now fade.
+- **The app starts faster on a slow connection.** Before the overview asked for its data, the
+  start made five requests one after the other, two of them twice. What does not depend on each
+  other now runs at the same time, and the second copy is served from the first. Measured on a
+  throttled phone (4x CPU, "Fast 4G"), three runs each, before and after: the overview asked for
+  its data after about 0.8 seconds instead of 1.3, and the greeting appeared after about 1.0
+  seconds instead of 1.5.
+- **Health loads in three steps instead of six.** The overview asked for vitals and medication,
+  then for the cycle history, then for the cycle settings, each only after the previous answer
+  had arrived. These now go out together; who may see what is decided as before. Measured on the
+  same throttled phone: the last answer arrived 747 ms after the first health request instead of
+  1119 ms.
+- **A weak connection no longer holds up the start.** With a network that is neither offline nor
+  answering - on a train, in a lift, at the edge of the Wi-Fi - the app waited for it although
+  everything it needed was already stored on the device. It now waits 1.5 seconds once, then
+  uses the stored copies and picks up the fresh ones in the background for the next start.
+  Measured with a server that accepts connections and never answers: the app's own files were
+  loaded after 1.6 seconds instead of never. Signing in and loading data still need the network.
+- **An update no longer downloads every language.** Each release fetched all 26 language files,
+  of which a device uses one. Only German, the language the app falls back to, is stored in
+  advance now; the language of the device is stored the first time it is used and stays
+  available offline. A language that was never used on a device needs a connection once.
+- **An update transfers only the files that changed.** After every release the app fetched all
+  of its roughly 300 files again. It now asks the server which of them differ and loads only
+  those; the server answers from the content of each file, so a changed file always arrives and
+  an unchanged one never does, also after a new image was installed.
+- **The app's files travel smaller.** The server compresses each script, stylesheet and language
+  file once at the highest Brotli level and keeps the result in memory, instead of compressing
+  at a low level on every request: 4.9 MB instead of 5.9 MB for all of them, about 5 MB of
+  memory, and some 25 seconds of background work on one core spread over the first requests
+  after a start. The files themselves are unchanged. `STATIC_BROTLI=off` restores the previous
+  behaviour.
+- **Housekeeping tasks: "Due" and "Done this month" stand beside the list.** On a desktop the
+  tasks tab left the side column empty while its two figures were shown only on the overview.
+- **Budget statistics read on a desktop and tell today from the rest of the month.** The
+  category rows ran across the whole page in 12px - the name on the left, the amount more than
+  800px away at the other end of a thin bar. Expenses and income now stand side by side, each
+  amount at the end of its bar, the names in the size of a list row. The running curve is drawn
+  solid up to today and dotted after it, with a "Today" mark, instead of a flat line to the end
+  of the month. On a phone the chart is half as tall again, and an empty period offers to add an
+  entry.
+- **Budget accounts: net worth stands beside the accounts.** On a desktop the single figure used
+  to fill a whole row above the account grid - one card across the page, mostly empty. It is now
+  a card in the side column, like the figures on the overview and on loans, and the accounts
+  start at the top next to it, one per row on the reading width. The accounts are rows of one
+  list now, divided by a line, in every width - no longer a card each.
+- **Tasks: on a desktop the filters open beside the list instead of over it.** The filter sheet
+  was a centred dialog with a dimmed, blurred backdrop - it covered the very list each chip
+  filters. From 1024px it is now a popover anchored to the filter button: no backdrop, the list
+  stays visible and updates as you choose. Escape or a click outside closes it and focus
+  returns to the button. On a phone it stays the sheet.
+- **Inventory opens on your things, not on a list of categories.** The start page used to show
+  one row per category and no item at all; reaching an item took two clicks. It now lists every
+  item, grouped by category, with the categories as filter chips above the list. On a wide
+  screen the details of the selected item stand beside it from the start, and short facts
+  (brand, model, serial number, price) share a row instead of running down one column. A link
+  to a category still works and selects its chip.
+- **Settings list their options as rows, one group per section.** Until now almost every option
+  had a card of its own: Appearance showed ten settings in eight cards and three of them on the
+  first screen. Options are now rows in one group - name on the left, switch or selection on the
+  right, the explanation below - the form "Active modules" already had. Appearance is about a
+  third shorter and shows five settings on the first screen of a laptop; on a phone a selection
+  with a short value no longer spans the full width. Cards remain for real forms (account,
+  password, CalDAV, e-mail, tokens). Saving is unchanged: switches and selections apply at once.
+- **The calendar settings name each section once.** "Appointments" stood twice in the sheet; the
+  personal section is now "Event defaults". The jump links at the top carry the names of the
+  headings they lead to instead of older names, and the default reminders are chips like the
+  other multi-selections in the app instead of small checkboxes.
+- **On a phone the document viewer uses the whole screen.** It was a sheet with a margin all
+  round, and 172 px of details stood above the document - which got 54 % of the height. The
+  viewer now fills the screen, the document runs from edge to edge, and the details are one row:
+  tapping the category unfolds folder, size, expiry and the note on why sharing is unavailable.
+  Download, edit and share stay where they were.
+- **Editing a repeating meal asks first what the change applies to.** "Apply change to" decides
+  what Save does and was the last field of the dialog, behind "More settings" - on a phone about
+  three screens down. It now stands at the top. The ingredients of an existing meal are folded
+  behind "Ingredients · n"; when adding a meal they stay open.
+- **The calendar's view button on a phone shows which view is open.** It carried "..." and the
+  header said nowhere whether you were in month, week, day or agenda. It now shows the icon of
+  the open view and names it ("View: Week"); the menu behind it is unchanged.
+- **"Log day" in the cycle tracker shows the daily entries first.** Bleeding, symptoms and
+  feelings stay at the top; basal temperature, cervical mucus, tests and intimacy sit behind "More
+  details", which opens by itself when one of them already has a value. On a phone the dialog is
+  about a third shorter, and the "Today" card with "Log day" now stands above the figures instead
+  of below the navigation bar.
+- **Meal plan and shopping list give the second header row back when you scroll (phone).** Under
+  the kitchen tabs the row with the week or the lists stayed put - 121 px of header at any scroll
+  position, where the pantry beside it folds to 56. It now folds away like the pantry's and
+  returns at the top; the quick-add field of the shopping list still opens from the "+" button.
+- **On a phone the calendar header shrinks to one row when you scroll.** Collapsed it measured
+  the same 117 px as open - the title left, but its row stayed for three icons. The period
+  stepper now moves up into that row (65 px, 52 px more for the week, day and agenda). Search,
+  filter and "Today" move into the view menu meanwhile; an active filter keeps its button and
+  count.
+- **Settings save the same way on every page.** Switches and selections take effect at once; a
+  form is saved with a button, and that button now sits at the right end of the card's footer
+  everywhere - it was left-aligned on most cards and stretched across the whole
+  card for "Save password" (612 px, now 162). Where a card has more actions (test, remove), Save
+  comes last. A single number field on its own - the default points for new tasks (Rewards) and
+  the grace period for countdowns (Overview) - is saved when you leave it or press Enter, with a
+  confirmation; the grace period had a Save button of its own until now.
+- **Dialogs share one set of fields.** The shared-expense dialogs (expense, recurring expense,
+  payment, group, member) now use the labels of a budget entry - smaller and quieter - mark
+  required fields with the star, and show the amount in the large amount field. The waste
+  schedule dialog picks weekdays with chips instead of seven small checkboxes, and "Active" is a
+  switch. The loan dialog opens in the 520 px panel instead of the 400 px one.
+- **Tapping a row opens its details - also for birthdays on a phone.** A birthday opened
+  straight into the edit form with the keyboard up; it now opens a read sheet (next date and age,
+  birth date, name day, note, reminder) with Delete at the start of the footer and Edit as the
+  main button at the end, as an appointment does. A contact's sheet has Edit in the same place
+  instead of in the header.
+- **One word per thing in the German interface, and two settings pages named for what they
+  hold.** The navigation says "Übersicht"; nine texts still said "Dashboard" (load error, pinned
+  notes, weather, permissions, shortcuts) - they now say "Übersicht" too, likewise "Overview" in
+  English. The settings page "Integrations" held only Immich and the weather location, while
+  CalDAV, Mealie, ntfy and the API live elsewhere: it is now "Photos and weather". "Family and
+  roles" stood next to "Roles and permissions" and is now "Members". Both in all 26 languages.
+  "Recipe-Provider" is "Rezeptdienst" in German. The tour's second step described a bottom bar
+  that does not exist ("Dashboard and Calendar", a "···" button); it now says what the bar does
+  and names "More", and the calendar's empty-state hint points to Settings → Calendar, where the
+  sync accounts are.
+- **Dialogs speak one grammar: Cancel and the main button sit at the bottom right, adding is
+  "Add" and editing is "Save".** Rewards dialogs (reward, redeem, bonus) had a main button and no
+  Cancel; adding or editing a housekeeper and editing a visit carried "Save" left-aligned at the
+  end of the scrolling form - on a phone below the fold of a 1200 px form. All of them now use the
+  shared footer, which stays in view. The main button of every create dialog reads "Add" where it
+  said "Create", "Create task", "Create loan", "Create folder" or "Save" (tasks, notes, calendar,
+  contacts, birthdays, rewards, health, shared expenses, shifts, quick links, sync accounts); a
+  dialog that edits says "Save". "Edit waste type" is 520 px wide so Delete, Archive, Cancel and
+  Save hold one row (the footer was two rows, 121 px), and on a phone "Save" no longer breaks
+  into two lines there and in "Edit account".
+- **Inventory on a phone: search and tools sit in the title row.** The head took three rows there
+  (114 px, 154 px inside a category) for a title and two icon buttons, while Documents and Health
+  next to it need one. It is one row now, and the first entry starts 49 px higher.
+- **Shared expenses: the figures at the top are those of the group you are looking at.** They
+  used to add up all groups, so "You owe 196.14" stood right above the group's own "Linda owes
+  Alex 24.14" - two numbers for what looked like one question. "You are owed" and "You owe" now
+  show your balance in the selected group; the sum across all groups stands in the group picker.
+  "Settle up" moved into the balances row, which is what it acts on. On a phone that frees a row:
+  the first expense starts 52 px higher and a fourth one fits on the first screen.
+- **Budget: what is planned and what is booked stand apart.** In the running month the overview
+  listed everything by date, latest first - so the entries that had not happened yet stood on top,
+  and on a full month the first real booking sat below the fold. The list now has two sections:
+  "Planned · n" with the next three entries (the rest behind "Show all"), their amounts in a
+  quieter colour, and "Booked" below it. An expected booking that still waits for its tick counts
+  as planned. A past month, a future month and search results keep their single list.
+- **Waste: the main button adds the recurring date.** It used to add a one-off pickup, the rarest
+  thing you do there, while the date the module is about - "every other Friday" - sat in the
+  three-dot menu of a waste type. The button now reads "Schedule" and opens that dialog, with the
+  waste type to choose (preset to the first one without a date). "New one-off pickup" moved into
+  the tools menu at the top. A pickup says when it is: "Fri, 09.10.2026 · 2 days" instead of the
+  bare date. And a waste type that has a pickup coming no longer claims "No schedule yet for this
+  waste type" - it names that pickup.
+- **Shift plan: the plan comes first.** The module opened on its master data: three tabs of shift
+  types, patterns and statistics stood before "Compare", the week as a grid, and that tab first
+  asked you to pick a person. "Compare" is now the first tab and the one the module opens on, with
+  your own lane already selected; a selection you made yourself is kept. Without a shift type or a
+  plan it shows the button that adds one. The "Today" card, 132 px tall above every tab, is one
+  line of chips. A shift type or a plan is a row, and editing it opens the same dialog as adding
+  it, with one "Save" - until now each was a fold-out card with the whole form inside and two
+  "Save" buttons, and a plan with seven cycle days was 964 px tall on a phone. Changing a plan's
+  cycle length adds or removes its days right in the dialog. On a 1280 px screen all seven days
+  of the comparison fit; Sunday used to be cut off by 36 px. The tab addresses are unchanged.
+- **Lists move the same way everywhere when an entry comes or goes.** Tasks, shopping, pantry
+  and a few others already did it: a deleted row folds away and the rows below close the gap,
+  a new one opens up, a re-sorted one glides to its place. Notes, documents, contacts, the
+  budget's transactions, inventory, subscriptions, shared expenses and birthdays cut hard
+  instead - the row was gone and the rest jumped. They now use the same motion, also when
+  "Undo" brings an entry back. Searching and filtering still redraw without motion, and with
+  reduced motion switched on nothing moves.
+- **Picking another row fades the detail column in.** In tasks, recipes, contacts, birthdays,
+  the agenda and inventory the column on the right swapped its content with a hard cut when
+  another row was selected. The new content now fades in briefly, like a tab or a month
+  change does. Saving the entry that is already shown redraws it without the fade.
+- **The date picker's month glides in from the side you page to**, like the calendar and the
+  budget month. It used to swap the grid of days with a hard cut.
+- **On a phone, the page title fades into its small form instead of snapping.** In notes and
+  contacts the large title jumps to the small one in the bar when the list scrolls; it now
+  fades in at its new size, and back when you return to the top. In the budget it fades back
+  in when the header opens again. The title that docks into the bar on scrolling pages fades
+  in and out the same way. Nothing changes size over time - only the opacity moves.
+- **Budget: swipe sideways to change the month.** On the tabs that have a period - Budget, Plan
+  and Reports - a horizontal swipe pages one period forward or back, with the same distance
+  and feel as in the calendar. The arrows stay for mouse and keyboard. Scrolling up and down
+  is unaffected, and the chart in Reports keeps its own horizontal drag for picking a day.
+- **The calendar's filter popover opens and closes like every other menu.** On a desktop it
+  appeared and vanished with a hard cut; it now grows out of the filter button and fades, and
+  leaves a little faster than it came.
+- **The welcome tour keeps its card still.** Each of the three steps rebuilt the card, which
+  changed height with the length of the text and moved "Next" away from under the pointer.
+  The card now has one height for all steps, the buttons stay where they are, and the text
+  of the next step fades in from the side.
+- **Budget reports: the curves draw themselves in once.** The first time the reports open, the
+  income and expense curves draw in along the time axis and the category ring fills clockwise.
+  Paging to another period afterwards shows the new figures at once, without replaying it.
+- **Overlapping events in the day and week view are placed by person, not by start time**
+  (D#1605, #1633). Events at the same time used to be packed by the clock alone: whoever
+  started first stood on the left, so the same person could be left at nine and right at
+  eleven, and two events with the same start and end could swap places from one load to the
+  next. Now every person in a group of overlapping events gets a column of their own, in the
+  order in which the household's members are listed - the order of the people filter. An event with several people stands where the first of them in
+  that order stands; events of people who are not household members follow after the members,
+  and an event with nobody assigned comes last. Two events of the same person at the same
+  time stand next to each other. Nothing is reserved: an event that overlaps nothing keeps
+  the full width, and a person who is not part of a group takes no room in it. The price is
+  width in a chain: with 9:00-10:00, 9:30-11:00 and 10:30-12:00 for three people, the third
+  used to take the place the first had left and the group was two columns wide; now it is
+  three, because the third may not stand in the first one's column, and a longer chain of
+  different people grows by a column per person. Schedule blocks, the all-day row, the month
+  and the agenda are unchanged.
+- **Two people with the same initials no longer look the same** (#1464). Linda Johnson and Leo
+  Johnson both showed "LJ" on their avatars, in the people picker, in avatar stacks and on the
+  overview, and colour was the only difference. Whoever shares their initials with somebody
+  else in the household now gets the first letter of their first name and the next letter of
+  it that nobody carries yet: "LI" and "LE". If that letter is taken as well - by Lisa Imhof,
+  "LI" - the next one is used ("LN"), and after the first name the letters of the last name.
+  Everybody whose initials are theirs alone keeps them, it stays at two characters, and the
+  result is the same in every view and for everyone who looks, because it is worked out from
+  the names of all accounts and not from the list a page happens to show. A deactivated
+  account still counts, so nobody's initials change when somebody leaves; they can change
+  when a new person joins or somebody is renamed. Names written without a space in Hangul,
+  Han or Kana take the family name's first character and the given name's last (김민수 and
+  박민수 become 김수 and 박수). Two accounts with exactly the same name stay the same. For
+  API clients: `GET /api/v1/auth/me` and the login answer carry `initialsRoster`, the display
+  names of all accounts; a shared-expenses guest gets an empty list.
+- **Removing a member no longer takes their entries with it** (#1381). Deleting someone under
+  Settings, Family used to delete everything that person had created as well - appointments,
+  tasks, notes, documents, and payments they had recorded for others, which silently changed
+  everybody else's balances in shared expenses. And anyone who had taken part in a shared
+  expense, or had ever added a quick link, could not be removed at all: the app answered with
+  "Internal server error". Now it depends on what the person leaves behind. If anything shared
+  still refers to them, the account is **deactivated** instead of deleted: every entry stays and
+  keeps their name, balances stay as they are, and the person stands at the end of the list
+  marked "Former member". If nothing shared refers to them, the account is deleted as before.
+  The dialog says both, and the message afterwards tells you which one happened.
+  **Access ends at once.** A deactivated person is signed out everywhere and cannot sign in
+  again, neither with a password nor through single sign-on, which recognises the account and
+  turns it away instead of creating a second one. API tokens acting as that person are
+  revoked, and so are tokens they issued for somebody else, because only the person who
+  issues a token ever sees it - issue those again if an integration still needs them.
+  Invitation links and wall tablet pairing codes they created and nobody has used yet stop
+  working; a tablet that is already paired stays. Their calendar feed addresses stop working,
+  a wall tablet can no longer tick off anything in their name, password reset links are
+  dropped and no new ones are sent, and their two-factor recovery codes are deleted. They get no more push messages, mails or reminders. An
+  administrator who is deactivated stops being one, and the last administrator still cannot
+  be removed.
+  **Private data stays where it is.** Health and cycle records, private notes, shift plans and
+  the person's own contact card and birthday are kept when an account is deactivated; nobody
+  can sign in to read them, and people who look after that person keep the access they had,
+  but nobody new can be given it. Removing that data is not part of this change. A deactivated person can no longer be picked
+  as assignee, attendee or group member, while everything they were already part of keeps
+  them. Bringing an account back is not possible yet. For API clients:
+  `DELETE /api/v1/auth/users/{id}` still answers `200 { "ok": true }` and now adds
+  `outcome` (`"deactivated"` or `"deleted"`) and `traces`; `GET /api/v1/auth/users` carries
+  `deactivated_at` per account.
+- **Housekeeping chores work like every other list.** A chore row carried a pencil and a bin
+  side by side, 4px apart; the pencil opened the same dialog as a tap on the row, and on a
+  phone the name was left with 198 of 358px. The row now opens the dialog when tapped, "Delete"
+  sits in the dialog footer, and on a touch screen a swipe to the end of the row deletes and a
+  swipe from the start marks the chore done. Deleting no longer asks first: it shows "Undo" for
+  five seconds, and undoing brings the chore back with its last completion. The circle is the
+  same one as in Tasks - 20px and neutral until you tick it, instead of 24px and green at rest.
+- **Row titles share one type size.** The name of a list row was set in four ways - 15px
+  semibold in Tasks, 16px regular in Budget entries and subscriptions, 16px medium in most
+  modules, 17px semibold in the agenda, contacts and birthdays. It is 16px medium everywhere
+  now; card titles keep their heading size.
+- **Budget: the seven tabs share one skeleton.** Figures use one size everywhere (28px; the
+  side columns of the overview and the loans tab showed the same card at 20px), and on a phone
+  every tab with figures shows them as one row, accounts included. On subscriptions and split
+  expenses the section titles now stand above their lists, with search and tools to the right,
+  as on the overview; the lists themselves are plain row lists instead of rows inside a padded
+  card.
+- **Budget statistics: the share ring sits with the categories it explains.** On a phone it
+  stood 874px below the category bars next to an empty area; on a desktop it sat in a side
+  column that was empty beneath it. It now shares the first row with the trend chart, the bars
+  use the full width below, and a line next to the ring names the number of segments, the
+  largest one and the total. The marker line no longer stands at the last data point before you
+  touch the chart.
+- **One period stepper in calendar, meal plan, budget, housekeeping reports and shift plan.**
+  The five modules now share the same control. The shift plan's "Today" disappears while today
+  is on screen, like everywhere else. In the budget on a phone, the month is shown in the
+  module colour while you are somewhere else, and a tap on it jumps back to the current one.
+- **Pantry: swipe a row to delete, and "Manage locations" is a button.** A swipe to the end of
+  a pantry row deletes it, with "Undo"; the stepper and the cart button are excluded from the
+  gesture. The header's "..." menu had a single entry and is now that action itself.
+- **Housekeeping: section titles stand above their cards**, as in the other modules.
+- **Headers have one height on a desktop.** Single-row headers measured 65 or 69px depending on
+  the module, and the "New" button moved by 2px when switching; all are 69px now.
+- **Settings: headings follow one scale.** On a sheet with "For me" and "For the household",
+  that scope title was the smallest heading on the page. It now ranks above the sections it
+  groups (sheet 22px, scope 20, section 17, card 16), also for screen readers.
+- **Sign-in, setup, invitation and password reset look like one family.** All of them show the
+  app mark and name, every password field has the eye to show what you typed (new on the
+  invitation and reset pages and on the repeat field of setup), and errors are announced the
+  same way on each page.
+- **Contacts: phone numbers, mail addresses and map links are no longer pink.** They stood in
+  the contacts colour right above a red "Delete"; the value is plain text now and the icon of
+  its row carries the colour.
+- **The shift plan steps through weeks like every other period.** The compare view read
+  "back, Today, forward, week"; it now reads back, week, forward and then "Today", as in the
+  calendar and the budget, and the arrows say what they move ("Previous week").
+- **Dialogs carry their module's colour.** The active chip in the Tasks filter sheet was violet
+  next to the same chip in green on the page behind it.
+- **Budget: amounts have one weight, and zero is not a gain.** The amount of a split expense
+  stood heavier than an account balance, which stood heavier than a booking; all of them are
+  semibold now. "You are owed 0.00" in Split no longer shows in green, "You owe 0.00" no longer
+  in red. "Loan transactions" is a real heading, so a screen reader finds the list.
+- **Rewards: the history rows are the shared list rows, and section headings carry no icon.**
+  The heading "Rewards" under the tab "Rewards" is no longer shown on a desktop either.
+- **Rewards, Waste and Housekeeping use the width of a desktop window.** These three stood as a
+  720px column next to an empty right half, and where one tab was wider than the others, the
+  header and its primary button jumped when you switched tabs - in Rewards by up to 431px. Each
+  module now has one outer edge for all of its tabs, and the button stays where it is. From a
+  window of about 1280px the lists get a second column with what was already there: the latest
+  bookings next to the point balances in Rewards (the heading leads to the full history) and
+  the balances next to the history, waste types and import sources next to the next pickups,
+  the month's figures next to the visit reports and a person's visit log next to the staff list
+  in Housekeeping. The lists themselves keep their reading width. Nothing changes on a phone
+  except that the Rewards overview ends with the latest bookings.
+- **Every Budget tab ends at the same edge on a desktop, and so does the header.** The "new"
+  button stood 276px (at 1280) or 404px (at 1440) short of the content it belongs to. The plan
+  was a single 720px column, loans changed their right edge four times on the way down, and the
+  net worth of the accounts sat in a 232px tile next to an empty row. Now the plan shows the
+  category budgets with the savings goal beside them, loans show the filter, the loans and their
+  transactions in one column with the three figures beside it, and the net worth runs across the
+  row above the accounts. In "Split" the recent expenses take the wider column, balances and
+  activity the narrower one. Phones are unchanged.
+- **"Latest vitals" in the Health overview uses the width instead of one long column.** On a
+  desktop the nine tiles stood one below the other, 930px tall, next to 640px of empty space.
+  The card now runs across the overview with four or five tiles per row, about a third as tall.
+- **The calendar's day view shows what comes next beside the day.** On a desktop the day was a
+  single 932px column, the phone layout stretched. From a window of about 1280px the next seven
+  days stand beside the hour timeline as agenda rows; a row opens the event, the heading leads
+  to the agenda. The phone's day view is unchanged.
+- **The Budget header is one row shorter on a phone.** Title, month stepper and tabs stood in
+  three rows (162px), and on the four tabs without a month the middle row only carried a
+  caption. The month now sits at the end of the title row with a short label ("Oct 2026"), the
+  caption of the other tabs stands in the same place, and the header is 117px on every tab, so
+  nothing moves when you switch. While you look at another month, a tap on the month label
+  returns to the current one; the arrows stay where they are.
+- **Contacts, Birthdays, Waste, Notes, Documents and Settings lose their second header row on a
+  phone.** That row only carried one or two icons (search, "more"). They now sit at the end of
+  the title row, and the list starts about 50px higher; an open search takes the row. In Waste,
+  "Add waste type" moves into the "more" menu on a phone, and in Documents the grid/list choice
+  moves into the sort menu. The note "Birthdays also appear in the calendar" no
+  longer stands above the list - it is still in the dialog where you add one.
+- **"Split" shows the first expense on the first screen of a phone.** The group list, the group
+  header and the balances stood as three cards in front of it, and the first expense came after
+  more than a full screen. The group choice is now one row that names the active group and
+  opens the list with search, "new group" and Active/Archived; the group header is just its
+  actions, and the balances are tighter. On a wide window nothing changes.
+- **Shift schedule: "Compare" and "Statistics" start with two rows of controls on a phone
+  instead of a third of the screen.** In "Compare" the people are one row you swipe through,
+  next to Week/Day, with the week stepper below; in "Statistics" person and period stand side
+  by side above the two buttons. The comparison or the figures begin about 170px higher.
+- **Inventory and the Housekeeping overview show their figures as one row on a phone.** Three
+  and four tiles stood in front of the list, one of them for "0". Now one row names the main
+  figure and up to two others, and a tap opens the tiles; a figure that is zero is left out.
+  The first category in Inventory starts 106px higher, the first visit in Housekeeping 57px.
+- **Rewards fit about five to a phone screen instead of two and a half.** A reward was a tall
+  tile with its emoji on a line of its own; on a phone it is now a compact card with emoji and
+  text side by side. The heading "Rewards" under the tab "Rewards" no longer takes a row, and
+  the overview ends with the three latest bookings instead of six.
+- **Shopping: checked items keep their way into the pantry.** "To pantry" and "Remove checked"
+  lived only in the pill that appears for five seconds after the first tick and then stays
+  away until nothing is checked. Both now also stand in the list menu, in a group of their own
+  while something is checked; the menu is grouped into checked items, the list, master data
+  and delete. The pill stays as the shortcut.
+- **Tasks: the dialog asks when, who and how important first.** Due date and time, assignee,
+  priority and category follow the title; the note comes after them. Recurrence and reminder
+  wait behind "More settings" while they are empty and stay open once set. On a phone the due
+  date is on the first screen (it stood at 700 of 844px) and the dialog is a quarter shorter.
+- **The formatting toolbar appears with the focus.** Above a note it took three rows on a phone
+  (162px) and twelve tab stops. It now shows when you enter the text field, runs as one row you
+  can scroll, and is a single tab stop: Shift+Tab from the field enters it, the arrow keys move.
+- **Notes: the editor is a workspace.** The text field was six lines high and started below the
+  keyboard line on a phone. Title and text no longer carry label rows, and the text field fills
+  the sheet (about 320px on a phone, 400px on a desktop) and grows with what you write.
+- **Tasks: the filter sheet is shorter.** Category and tag fold while nothing in them is
+  chosen, and grouping and "Show scheduled" form a separate "View" section at the end.
+- **Recipes: the uploaded picture opens the detail** as a 3:2 header; without a picture
+  nothing takes its place.
+- **Health on a phone: the start page is half as long.** Below "Due today" and the area list it
+  shows the two most recent vitals - the card title leads to all of them - and one row "Show
+  all values" for the rest. The CSV export is a button in the head that opens a dialog, on
+  every screen size.
+- **Settings: long sheets start with jump marks.** A sheet with more than three sections opens
+  with a row of links to them. On a phone that row stands in place of the sheet description, and
+  a sheet without it shows the description in two lines.
+- **Subscriptions on a phone: the billing cycle stands under the amount**, so the line with the
+  due date no longer wraps. **Budget accounts:** a long account name wraps to a second line
+  instead of being cut after "Gemeinsames Gi...".
+- **Movement follows one curve.** Hover and press feedback ran on a different easing curve than
+  pages, dialogs and lists; buttons, rows, chips and toggles now share the curve of the rest of
+  the app.
+- **Sheets from below move the same way.** The dialog sheet, the "More" sheet and the search on
+  a phone were three different movements; all three now rise by a short lift with a fade and
+  leave faster than they arrive. Menus fade out instead of vanishing.
+- **Switching a tab or a period no longer cuts.** Tabs inside Rewards, Housekeeping and the
+  shift schedule fade to the new content as Budget's already did, in the direction of the tab
+  you switch to, and paging by month or week (Budget, calendar,
+  meal plan, housekeeping reports, shift overview) brings the new period in from the side you
+  page to - with the arrows and shortcuts too, not only with a swipe. Health fades between
+  areas on a desktop as it did on a phone. With "reduce motion" switched on only a short fade
+  remains.
+- **Lists show what changed.** In Housekeeping, Waste collection, Pantry and Rewards a deleted
+  or decided row folds away, a new one unfolds and a reordered one glides to its place, instead
+  of the whole list being rebuilt in one step. Checked shopping items fade to their muted
+  colour.
+- **Rewards and the shift schedule no longer flash a loading state.** Rewards emptied the page
+  into a placeholder on every tab change and after every action; the shift overview did the
+  same on every week step. Both keep what is shown until the new content is there. Where
+  something does load for the first time, the shift schedule and the budget statistics show a
+  placeholder in the shape of what follows instead of a "Loading..." card or a list.
+- **Overview: customising no longer jumps.** Entering and leaving the customise mode slides
+  the tiles to their new position, and "+N more today" unfolds in place.
+- **Shopping on a phone: the add field unfolds** instead of pushing the list down in one step.
+- **Inventory on a phone: Edit sits at the bottom of the detail sheet** (#1463). The sheet had
+  Delete at the bottom, where the thumb rests, and Edit at the top, out of reach - the
+  riskiest action was the easiest one to hit. Edit is now the main button at the end of the
+  footer and Delete stands back at its start, as in the calendar. Deleting still asks first,
+  and without write access neither button is shown.
+- **Deleting a shared expense now leaves a trace instead of rewriting the books.** Until now
+  deleting an expense removed its bookings, so the balances changed and nothing showed why. The
+  expense now stays in the ledger and a counter-entry cancels it, so balances end up exactly where
+  they would be without it, the same way a reversed payment works. The activity names the deleted
+  expense with its title and amount, and the entry that added it is struck through and marked
+  "Deleted" at every access level. A payment recorded against the expense stays as it is: payments
+  are not tied to single expenses, so after the delete the balances show what was paid too much.
+  An expense in another currency is cancelled in the currency it was booked in. Expenses deleted
+  before this change keep their balances; only their trace is missing. (#1382)
+
+### Fixed
+
+- **The first visit no longer reloads itself and empties the login form.** One to four seconds
+  after the very first load the page reloaded, and whatever had been typed into the login form
+  was gone. The reload was meant for an update of the app, but it also fired when the app was
+  installed in the browser for the first time.
+- **An update of the app no longer interrupts what you are doing.** When a new version arrived,
+  the page reloaded 200 ms later - with a dialog open, a half-filled form or an unsaved overview
+  layout. Now it reloads right away only when nothing is open and nobody is typing. Otherwise a
+  notice with a "Reload" button appears, and the new version loads with the next page change or
+  when the app goes to the background. The notice says the same in every language; in German,
+  Persian, Indonesian, Korean and Polish it used to announce a reload that was already over.
+- **Switching the language without a connection no longer leaves the app half switched.** If the
+  language file could not be loaded, texts stayed in the old language while numbers and dates
+  followed the new one, the setting showed a parser error, and the next start fell back to
+  German without a word. A switch that cannot load its file now changes nothing: the selection
+  returns to the language in use and the line below says that there is no connection.
+- **Health on a phone no longer jumps while it loads** (cause of #1770). The block above the list
+  of areas - person, "Due today", "Quick add" - appeared only once its data had arrived and
+  pushed the list down by almost 500 px, under the finger; each row then grew again when its
+  status came in. The block now holds its place from the first frame with a placeholder in its
+  final shape, and the rows have their two-line height from the start. Measured layout shift at
+  390x844: 0.58 before, below 0.01 after. The areas themselves load with a placeholder in the
+  shape of their content instead of the word "Loading".
+- **A required field no longer complains before anything was entered.** In "New event" the title
+  showed "This field is required." on the first Tab or when reaching for the date picker, and
+  everything below it jumped down by a line. An untouched empty field now stays quiet until the
+  form is submitted or until something was typed into it and removed again, and the message
+  slides in instead of pushing the form. This applies to every dialog that marks required fields
+  (events, tasks, meals, recipes, pantry, inventory, contact sync).
+- **Checked items no longer twitch when the list changes.** Adding or deleting an item in the
+  shopping list, or opening a group, replayed the little "checked" animation on every item that
+  had been ticked off long ago. It now plays once, on the box you touch - also when you take a
+  tick back - and has become calmer. The same applies to tasks, subtasks, the housekeeping
+  list and checklists in notes.
+- **The tab bar keeps its glass while you change pages.** On a phone the bar at the bottom went
+  see-through for a moment on every tab change, and the round "+" button popped in again each
+  time. Both now stand still while the page underneath changes; the "+" only arrives with an
+  entrance when the page before had none.
+- **A tapped row no longer stays highlighted on a phone.** After a tap, list rows, task cards and
+  the cards on the overview kept the look they have under a mouse pointer until something else
+  was tapped.
+- **Overview on a desktop: opening "New" no longer tips the button over.** The plus turns into
+  a cross by rotating - and it was the whole button that rotated, label included, so the capsule
+  stood diagonally at 45 degrees and turned grey while its menu was open. Only the icon turns
+  now, and the capsule keeps its colour. The round button on a phone looks as before.
+- **Swiping a row shows its whole label at the point where the swipe takes effect.** Icon and
+  word sat in the middle of a panel half the row wide, while the action triggers after 80 px -
+  at that moment a phone showed "Che" and half a tick. They now stand inside the strip the swipe
+  uncovers, on both sides and in right-to-left languages, in every list that swipes.
+- **Dark theme: the selected segment and the switch knob are the lighter surface again.** The
+  selected tab of a segmented control was darker than its track and read as a dent, and the knob
+  of a switch was a dark dot on a light rail. The thumb now sits one step above its track
+  (module-coloured labels on it keep at least 4.5:1), and the knob is white in both themes; a
+  switch that is on uses the same violet as a primary button, so the knob stands at 5.7:1 instead
+  of 2.7:1.
+- **The budget tile on the overview wears the budget colour.** Its mark was violet, the colour of
+  the overview itself, because the colour was derived from the tile's link and that link carries
+  a `?tab=` part. The fasting tile, which had no colour of its own either, now wears the health
+  colour like the other health tiles.
+- **The login pages show the Yuvomi mark as it is.** In the dark theme the mark on login,
+  invitation and password reset was three dark dots on a lilac tile, and the circles filled less
+  than a third of it. Sidebar and login pages now draw the same mark - the gradient tile with
+  the three light circles of the app icon - and it no longer changes with the theme.
+- **A confirmation without an explanation has no empty gap.** Dialogs such as "Log out of this
+  device?" showed an empty band between two hairlines, between the question and its buttons.
+- **Tasks on a phone: after picking a folded entry from the tools menu, the keyboard focus is
+  back on the menu button.** With the header docked, view switch and filter move into the "..."
+  menu; choosing one of them there left the focus on the page instead of on the button the menu
+  was opened from.
+- **Health overview: the medication name gets its own line on a phone, and the gap above "Latest
+  vitals" is always there.** The dose row left the name 81px, so "Eisen (Eisenbisglycinat)" broke
+  in the middle of the word; the name now stands on the first line, time and actions below it.
+  On a desktop the vitals band could sit flush against the card above it, depending on which
+  column was the tallest.
+- **Notes: no empty row between pinned and other notes.** When the pinned notes did not fill
+  their last row - five notes in four columns - the rest of that row stayed empty and "Other
+  notes" started a screen further down. The other notes now continue in that row; their heading
+  starts in the first free column. On a phone nothing changes.
+- **A new task shows up where you can see it.** After adding a task the list simply redrew: the
+  new row sat somewhere between the others - below the fold in a long list, hidden in a
+  collapsed group - and the detail column kept showing the previous task. The new row now
+  scrolls into view and slides in, its group opens if it was collapsed, and on a desktop the
+  detail column shows the task you just added.
+- **Inventory: a deleted item no longer stays in the address.** Deleting the selected item could
+  leave `?open=<id>` in the address bar, so a reload showed "not found". The detail row for the
+  warranty is now labelled "Warranty" and names the duration and the end date; it used to carry
+  the form label "Warranty (months)" above a date.
+- **Editing a shopping item: quantity and category, price and store stand side by side again.**
+  The dialog used a layout class whose stylesheet is only loaded in the pantry, so each pair fell
+  into two full-width rows and the dialog was 748 px long on a phone; it is 563 px now and fits
+  without scrolling.
+- **Arrow keys in the date picker move one day again after changing the month.** Every month
+  change added another key listener to the grid of days: after two changes an arrow key jumped
+  three days and Page Down three months. The keys are now bound once per opened picker.
+- **The meal plan's week board no longer cuts its cards off on a short window.** At a window
+  height of 650 px every planned meal lost its lower edge, including the "+" for a second meal
+  in the same slot, and the board offered no way to scroll there. A row is now as tall as its
+  tallest card, and the board scrolls vertically when the week does not fit.
+- **Housekeeping: the tab bar no longer jumps when you open "Reports".** On a phone the month
+  stepper pushed itself between the title and the tabs, so the bar moved 52 px down under your
+  finger on that one tab. The tabs now sit in the same place on all four, and the month stepper
+  stands below them, above the figures it selects. On a desktop it stays in the title row, where
+  nothing ever jumped.
+- **Shifts in the calendar are readable: tinted chip, colour dot, dark text.** A shift from the
+  shift plan stood in the calendar as a block of its full colour with white 12 px text - 3.26:1
+  on the early shift's teal, less on amber. It now looks the way the same shift does in the shift
+  plan's comparison view: a light tint of its colour, the full colour as a dot before the name,
+  the text in the normal ink. Month, the all-day row of week and day, and agenda, in light and
+  dark; every colour of the starter palette is above 10:1 for the name and 5:1 for the time.
+- **The cycle calendar tells a screen reader what each day shows, not only its date.** Period,
+  predicted period, fertile window, ovulation, an entry and "today" were colours on the day and
+  nothing else - somebody listening to the calendar got 42 dates and no state. Each day now names
+  what it shows in the words of the legend next to it ("3 October, Period, Flow: Medium, Entry"),
+  as a button and in the read-only view of your own cycle. Somebody else's cycle stays hidden
+  from the screen reader as before.
+- **Budget statistics: an entry added from an empty period lands in that period.** The "add an
+  entry" action of an empty week, month or year opened the dialog with a date from the month of
+  the entry list, so the entry went elsewhere and the report stayed empty. The dialog now starts
+  on the first day of the period on screen, or on today when the period contains it (#1775).
+- **Budget and calendar: a second swipe while the next period is still loading is ignored.** Two
+  quick swipes forward in the budget asked for the same month twice instead of moving on by two,
+  and two opposite ones left whichever answer came last on screen. A swipe now starts only when
+  the one before it has finished loading; the arrows are unchanged. In the statistics, a late
+  answer for an earlier period no longer replaces the period on screen (#1775).
+- **Waste: "Add pickup" is no longer offered while every waste type is archived.** The entry in
+  the header menu opened the dialog for a new waste type in that state - a pickup has no type to
+  pick then. It is hidden until a type is active again, as it already was before the first type
+  existed (#1775).
+- **The filter popover on the desktop follows the window.** It was placed once when it opened;
+  narrowing or rotating the window while it was open could leave it partly outside until it was
+  closed and opened again. It is now placed again on every change of the window, and closes when
+  the window gets narrower than the width from which the filters open as a popover (#1775).
+- **Shift types: a field removed in the dialog can be attached again without leaving it.** Removing
+  an attached field only deleted its row; it did not come back to the list of fields to add, and
+  with every field attached there was no such list at all - undoing a slip meant cancelling the
+  dialog and losing the other edits. A removed field now returns to the list at once, and comes
+  back with its "show in overlay" switch as it was (#1775).
+- **Dialogs ask before discarding a change that is only a tick.** Closing a dialog asks "Discard
+  changes?" when a field differs from what it was on opening, but a checkbox or a radio button
+  was compared by a text that never changes - switching only "Active" in a shift pattern, or the
+  switches of the fields of a shift type, and closing the dialog lost the change without a
+  question. Their state now counts, in every dialog. The participants sheet of Rewards saves
+  each tick at once and therefore still closes without asking (#1775).
+- **Budget, split expenses: the header no longer says "All groups" above the numbers of one
+  group.** Since the figures at the top of the tab show the selected group, the note in the
+  header claimed the opposite of what stood below it. It is gone on this tab; the total over all
+  groups keeps its label in the group list, and the selected group its own heading.
+- **An open filter popover no longer stays on screen when the page changes.** On a desktop the
+  calendar's filter popover hangs above the page and closed only on Escape or a click outside:
+  going back in the browser or changing the page from the keyboard left it standing over the next
+  page. It is now removed on every page change, and so is the new filter popover in Tasks.
+- **The API description of `PUT /api/v1/meals/{id}` names the two fields a series edit reads**
+  (follow-up to #1679). With `?scope=series` the route has long taken `repeat_until` (the end of
+  the series; an empty string removes it) and `ingredients` (replacing those of the series and of
+  all its meals), but the OpenAPI document listed them for creating a meal only. Both are now
+  described for the update as well, with the note that they are read in a series edit alone.
+- **Holiday countries and regions are named in your language, and the delete button of the task
+  selection is no longer announced as a question** (#1723). Under Settings, Calendar, the list of
+  countries for public holidays showed English names in every language, in English order. The
+  names now follow the language of the app and the list is sorted in it; a country the browser
+  cannot name keeps the name it had. The regions below a country (federal states, cantons) come
+  from the holiday service, which carries them in several languages: the app now asks for yours
+  and falls back to English where the service has none. The three nations of the United Kingdom
+  stay in English. In Tasks, with several tasks selected, a screen reader read the delete button
+  as "Delete 3 tasks?" where the screen says "Delete" - the question belongs to the confirmation
+  step that follows. The button is now called "Delete 3 tasks". That name is new in all 26
+  languages; in Vietnamese, Hindi, Arabic, Persian, Korean, Japanese, Chinese and Filipino it was
+  not written by a native speaker. For API clients:
+  `GET /api/v1/preferences/holidays/subdivisions/{countryCode}` takes an optional `lang`; without
+  it the answer is in English, as before.
+- **A monthly shared expense on the 29th, 30th or 31st no longer skips a month** (#1721). A
+  recurring shared expense only knew its next date, not the day it was meant for. After a
+  booking on 31 January the next date overflowed to 3 March: February got no booking at all,
+  nothing said so, and the series stayed on the 3rd from then on (on the 2nd or 1st when it
+  started on the 30th or 29th, or after a 30-day month). A series now remembers its day. In a
+  shorter month it books on the last day and returns to its day afterwards: 31 January,
+  28 February (29 in a leap year), 31 March. A yearly series from 29 February books on
+  28 February and on 29 February again in a leap year, instead of moving to 1 March for good.
+  Resuming a paused series counts the same way. Weekly series were not affected.
+  **Existing series that demonstrably drifted off the 29th-31st return to their day; the month
+  that was skipped is not booked afterwards.** The evidence is the first expense the series
+  booked: if it lies on the 29th, 30th or 31st and the next date sits on the 1st, 2nd or 3rd
+  where the overflow left it, the next date moves to that day (or the last day) of the same
+  month. If the skipped month is still ahead at the time of the update - the series booked on
+  31 October and waits for 1 December, and it is 10 November - the date moves into that month
+  instead (30 November), so it is not left empty; that is a date in the future, not a booking
+  made up afterwards. A series that was really created on the 1st to 3rd stays there. So does
+  one whose first expense has been deleted or was ever edited, because then nothing shows
+  reliably where the series started: an edit can have changed the date, and the app does not
+  record what an edit changed, so an edit of the title alone counts as well. Two more cases
+  keep the date where it is. If the series already has an expense in that month, the series
+  returns with the following booking. And no date is ever moved into the past, where the next
+  run would book it at once: a paused series whose date already lies behind returns when it is
+  resumed. A yearly series that stands on 1 March and cannot be moved back for one of these
+  reasons stays on 1 March. If a month is missing in your group, add that expense by hand.
+  Shared expenses only: subscriptions and tasks keep their own rules. For API clients:
+  recurring expenses carry `anchor_day` (migration 234).
+- **Meal plan and recipes with read-only access: no more buttons that end in an error message**
+  (#1265). A member who may only read the Kitchen still saw every control on both tabs: the plus
+  buttons and the empty slots, the edit dialog with Save and Delete, the bin on a meal, the drag
+  handle, "Fill plan at random", the recipe column, and on a recipe Edit, Duplicate, Delete and
+  "Add to meal plan". Each of them ended in "no permission"; a dragged meal jumped back, and a
+  deleted one came back after the undo window. Those controls are now gone for such a member.
+  What the plan and the list show stays, and is readable in full: tapping a meal opens a
+  read-only view with everything the form shows - date, meal, ingredients with their shopping
+  category, the saved recipe, notes, the recipe link and whether it repeats. A recipe opens its
+  details as before, which now also name the meals it is meant for and the category of each
+  ingredient. An empty week or an empty recipe list only says so, instead of inviting you to add
+  something. "Add to shopping list" on a recipe keeps following the right it needs: it stays
+  for a member who may read the Kitchen and edit Shopping. Assigning a recipe ingredient to a
+  pantry row needs write access to both the Kitchen and the Pantry, as the server requires; with
+  only the Pantry right the button used to be offered and the save was refused.
+- **The PDFs in the demo data are real PDFs** (#1511). The demo documents carried a line of
+  placeholder text under a `.pdf` name, so the built-in preview could not open them and
+  every screenshot of an opened document showed an error. Each one is now a one-page PDF with
+  the title and description of its entry, in the language the demo was seeded in, and it opens
+  in the preview and in the browser's own viewer. The three demo images are still placeholders.
+  Only a database filled by `scripts/seed-demo.js` is affected.
+- **The reminder-list settings have one name: "Reminder sync"** (#1524). The section under
+  Settings, Tasks was headed "Show/hide reminder lists", while the settings search and the link
+  from the task defaults called it "Reminder sync" - whoever searched for the one found the
+  other. The heading now carries the name the search and the links use. It is also the name
+  that says what the section does: its switches decide which CalDAV lists the household syncs
+  and whether a list feeds Tasks or Shopping, nothing in it merely hides a list.
+- **Wording: waste colours are named after what they show, and two stale sentences are gone**
+  (#1507). In the waste type dialog the swatch called "Violet" was fuchsia and the one called
+  "Teal" was emerald; both now carry those names, which is what a screen reader announces. The
+  hint above the module order under Settings, Navigation listed groups that no longer exist
+  ("Overview, Plan, Home") and now simply says the modules are sorted within their group. In
+  German, the empty waste page read "Papier -, um".
+- **Wording: one word for the housekeeper, a pink that is called pink, "Square (2×2)", and a
+  real sentence when weather coordinates are missing** (#1723). In Housekeeping the person had
+  four names: the tab said "Staff", its heading "Housekeeping staff", the add button
+  "Housekeeper", and in German the short add label just "Person". It is "Housekeeper"
+  ("Haushaltshilfe") everywhere now; the tab and its heading read "Housekeepers", and a
+  housekeeper's account under Settings, Family carries that word as its role instead of
+  "Staff". The module keeps its name. In the waste type dialog the swatch called "Magenta" is a
+  pink and is now called that - only the name a screen reader announces changes, saved waste
+  types keep their colour. On the overview, the largest of the four tile sizes was called
+  "Standard (2×2)" although no tile starts in it; it is "Square (2×2)", saved layouts are
+  untouched. And in the weather settings, saving without valid coordinates showed the two
+  field names, "Latitude / Longitude", as the error; it now says "Enter valid coordinates."
+  The new wording is in all 26 languages; in Vietnamese, Hindi, Arabic, Persian, Korean,
+  Japanese, Chinese and Filipino it was not written by a native speaker.
+- **Resuming a paused recurring shared expense no longer books every date it missed** (#1647).
+  A recurring expense that was paused for six months and then resumed got six expenses within
+  six hours, one per hourly run, each with its original date. Resuming now skips the missed
+  dates: the series continues at its next date that is not in the past, in its own rhythm, and
+  nothing is booked for the time it was paused. A date that falls on today is still booked.
+  The app has no control for this yet, so it concerns API clients: this changes what
+  `POST /api/v1/split-expenses/recurring/{id}/pause` does by default when it resumes. To get
+  the previous behaviour, send `{ "missed": "book" }`; `"skip"` is the default, and any other
+  value answers 400 with `reason: "invalid_missed"`.
+- **An avatar never shows more than one character per name part** (#1464). A name starting
+  with "ß" put three letters on the disc ("ßeta Schmidt" showed "SSS"), because writing a
+  letter in capitals can turn it into two; the same went for the ligatures "ﬁ" and "ﬂ". The
+  disc now keeps one character each ("SS"). Along with it: brackets, quotation marks and
+  other punctuation at the start of a name are skipped ("(Grandma) Erika" shows "GE", not
+  "(E"), and a name part made of punctuation only does not count; an invisible direction
+  mark in front of an Arabic or Hebrew name no longer leaves the disc empty; two Arabic
+  initials stand side by side instead of joining into a word; Georgian letters stay as
+  typed instead of turning into a capital form most fonts cannot draw; the flags of England,
+  Scotland and Wales stay whole on browsers without `Intl.Segmenter`; and two half-width
+  katakana fit the small disc, so they are no longer cut to one. Capitals are formed the
+  same way in every language of the interface, so a person does not show different initials
+  depending on who looks: "ipek" gives "I", and whoever types "İpek" keeps the "İ".
+- **Documents: Esc closes the viewer again when the PDF took the focus by itself.** Opened by
+  keyboard, a file whose preview fails - one that claims to be a PDF and is not one - left the
+  focus inside the browser's built-in PDF viewer without anyone having touched it, and from
+  there no key reaches the page: Esc did nothing. The same happened after Tab from a blank spot
+  of the dialog. Focus that arrives in the PDF while you are on the keyboard now goes back to
+  the control that had it, so Esc closes and the focus returns to the document you opened. What
+  stays as it is: after a click into the PDF, Esc does not close until you click the dialog or
+  its X. The built-in viewer is a separate part of the browser that keeps its keystrokes, and
+  taking the focus away from a click would break selecting and copying in the PDF (#1511).
+- **Settings: the sheet you are on is visible in the sidebar, not hidden under its search.** The
+  sidebar scrolls on its own and its search field stays at the top while it does. When the open
+  sheet lay above the visible part - after Back, from the command palette, from a link - the
+  sidebar scrolled it to its very top edge, exactly where the search sits: at 1280x700 the active
+  entry stood at 32-72 under a search at 32-100, all 40px of it covered. An entry half behind
+  the search was not moved at all. The sidebar now brings the entry to just below the search
+  (#1509).
+- **Calendar: the week follows the screen when it crosses the phone width.** On a phone the week
+  is a window of three days around the selected day, on a wider screen the whole week, and the
+  label, the arrows and the loaded range follow the same threshold. Only the month was redrawn
+  when the width crossed it. Rotating a tablet or resizing the window from 1280px to 390px left
+  seven columns of 49px each under "CW 41"; the other way round, three columns of 311px each
+  under "05.10. - 07.10.2026", with arrows that still stepped by three days. The week is now
+  rebuilt on that change, its range reloaded first when the other form shows a day that was not
+  loaded (the selected day at the edge of the week), and the day view switches between the long
+  and the short weekday in its label (#1504).
+- **Phones: the tab you are on stays inside the tab strip.** A tab strip that does not fit the
+  screen scrolls, and it snaps to the start of a tab. Opening a tab that lay past the edge moved
+  the strip by exactly the missing pixels, and the snapping then pulled it back to the nearest
+  snap point, which could be the one behind it. Budget "Loans" at 390px stood at 327-404 in a
+  strip that ends at 374, 30px outside and without the strip having moved at all; the same at
+  320px (subscriptions, 21px), 360px (reports, 8px) and 414px (loans 6px, reports 20px), on a tap
+  as well as after a reload. At 375px it happened to work, which is why it looked fixed. The
+  strip now moves to the first snap point at which the tab fits with its padding, so there is
+  nothing left to pull back, and it does so in right-to-left languages too (#1504).
+- **A refused change is sent to the server once, not twice.** When the server turned a change
+  down with a reason - a locked task, a read-only module, a recipe managed elsewhere - the app
+  sent the same request a second time before showing the message. The repeat exists to recover
+  from an expired security token, and it ran for every refusal. It now runs only when the
+  server names the token as the reason, or names no reason at all; a refusal with any other
+  reason is shown straight away. Nothing was saved twice, since the second attempt was refused
+  as well, but each such refusal cost a second round trip (#1669).
+- **A failed single sign-on says why in the log.** When the identity provider turned the token
+  request down, the server log showed only "server responded with an error in the response
+  body" and a stack trace - the same line for a wrong client secret, a mismatched redirect URI
+  and an expired code. The entry now carries the provider's `error`, `error_description` and
+  HTTP status, the challenge of a 401 answer, and the network error underneath a failed
+  discovery (certificate, DNS, connection). Secret, authorization code and tokens are not
+  logged (#1675).
+- **Health: "month" and "week" no longer start empty.** The default month was the calendar
+  month and the activity week the calendar week, so on the 5th the trend said "too few
+  readings" over four measurements from the week before, and on a Monday the week was empty
+  although yesterday's run was listed. The current period is now the last 30 or 7 days up to
+  today and says so in its label; paging back still shows the calendar month or week.
+- **Health: adherence shows one figure.** The overview counted 30 days and the medication page
+  7, so the same figure read 21 % here and 86 % there. Both use the last 7 days and name them.
+- **Health: the year chart labels months** instead of the first day of each month.
+- **Tasks: "Filter 1" is no longer the resting state.** The default status "open" counted as an
+  active filter, so the button always carried a number and its active colour, and "Clear all
+  filters" led to a third state that also showed finished tasks. The button now marks only
+  what differs from the default, and "Reset filters" restores it.
+- **Meal plan: a dragged meal lands at once**, and a move the server refuses says so instead of
+  silently snapping back. Saving a meal confirms with "Meal saved." instead of the dialog
+  title "Add meal".
+- **Recipes: your own recipes show their picture in the list.** The thumbnail appeared only for
+  recipes mirrored from Mealie or Tandoor.
+- **Shopping: the tick is felt when you tap**, not after the server has answered.
+- **Housekeeping staff: the row's button is as high as the row** (it was 25px) for keyboard and
+  assistive technology.
+- **Required fields: the star is no longer part of the label text.** In thirteen labels the
+  " *" was written into the translated text, so screen readers read it out, it lacked the
+  warning colour of the other stars, and a loan's read-only view showed "Total amount *".
+- **Charts: the lowest axis value no longer runs into the first date** on a phone ("0 EUR" stood
+  3px next to "01.10.2026" in the budget trend; the health charts share the fix).
+- **Sign-in pages no longer stack inside each other.** Going from one page without sign-in to
+  the next inside the app - "Back to sign in" on the forgotten-password page, or the back button
+  between them - put the new page inside the old one. The card then shrank to the width of its
+  content (338px on the sign-in page, 307px on the reset page, instead of 380px), and a screen
+  reader met two nested main regions. Each of these pages now replaces the one before it.
+- **Budget: the category bars grow to their value.** They were built to animate and never did;
+  they now grow from the previous month's value when you page, and from zero the first time.
+- **Meal plan: a dragged meal lifts off** with a short movement, and its slot fades instead of
+  switching to pale in one step.
+- **The page title in Budget, calendar, notes and contacts no longer stutters while the header
+  collapses** on a phone; it changed its size across several layout steps during scrolling.
+- **Pantry: read-only access no longer offers what the server refuses.** With read-only access
+  to the pantry, the plus and minus buttons still changed the quantity until the server said no
+  and the row jumped back, a tap on a row opened the edit dialog with "Save" and "Delete", and
+  "Manage locations" and the "Add item" button of the empty pantry were there as well. The row
+  now shows its quantity without the buttons, and a tap opens a read-only view with everything
+  the dialog shows - quantity, location, category, best-before date, minimum stock and note.
+  The cart button stays for members who may write to the shopping list.
+- **The budget shows the whole list again when you come back to it** (#1593). Tapping a
+  person's avatar on an entry narrows the list to what that person is responsible for. That
+  filter survived leaving the budget: you opened another page, came back, and still saw only
+  those entries. It now falls back when the budget is opened, like the account filter and the
+  loan filters always did. Within the budget it stays as it was, also across months.
+- **The budget page answers a refused action in your language, at the field it is about**
+  (#1668). Outside the loan dialog the page still showed whatever the server answered - in
+  English, or for an account that no longer exists in German ("Konto nicht gefunden.") - as a
+  toast, in every language. Saving an entry, a series or an account, booking an expected
+  entry, adding a category, ticking off or deleting an installment, and deleting an entry, a
+  series, an account or a loan now say it in the app's own sentence. Where the refusal is
+  about one field of an open dialog, the sentence stands at that field: an account that was
+  deleted in the meantime at "Account", an amount above what is left of a loan at "Amount".
+  The loan dialog got more precise as well: a loan that would run too long says so, with the
+  limit of 600 months, instead of "does not amortize" - in the preview and on saving; 361
+  installments are answered with the allowed range of 1 to 360; too many installments
+  already paid names how many the loan has; and title, notes, currency and account each have
+  a sentence of their own instead of the general "could not be saved". For API clients:
+  every 400 and 409 of the write routes for entries, series, accounts, categories and loans
+  now carries a `reason` next to `error`, three of them with `max` (the limit the refusal is
+  about); budget plans are unchanged. A refused `POST /api/v1/budget/loans/preview` says why
+  (`reason`, `max`). An unknown `account_id` was answered in German and now reads "Account
+  not found." or "account_id must be a valid account id."; the other German `error` sentences
+  of the budget routes are the next entry.
+- **Budget API: the `error` sentences are English throughout.** For API clients only - the app
+  does not show these sentences, it reads `reason`. Some refusals of the budget routes were
+  still German or half German, because a German field name was put into an English sentence:
+  "month muss YYYY-MM sein", "Betrag muss größer als 0 sein.", "Titel is required.", "Kontotyp
+  must be one of: ...". They now read "month must be in YYYY-MM format.", "Amount must be
+  greater than zero.", "Title is required.", "Account type must be one of: ...", and the same
+  goes for the other field names: Amount, Category, Date, Interval, Interval count, Starting
+  balance, Credit limit, Color, Type, and `recurrence_rule` for an invalid rule. Affected are
+  entries, series, booking an expected entry, accounts, categories, budget plans, and the
+  `month`, `q`, `range` and `anchor` parameters of the list, the summary, the search and the
+  statistics. Status codes and every `reason` are exactly as before; `reason` is the stable
+  key, so a client that compared the `error` text should switch to it. Where a sentence lists
+  the allowed category keys, the keys of the built-in income categories are still German
+  words - they are stored keys, not wording. Other modules are unchanged (#1668).
+- **Three layout points from a Korean household: a long title stays on its card, hints wrap
+  at word boundaries, and the chart's amounts are no longer cut off** (#1607, reported by
+  @soonJ817). On the task board, a title without spaces - a web address, one very long
+  word - ran out of its card and across the neighbouring columns; it now wraps inside the
+  card. In the Korean interface, hints and descriptions broke between any two syllables and
+  left a single one on the next line ("선택합니 / 다."); Korean now wraps between words, as
+  it is written, and the other languages wrap as before. In the Budget statistics, the
+  amounts along the left edge of the chart lost their beginning once they got long -
+  "₩6,000,000" was cut off at its currency sign, on a phone and on a desktop alike. The
+  chart now measures its amounts and leaves them the room they need, whatever the currency
+  and region; a chart with short amounts looks exactly as before.
+- **Inventory and Documents with read-only access: no more buttons that end in an error message**
+  (#1265). A member who may only read the Inventory still saw Add, Edit and Delete, "Done" on a
+  due deadline, and the menu that manages locations and categories; a member who may only read
+  Documents still saw Upload, the folder buttons, the menu on every document and "Select
+  multiple". Each of them ended in "no permission". Those controls are now gone for such a
+  member. What the pages show stays and is readable in full: an inventory item opens its
+  details, which now also name a deadline's reminder lead time and its repeat interval, and a
+  document opens in the viewer with preview, download and share, which now also shows its
+  description, who may see it, the reminder lead time and whether it is archived. An empty
+  page only says that it is empty instead of inviting you to add something.
+- **Documents: Edit, Move, Archive and Delete are only offered on documents you may change**
+  (#1265). A document can be changed by the person who uploaded it and by an admin. The page
+  did not know that rule: every document that was shared with you carried the full menu, and
+  saving, archiving or deleting somebody else's document ended in "Not authorized" - a deleted
+  one disappeared first and came back a few seconds later. Now the menu, the pencil in the
+  viewer and the selection circle of "Select multiple" appear only on your own documents (on
+  all of them for an admin). Viewing, downloading and sharing stay available on every document
+  you can see, and on a narrow phone a document without a menu keeps its view button.
+- **With read-only access, a screen reader now says that a row opens its details** (#1682).
+  In the pantry and under Birthdays, a row announced only its content when you may read
+  but not change: with write access it ends on "Edit", and with read access that word was
+  removed and nothing took its place. The row now ends on "Show details". The info button of
+  a shopping item says the same, followed by the item's name. Along with it, in the pantry on
+  a narrow phone: a row with a cart button hid its best-before date to make room for the
+  plus and minus buttons. A read-only row has no such buttons, so the date stays visible
+  there. Behind the scenes the three read views (birthdays, shopping, pantry) now draw their
+  rows with one shared building block instead of three copies.
+- **Every chart leaves its axis values the room they need, not only the Budget trend**
+  (#1722). The Health charts (vitals, lab values, activity, and the cycle trends) and the
+  odometer chart of an inventory item kept a fixed margin sized for short numbers. The
+  severity trend of a cycle symptom writes words on that axis, and their length depends on
+  the language: in Polish, "Umiarkowane" started to the left of its chart and ended up one
+  pixel from the edge of its card on a phone; Filipino and Russian stuck out as well. Each
+  of these charts is now measured the moment it appears, the same way the Budget trend
+  already was, so a long word or a seven-digit odometer reading stays inside its chart. A
+  chart with short values looks exactly as before.
+
 ## [1.2.0] - 2026-10-07
 
 ### Added

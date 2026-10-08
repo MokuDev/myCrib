@@ -164,7 +164,7 @@ test('Aufgabenzeile mit `tasks: read`: der Haken wird zum Zustandszeichen', () =
     const html = tasks.renderTaskCard(aufgabe({ subtasks: [{ id: 8, title: 'Tonne', status: 'done' }] }));
 
     // Zustand ANZEIGEN: bleibt stehen - als span, nicht als gesperrter Knopf.
-    assert.match(html, /<span class="task-status-btn task-status-btn--open task-status-btn--static"[\s\S]*?role="img"/,
+    assert.match(html, /<span class="task-status-btn task-status-btn--open task-status-btn--static check-ring check-ring--static"[\s\S]*?role="img"/,
       'der Erledigt-Haken zeigt den Zustand der Aufgabe und darf nicht verschwinden');
     assert.doesNotMatch(html, /data-action="toggle-status"/,
       'aber er ist kein Knopf mehr: ein disabled-Knopf verspricht eine Berührung, die nichts tut');
@@ -206,7 +206,7 @@ test('Zustandszeichen bei `tasks: read`: eine begonnene Aufgabe heisst "In Bearb
   withAccess({ tasks: 'read' }, () => {
     for (const [status, key] of zustaende) {
       const html = tasks.renderTaskCard(aufgabe({ status }));
-      const zeichen = html.match(/<span class="task-status-btn [^"]*task-status-btn--static"[^>]*aria-label="([^"]*)"/);
+      const zeichen = html.match(/<span class="task-status-btn [^"]*task-status-btn--static check-ring check-ring--static"[^>]*aria-label="([^"]*)"/);
       assert.ok(zeichen, `Zeichen fuer ${status} vorhanden`);
       assert.equal(zeichen[1], `Müll rausbringen: ${key}`, `Aufgabe im Zustand ${status}`);
 
@@ -414,28 +414,34 @@ test('der Kaskadenloeser selbst: Zustands-Suffix und :not() zaehlen mit', () => 
     'der bedienbare Knopf reagiert weiter');
 });
 
+// R18: die Quittung haengt gar nicht mehr am Stylesheet. `acknowledgeCheck`
+// (utils/ux.js) startet sie im Klick-Handler des Knopfs; das Zeichen ist ein
+// `span` ohne `data-action` und erreicht den Handler nie. Damit gilt die
+// Zusicherung staerker als vorher: KEINE Kombination der Zustandsklassen traegt
+// eine Animation - weder das Zeichen noch der bedienbare Knopf, der sie frueher
+// bei jedem Neuzeichnen mitspielte. (Blattuebergreifend: test:motion.)
+const ANIMIERT_NICHT = [null, 'none'];
+const TASKS_JS = readFileSync(new URL('../public/pages/tasks.js', import.meta.url), 'utf8');
+
 test('eine erledigte Aufgabe im Zustandszeichen animiert nicht', () => {
-  assert.equal(
+  assert.ok(ANIMIERT_NICHT.includes(
     effektiverWert(TASKS_CSS, ['task-status-btn', 'task-status-btn--done', 'task-status-btn--static'], 'animation'),
-    'none',
-    'check-pop quittiert eine Beruehrung - hier hat niemand etwas beruehrt',
-  );
-  // Der bedienbare Knopf behaelt sie: die Quittung gehoert zum gedrueckten Haken.
-  assert.match(
-    effektiverWert(TASKS_CSS, ['task-status-btn', 'task-status-btn--done'], 'animation') ?? '',
-    /check-pop/,
-  );
+  ), 'die Quittung gehoert einer Beruehrung - hier hat niemand etwas beruehrt');
+  assert.ok(ANIMIERT_NICHT.includes(
+    effektiverWert(TASKS_CSS, ['task-status-btn', 'task-status-btn--done'], 'animation'),
+  ), 'auch der Knopf traegt sie nicht als Zustand: sie liefe bei jedem Neuzeichnen');
+  // Der bedienbare Knopf behaelt seine Quittung - im Handler.
+  assert.match(TASKS_JS, /const settled = acknowledgeCheck\(target, \{ checked: nextStatus === 'done' \}\);/);
 });
 
 test('dieselbe Zusicherung fuer die Teilaufgabe (#1209 und #467 teilen sich das Zeichen)', () => {
-  assert.equal(
+  assert.ok(ANIMIERT_NICHT.includes(
     effektiverWert(TASKS_CSS, ['subtask-item__checkbox', 'subtask-item__checkbox--done', 'subtask-item__checkbox--static'], 'animation'),
-    'none',
-  );
-  assert.match(
-    effektiverWert(TASKS_CSS, ['subtask-item__checkbox', 'subtask-item__checkbox--done'], 'animation') ?? '',
-    /check-pop/,
-  );
+  ));
+  assert.ok(ANIMIERT_NICHT.includes(
+    effektiverWert(TASKS_CSS, ['subtask-item__checkbox', 'subtask-item__checkbox--done'], 'animation'),
+  ));
+  assert.match(TASKS_JS, /const settled = acknowledgeCheck\(target, \{ checked: subtaskDone \}\);/);
 });
 
 // -------------------------------------------------------------------------
@@ -450,18 +456,22 @@ test('dieselbe Zusicherung fuer die Teilaufgabe (#1209 und #467 teilen sich das 
 // -------------------------------------------------------------------------
 
 test('das Zustandszeichen reagiert nicht auf Ueberfahren, und der Ring behaelt seine Farbe', () => {
+  // Der Ring samt Einladung steht seit R16 geteilt in list-row.css
+  // (`.check-ring`), der Zustand weiter in tasks.css - gemessen wird die
+  // Kaskade in Ladereihenfolge (index.html: list-row.css vor dem Seiten-CSS).
+  const KASKADE = `${readFileSync(new URL('../public/styles/list-row.css', import.meta.url), 'utf8')}\n${TASKS_CSS}`;
   for (const [name, klassen, ruhend] of [
-    ['erledigt', ['task-status-btn', 'task-status-btn--done', 'task-status-btn--static'], 'var(--color-success)'],
-    ['in Arbeit', ['task-status-btn', 'task-status-btn--in_progress', 'task-status-btn--static'], 'var(--color-warning)'],
+    ['erledigt', ['task-status-btn', 'task-status-btn--done', 'task-status-btn--static', 'check-ring', 'check-ring--static'], 'var(--color-success)'],
+    ['in Arbeit', ['task-status-btn', 'task-status-btn--in_progress', 'task-status-btn--static', 'check-ring', 'check-ring--static'], 'var(--color-warning)'],
   ]) {
-    assert.equal(effektiverWert(TASKS_CSS, klassen, 'border-color', ':hover::after'), null,
+    assert.equal(effektiverWert(KASKADE, klassen, 'border-color', ':hover::after'), null,
       `${name}: keine Hover-Regel darf das Zeichen treffen`);
-    assert.equal(effektiverWert(TASKS_CSS, klassen, 'border-color', '::after'), ruhend,
+    assert.equal(effektiverWert(KASKADE, klassen, 'border-color', '::after'), ruhend,
       `${name}: der Ring behaelt die Farbe, die den Zustand traegt`);
   }
   // Der bedienbare Knopf behaelt seine Hover-Reaktion.
   assert.match(
-    effektiverWert(TASKS_CSS, ['task-status-btn', 'task-status-btn--done'], 'border-color', ':hover::after') ?? '',
+    effektiverWert(KASKADE, ['task-status-btn', 'task-status-btn--done', 'check-ring'], 'border-color', ':hover::after') ?? '',
     /module-accent/,
   );
 });
@@ -735,6 +745,370 @@ test('Ersteinrichtung mit `rewards: read`: keine Aufforderung, die ins 403 führ
       assert.equal(rewards.renderSetupHints(), '',
         'alle drei Schritte legen etwas an');
     });
+  });
+});
+
+// Taschengeld (#1734): der Geld-Saldo ist ein Zustand, Abheben/Einzahlen/
+// Buchen/Plan sind Handlungen. WER ein Konto sieht, entscheidet der Server -
+// hier steht nur, was die Seite aus der Antwort macht.
+function mitTaschengeld(fn, { role = 'member', me = 3, former = false } = {}) {
+  const vorher = { overview: rewards.state.overview, user: rewards.state.user, money: rewards.state.money, redemptions: rewards.state.redemptions };
+  rewards.state.user = { role };
+  rewards.state.overview = { me, balances: [] };
+  // DER HAUSHALT FUEHRT INZWISCHEN YEN, das Konto wurde in EUR eroeffnet (#1734):
+  // jede Zahl unten muss aus der Waehrung des KONTOS kommen. Kaeme sie aus der
+  // des Haushalts, staende "7.731 JPY" da und kein "77,31".
+  const EUR = { currency: 'EUR', minor_unit: 2 };
+  rewards.state.money = {
+    currency: 'JPY', minor_unit: 0,
+    accounts: [{ id: 3, display_name: 'Emma', balance_minor: 7731, former, ...EUR, plan: { amount_minor: 500, ...EUR, frequency: 'weekly', anchor_day: 5, next_run_date: '2026-10-09', paused: false } }],
+    candidates: role === 'admin' ? [{ id: 4, display_name: 'Leo' }] : [],
+  };
+  rewards.state.redemptions = [{ id: 31, user_id: 3, user_name: 'Emma', kind: 'withdrawal', reward_name: 'withdrawal', cost: 421, ...EUR, user_balance: 7731, status: 'pending' }];
+  // Wie bei withAccess oben: ein `finally` um ein Promise feuert am ersten
+  // `await`. Ein async Aufrufer bekaeme den Zustand mitten im Test weggeraeumt.
+  const restore = () => Object.assign(rewards.state, vorher);
+  let result;
+  try {
+    result = fn();
+  } catch (err) {
+    restore();
+    throw err;
+  }
+  if (typeof result?.then === 'function') return result.finally(restore);
+  restore();
+  return result;
+}
+
+test('Taschengeld mit `rewards: read`: der Stand bleibt, Abheben und Einzahlen verschwinden', () => {
+  mitTaschengeld(() => {
+    withAccess({ rewards: 'write' }, () => {
+      const html = rewards.renderMoneySection();
+      assert.match(html, /data-money-request="withdrawal"/);
+      assert.match(html, /data-money-request="deposit"/);
+      assert.doesNotMatch(html, /data-money-book|data-money-plan|rw-money-setup/, 'ein Kind bucht nicht und plant nicht');
+    });
+    withAccess({ rewards: 'read' }, () => {
+      const html = rewards.renderMoneySection();
+      assert.doesNotMatch(html, /data-money-request=/, 'der POST endete im 403 - wie beim Einloesen');
+      assert.doesNotMatch(html, /rw-standing__actions/, 'der leere Behaelter geht mit');
+      assert.match(html, /Emma/);
+      assert.match(html, /77[.,]31/, 'der Saldo bleibt lesbar');
+      assert.match(html, /rewards\.money\.planWeekly/, 'und der Plan auch');
+      assert.match(html, /data-money-member="3"/, 'der Weg in den Verlauf bleibt');
+    });
+  });
+});
+
+test('Taschengeld: das eigene Konto traegt die Anfrage-Knoepfe, ein fremdes nie', () => {
+  // Der Server schickt einem Kind kein fremdes Konto. Kaeme doch eines an,
+  // haengt an ihm trotzdem kein Knopf: die Anfrage gilt immer der eigenen Person.
+  mitTaschengeld(() => {
+    withAccess({ rewards: 'write' }, () => {
+      assert.doesNotMatch(rewards.renderMoneySection(), /data-money-request=|data-money-book=/);
+    });
+  }, { me: 9 });
+});
+
+test('Taschengeld fuer Eltern: buchen, planen, einrichten - und mit `rewards: read` nichts davon', () => {
+  mitTaschengeld(() => {
+    withAccess({ rewards: 'write' }, () => {
+      const html = rewards.renderMoneySection();
+      assert.match(html, /data-money-book="3"/);
+      assert.match(html, /data-money-plan="3"/);
+      assert.match(html, /rw-money-setup/, 'Leo hat noch kein Konto');
+      assert.doesNotMatch(html, /data-money-request=/, 'Eltern buchen direkt, sie stellen keine Anfrage');
+    });
+    withAccess({ rewards: 'read' }, () => {
+      const html = rewards.renderMoneySection();
+      assert.doesNotMatch(html, /data-money-book|data-money-plan|rw-money-setup/);
+      assert.match(html, /77[.,]31/);
+    });
+  }, { role: 'admin', me: 1 });
+});
+
+test('Taschengeld: ein ehemaliges Konto traegt das Zeichen und genau eine Handlung - auszahlen', () => {
+  const vorher = globalThis.__openModal;
+  const dialoge = [];
+  globalThis.__openModal = (options) => { dialoge.push(options); };
+  try {
+    mitTaschengeld(() => {
+      withAccess({ rewards: 'write' }, () => {
+        const html = rewards.renderMoneySection();
+        assert.match(html, /settings\.memberFormerBadge/, 'als ehemalig gekennzeichnet');
+        assert.match(html, /data-money-book="3"/, 'abbuchen geht');
+        assert.match(html, /rewards\.money\.debit/);
+        assert.doesNotMatch(html, /rewards\.money\.book[^a-zA-Z]/, 'nicht "Buchen": gutschreiben gibt es nicht mehr');
+        assert.doesNotMatch(html, /data-money-plan|data-money-request/, 'kein Plan, keine Anfrage');
+        assert.match(html, /77[.,]31/, 'das Restguthaben steht da');
+
+        rewards.openMoneyPlanModal(3);
+        assert.equal(dialoge.length, 0, 'der Plan-Dialog oeffnet fuer ein ehemaliges Konto nicht');
+        rewards.openMoneyBookModal(3);
+        assert.equal(dialoge.length, 1);
+        assert.match(dialoge[0].content, /type="hidden" id="rw-money-direction" value="debit"/, 'der Dialog bucht nur ab');
+        assert.doesNotMatch(dialoge[0].content, /value="credit"/);
+      });
+      withAccess({ rewards: 'read' }, () => {
+        const html = rewards.renderMoneySection();
+        assert.doesNotMatch(html, /data-money-book/, 'nur-lesen: auch das Auszahlen ist eine Handlung');
+        assert.match(html, /settings\.memberFormerBadge/);
+      });
+    }, { role: 'admin', me: 1, former: true });
+    // Ein aktives Konto bietet weiter beides.
+    mitTaschengeld(() => withAccess({ rewards: 'write' }, () => {
+      dialoge.length = 0;
+      rewards.openMoneyBookModal(3);
+      assert.match(dialoge[0].content, /value="credit"/);
+      assert.doesNotMatch(rewards.renderMoneySection(), /settings\.memberFormerBadge/);
+    }), { role: 'admin', me: 1 });
+  } finally {
+    globalThis.__openModal = vorher;
+  }
+});
+
+test('Taschengeld: Konto eroeffnen ist ein eigener Dialog, und schliessen laesst sich nur, was der Server leer nennt', async () => {
+  const vorher = globalThis.__openModal;
+  const dialoge = [];
+  globalThis.__openModal = (options) => { dialoge.push(options); };
+  try {
+    await mitTaschengeld(async () => {
+      withAccess({ rewards: 'write' }, () => {
+        // Eroeffnen: die Mitglieder ohne Konto, kein Betrag, kein Plan.
+        rewards.openMoneyAccountModal();
+        assert.equal(dialoge.length, 1);
+        assert.match(dialoge[0].content, /id="rw-account-member"/);
+        assert.match(dialoge[0].content, /<option value="4">Leo<\/option>/);
+        assert.match(dialoge[0].content, /rewards\.money\.openAccount/);
+        assert.doesNotMatch(dialoge[0].content, /rw-money-amount|rw-plan-frequency/, 'ein Konto braucht weder Betrag noch Plan');
+
+        // Schliessen: nur am leeren Konto.
+        assert.doesNotMatch(rewards.renderMoneySection(), /data-money-close/, 'mit Guthaben und Plan: kein Schliessen');
+        rewards.state.money.accounts[0] = { ...rewards.state.money.accounts[0], balance_minor: 0, plan: null, closable: true };
+        assert.match(rewards.renderMoneySection(), /data-money-close="3"/);
+      });
+      withAccess({ rewards: 'read' }, () => {
+        assert.doesNotMatch(rewards.renderMoneySection(), /data-money-close|rw-money-setup/, 'nur-lesen: weder eroeffnen noch schliessen');
+        dialoge.length = 0;
+        rewards.openMoneyAccountModal();
+        assert.equal(dialoge.length, 0);
+      });
+
+      // Zwischen Anzeige und Klick ging eine Anfrage ein: der Server weist ab,
+      // die Seite sagt es in ihrer Sprache und laedt neu.
+      await withAccess({ rewards: 'write' }, () => mitSeitenSonde(async (sonde) => {
+        globalThis.__apiStub = { delete: async () => { throw Object.assign(new Error('Only an empty account can be closed'), { data: { reason: 'money_account_not_empty' } }); } };
+        await assert.doesNotReject(rewards.closeMoneyAccount(rewards.state.money.accounts[0]));
+        assert.equal(sonde.gefragt.length, 2, 'die Rueckfrage und die Absage');
+        assert.match(sonde.gefragt[0], /rewards\.money\.confirmCloseAccount/);
+        assert.match(sonde.gefragt[1], /rewards\.money\.accountNotEmpty/);
+        assert.equal(sonde.reloads, 1);
+        const calls = [];
+        globalThis.__apiStub = { delete: async (path) => { calls.push(path); return { ok: true }; } };
+        await rewards.closeMoneyAccount(rewards.state.money.accounts[0]);
+        assert.deepEqual(calls, ['/rewards/money/accounts/3']);
+      }));
+    }, { role: 'admin', me: 1 });
+    // Das Kind selbst schliesst nichts und eroeffnet nichts.
+    mitTaschengeld(() => withAccess({ rewards: 'write' }, () => {
+      rewards.state.money.accounts[0] = { ...rewards.state.money.accounts[0], balance_minor: 0, plan: null, closable: true };
+      assert.doesNotMatch(rewards.renderMoneySection(), /data-money-close|rw-money-setup/);
+      dialoge.length = 0;
+      rewards.openMoneyAccountModal();
+      assert.equal(dialoge.length, 0);
+    }));
+  } finally {
+    globalThis.__openModal = vorher;
+  }
+});
+
+test('Taschengeld: ohne Antwort oder ohne Konto steht kein leerer Abschnitt da', () => {
+  mitTaschengeld(() => {
+    withAccess({ rewards: 'write' }, () => {
+      rewards.state.money = null;
+      assert.equal(rewards.renderMoneySection(), '', 'ohne Antwort: kein Abschnitt (auch am Wandtablett)');
+      rewards.state.money = { currency: 'EUR', minor_unit: 2, accounts: [], candidates: [] };
+      assert.equal(rewards.renderMoneySection(), '', 'ein Kind ohne Konto sieht keine Ueberschrift ueber nichts');
+    });
+  });
+});
+
+test('eine Geld-Anfrage in der Liste: Betrag in Geld, nicht in Punkten - und nur-lesen ohne Entscheidung', () => {
+  mitTaschengeld(() => {
+    withAccess({ rewards: 'write' }, () => {
+      const html = rewards.renderPendingPanel();
+      assert.match(html, /rewards\.money\.ledgerWithdrawal/, 'der Titel ist die Art der Anfrage, nicht der Marker aus der Datenbank');
+      assert.match(html, /4[.,]21/);
+      assert.doesNotMatch(html, /rewards\.pointsUnit/, '421 Cent sind keine 421 Punkte');
+      assert.match(html, /77[.,]31/, 'wer entscheidet, liest das Guthaben daneben');
+      assert.match(html, /data-decide="fulfill"/);
+    });
+    withAccess({ rewards: 'read' }, () => {
+      assert.doesNotMatch(rewards.renderPendingPanel(), /data-decide=/);
+    });
+  }, { role: 'admin', me: 1 });
+});
+
+// DIE NACHKOMMASTELLEN KOMMEN VOM SERVER (Review zu #1745). Der Plan-Dialog
+// belegte sein Betragsfeld ueber `Intl` vor: fuer COP, HUF, IDR, IRR und PYG
+// (CLDR 0 Stellen, ISO 4217 zwei) stand der Betrag hundertfach im Feld, und
+// jedes Speichern verhundertfachte das Taschengeld. Gemessen wird der ganze
+// Rundlauf - Server-Betrag -> Feld -> Pruefung -> Text an den Server ->
+// Server-Betrag - mit dem ECHTEN Parser des Servers und fuer JEDE waehlbare
+// Waehrung, nicht fuer drei Beispiele.
+test('Taschengeld: ein Betrag ueberlebt den Rundlauf durch das Feld, in jeder waehlbaren Waehrung', async () => {
+  const { CURRENCY_CODES } = await import('../public/utils/currency-codes.js');
+  const { minorUnit, parseMoneyToMinor } = await import('../server/services/split-expenses.js');
+  const { toDecimalString, currencyFractionDigits } = await import('../public/utils/money.js');
+  assert.ok(CURRENCY_CODES.length >= 20, 'die Liste der Waehrungen ist da');
+  const vorher = rewards.state.money;
+  const abweichend = [];
+  try {
+    for (const currency of CURRENCY_CODES) {
+      const digits = minorUnit(currency);
+      if (digits !== currencyFractionDigits(currency)) abweichend.push(currency);
+      // Das KONTO rechnet in `currency`; der Haushalt fuehrt inzwischen eine
+      // andere Waehrung mit anderen Stellen (#1734). Jede Rechnung muss dem
+      // Konto folgen.
+      const household = digits === 0 ? { currency: 'KWD', minor_unit: 3 } : { currency: 'JPY', minor_unit: 0 };
+      rewards.state.money = { ...household, accounts: [], candidates: [] };
+      const account = { currency, minor_unit: digits };
+      // Glatt, mit Nachkommastellen (wo die Waehrung welche hat), klein, gross.
+      for (const minor of [5000 * 10 ** digits, 123456, 1, 10 ** 12]) {
+        const field = rewards.minorToAmountInput(minor, account);
+        assert.equal(rewards.moneyAmountProblem(field, account), null, `${currency} ${minor}: "${field}" ist speicherbar`);
+        assert.equal(parseMoneyToMinor(toDecimalString(field), currency), minor,
+          `${currency}: ${minor} steht als "${field}" im Feld und kommt als derselbe Betrag zurueck`);
+        assert.equal(rewards.decimalToMinor(toDecimalString(field), account), minor, `${currency}: der Vergleich mit dem Guthaben rechnet gleich`);
+      }
+      // Eine Stelle mehr, als der Server annimmt, ist ein Grund am Feld.
+      assert.equal(rewards.moneyAmountProblem(`1,${'1'.repeat(digits + 1)}`, account), 'precision', `${currency}: zu viele Stellen`);
+      // Ohne Konto (ein neues wird eroeffnet) gilt die Waehrung des Haushalts.
+      assert.equal(rewards.minorToAmountInput(1, undefined), rewards.minorToAmountInput(1, household));
+    }
+  } finally {
+    rewards.state.money = vorher;
+  }
+  // Ohne diese Waehrungen maesse der Rundlauf den Fehler gar nicht.
+  assert.ok(abweichend.includes('HUF') && abweichend.includes('IDR'),
+    `die Probe braucht Waehrungen, bei denen Intl und ISO 4217 auseinandergehen (gefunden: ${abweichend.join(', ')})`);
+});
+
+test('Taschengeld: der Plan-Dialog eines Forint-Haushalts zeigt 5000, nicht 500000', () => {
+  const vorher = rewards.state.money;
+  try {
+    rewards.state.money = { currency: 'HUF', minor_unit: 2, accounts: [], candidates: [] };
+    assert.equal(rewards.minorToAmountInput(500000), '5000');
+    assert.equal(rewards.minorToAmountInput(500050), '5000,50', 'ein Betrag mit Filler bleibt, wie er gespeichert ist');
+    rewards.state.money = { currency: 'EUR', minor_unit: 2, accounts: [], candidates: [] };
+    assert.equal(rewards.minorToAmountInput(500), '5,00');
+    rewards.state.money = { currency: 'JPY', minor_unit: 0, accounts: [], candidates: [] };
+    assert.equal(rewards.minorToAmountInput(500), '500');
+    rewards.state.money = { currency: 'KWD', minor_unit: 3, accounts: [], candidates: [] };
+    assert.equal(rewards.minorToAmountInput(1234), '1,234');
+  } finally {
+    rewards.state.money = vorher;
+  }
+});
+
+test('Taschengeld: der Plan-Dialog selbst belegt das Feld mit dem Betrag, den der Server gespeichert hat', () => {
+  // Der Helfer oben kann stimmen und der Dialog trotzdem an ihm vorbei rechnen:
+  // gelesen wird deshalb das Feld, das der Dialog baut.
+  const vorher = { money: rewards.state.money, user: rewards.state.user, open: globalThis.__openModal };
+  const dialoge = [];
+  globalThis.__openModal = (options) => { dialoge.push(options); };
+  try {
+    rewards.state.user = { role: 'admin' };
+    withAccess({ rewards: 'write' }, () => {
+      for (const [currency, minor_unit, stored, shown] of [['HUF', 2, 500000, '5000'], ['IDR', 2, 15000000, '150000'], ['EUR', 2, 500, '5,00'], ['JPY', 0, 500, '500'], ['KWD', 3, 1500, '1,500']]) {
+        // Der Haushalt fuehrt eine ANDERE Waehrung als das Konto.
+        const household = minor_unit === 0 ? { currency: 'KWD', minor_unit: 3 } : { currency: 'JPY', minor_unit: 0 };
+        rewards.state.money = {
+          ...household, candidates: [],
+          accounts: [{ id: 3, display_name: 'Emma', balance_minor: 0, currency, minor_unit, plan: { amount_minor: stored, currency, minor_unit, frequency: 'weekly', anchor_day: 5, next_run_date: '2026-10-09', paused: false } }],
+        };
+        dialoge.length = 0;
+        rewards.openMoneyPlanModal(3);
+        assert.equal(dialoge.length, 1, `${currency}: der Dialog oeffnet`);
+        const value = dialoge[0].content.match(/id="rw-money-amount"[^>]*value="([^"]*)"/)?.[1];
+        assert.equal(value, shown, `${currency}: ${stored} kleinste Einheiten stehen als "${shown}" im Feld`);
+        assert.match(dialoge[0].content, new RegExp(`\\(${currency}\\)`), `${currency}: das Feld nennt die Waehrung des Kontos, nicht die des Haushalts`);
+      }
+    });
+  } finally {
+    rewards.state.money = vorher.money;
+    rewards.state.user = vorher.user;
+    globalThis.__openModal = vorher.open;
+  }
+});
+
+/** Zaehlt, wie oft die Seite sich neu laden will (`refreshActiveTab` sucht ihren Traeger). */
+async function mitSeitenSonde(fn) {
+  const vorher = { document: globalThis.document, api: globalThis.__apiStub, confirm: globalThis.__confirmModal };
+  const sonde = { reloads: 0, gefragt: [] };
+  globalThis.document = {
+    querySelector: (sel) => { if (sel === '.rewards-page') sonde.reloads += 1; return null; },
+    getElementById: () => null,
+    body: {},
+  };
+  globalThis.__confirmModal = async (text) => { sonde.gefragt.push(text); return true; };
+  try {
+    return await fn(sonde);
+  } finally {
+    globalThis.document = vorher.document;
+    globalThis.__apiStub = vorher.api;
+    globalThis.__confirmModal = vorher.confirm;
+  }
+}
+
+test('Taschengeld: scheitert "Plan beenden", sagt die Seite es - keine unbehandelte Rejection', async () => {
+  await mitTaschengeld(() => withAccess({ rewards: 'write' }, () => mitSeitenSonde(async (sonde) => {
+    globalThis.__apiStub = { delete: async () => { throw Object.assign(new Error('Server nicht erreichbar'), { status: 503 }); } };
+    await assert.doesNotReject(rewards.removeMoneyPlan({ id: 3, display_name: 'Emma' }),
+      'das Formular ist schon zu - der Fehler darf nicht ins Leere fallen');
+    assert.deepEqual(sonde.gefragt, ['Server nicht erreichbar'], 'die Meldung steht in einem Dialog');
+    assert.equal(sonde.reloads, 1, 'und die Liste zeigt danach, was gilt');
+
+    sonde.gefragt.length = 0;
+    const calls = [];
+    globalThis.__apiStub = { delete: async (path) => { calls.push(path); return { ok: true }; } };
+    await rewards.removeMoneyPlan({ id: 3, display_name: 'Emma' });
+    assert.deepEqual(calls, ['/rewards/money/plans/3']);
+    assert.deepEqual(sonde.gefragt, [], 'gelingt es, fragt niemand nach');
+  })), { role: 'admin', me: 1 });
+});
+
+test('Taschengeld: reicht das Guthaben bei der Freigabe nicht mehr, laedt die Liste neu', async () => {
+  await mitTaschengeld(() => withAccess({ rewards: 'write' }, () => mitSeitenSonde(async (sonde) => {
+    globalThis.__apiStub = {
+      patch: async () => { throw Object.assign(new Error('The balance no longer covers this withdrawal'), { data: { reason: 'insufficient_funds' } }); },
+    };
+    await rewards.decideRedemption(31, 'fulfill', null);
+    assert.equal(sonde.gefragt.length, 1);
+    assert.match(sonde.gefragt[0], /rewards\.money\.insufficientOnApprove/, 'der Satz ist uebersetzt, nicht der Servertext');
+    assert.equal(sonde.reloads, 1, 'das Guthaben neben der Anfrage war der Stand von vor der Absage');
+
+    // Ein anderer Fehler laesst die Liste stehen, wie bisher.
+    sonde.reloads = 0;
+    globalThis.__apiStub = { patch: async () => { throw new Error('kaputt'); } };
+    await rewards.decideRedemption(31, 'fulfill', null);
+    assert.equal(sonde.reloads, 0);
+  })), { role: 'admin', me: 1 });
+});
+
+test('Geldbuchungen im Verlauf: was sie waren, steht in ihren Feldern', () => {
+  mitTaschengeld(() => {
+    assert.equal(rewards.moneyRowKind({ delta: 500, type: 'bonus', allowance_date: '2026-10-09' }), 'allowance');
+    assert.equal(rewards.moneyRowKind({ delta: 2000, type: 'bonus', request_kind: 'deposit' }), 'deposit');
+    assert.equal(rewards.moneyRowKind({ delta: -1234, type: 'redeem', request_kind: 'withdrawal' }), 'withdrawal');
+    assert.equal(rewards.moneyRowKind({ delta: 300, type: 'bonus' }), 'credit');
+    assert.equal(rewards.moneyRowKind({ delta: -300, type: 'adjust' }), 'debit');
+    const html = rewards.moneyLedgerRowHtml({ delta: -1234, currency: 'EUR', minor_unit: 2, type: 'redeem', request_kind: 'withdrawal', reason: '<b>Kino</b>', created_at: '2026-10-06T10:00:00Z' });
+    // Eine Zeile aus der Zeit vor einem Neuanfang traegt ihre eigene Waehrung.
+    assert.match(rewards.moneyLedgerRowHtml({ delta: 500, currency: 'KWD', minor_unit: 3, type: 'bonus', created_at: '2026-10-06T10:00:00Z' }), /0[.,]500/);
+    assert.match(html, /12[.,]34/);
+    assert.match(html, /rw-delta--neg/);
+    assert.doesNotMatch(html, /<b>Kino<\/b>/, 'die Notiz des Kindes laeuft durch esc()');
   });
 });
 
@@ -1719,7 +2093,11 @@ test('Kontakt-Detailansicht mit `contacts: read`: kein Bearbeiten, kein Loeschen
   const schreibend = withAccess({ contacts: 'write' }, () => (
     detailOptionen(() => contacts.openContactDetail(kontakt()))
   ));
-  assert.ok(schreibend.edit, 'mit Schreibrecht traegt der Kopf „Bearbeiten"');
+  assert.ok(schreibend.edit, 'mit Schreibrecht traegt die Ansicht „Bearbeiten"');
+  // R17 (E7): Bearbeiten sitzt im Blatt an EINER Stelle - als Primaerknopf am
+  // Ende des Fusses, wie im Termin und im Inventar; bis dahin stand es im
+  // Kontakt als Kopfaktion.
+  assert.equal(schreibend.edit.primary, true, 'Bearbeiten ist im Blatt die Hauptaktion unten');
   assert.ok(ids(schreibend).includes('contact-detail-delete'));
 
   const lesend = withAccess({ contacts: 'read' }, () => (
@@ -2070,16 +2448,40 @@ test('Geburtstagszeile: die Textspalte ist fuer Lesende UND Schreibende der Weg 
   });
 });
 
-test('Ein Tipp auf die Geburtstagszeile mit Schreibrecht oeffnet den Editor mit dem Bestand (H8)', () => {
+test('R17 E7: ein Tipp auf die Geburtstagszeile oeffnet das Leseblatt, Bearbeiten steht primaer am Ende', async () => {
+  // Bis R17 ging der Tipp unter der Schwelle direkt in den Editor (H8) - als
+  // einzige Liste neben Kalender und Kontakten, die ein Leseblatt oeffnen.
   const eintrag = geburtstag();
-  const offen = mitGeburtstagen([eintrag], () => withAccess({ calendar: 'write' }, () => (
-    modalOptionen(() => birthdays.onListClick(klickAuf({ '[data-open]': { dataset: { open: '9' } } })))
-  )));
-  assert.ok(offen, 'der Tipp oeffnet einen Dialog');
-  assert.match(offen.content, /id="bd-save"/, 'der Editor, nicht die Leseansicht');
+  let blatt = null;
+  const editor = mitGeburtstagen([eintrag], () => withAccess({ calendar: 'write' }, () => modalOptionen(() => {
+    blatt = detailOptionen(() => birthdays.onListClick(klickAuf({ '[data-open]': { dataset: { open: '9' } } })));
+  })));
+  assert.ok(blatt, 'der Tipp oeffnet die geteilte Leseansicht (openDetailView)');
+  assert.equal(editor, null, 'und NICHT den Editor - kein Formular, keine Tastatur');
+  assert.equal(blatt.title, 'Oma Erna');
+  assert.equal(blatt.pane, undefined, 'als Blatt, nicht in der Spalte');
+  assert.ok(blatt.sections.some((row) => row.value === 'Mag Kuchen'), 'die Notiz, die die Zeile am Telefon ausblendet');
+  assert.deepEqual(blatt.actions.map((a) => [a.id, a.variant, a.align ?? 'end']), [
+    ['birthday-detail-delete', 'danger-ghost', 'start'],
+    ['detail-view-edit', 'primary', 'end'],
+  ], 'Loeschen zurueckgenommen am Anfang, Bearbeiten als Primaerknopf am Ende - wie im Termin');
+
+  // Bearbeiten schliesst das Blatt und oeffnet den Editor mit dem Bestand.
+  const geschlossen = [];
+  let offen = null;
+  const vorher = globalThis.__openModal;
+  globalThis.__openModal = (opts) => { offen = opts; };
+  try {
+    await blatt.actions[1].onClick({ close: async (o) => { geschlossen.push(o); } });
+  } finally {
+    if (vorher === undefined) delete globalThis.__openModal;
+    else globalThis.__openModal = vorher;
+  }
+  assert.deepEqual(geschlossen, [{ force: true }], 'erst geht das Blatt zu');
+  assert.ok(offen, 'dann oeffnet der Editor');
+  assert.match(offen.content, /id="bd-save"/);
   assert.match(offen.content, /id="bd-name"[^>]*value="Oma Erna"/, 'mit dem Bestand vorbelegt');
 });
-
 test('Ein Tipp bei `calendar: read` oeffnet die Leseansicht, und sie zeigt, was der Editor zeigt', () => {
   const eintrag = geburtstag({ name_day: '05-12', reminder_offset: '2880' });
   const offen = mitGeburtstagen([eintrag], () => withAccess({ calendar: 'read' }, () => (
@@ -2717,6 +3119,51 @@ test('R8 H9: eine Messung oeffnet sich mit Bestand, Loeschen steht links im Dial
   assert.doesNotMatch(neu.content, /id="vital-type" disabled/);
 });
 
+test('R18: "Messwert erfassen" spricht in Formularzeilen - der Blutdruck ist EIN Feld mit Einheit', () => {
+  const neu = withAccess({ health: 'write' }, () => modalOptionen(() => health.openVitalModal())).content;
+  // Reihenfolge der Felder wie vorher: Art, Wert, Zeitpunkt, Sichtbarkeit, Notiz.
+  const order = ['id="vital-type"', 'id="vital-value-fields"', 'id="vital-measured-at"', 'id="vital-visibility"', 'id="vital-note"'].map((id) => neu.indexOf(id));
+  assert.ok(order.every((at) => at >= 0), 'alle fuenf Felder stehen im Dialog');
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'in der alten Reihenfolge');
+  assert.doesNotMatch(neu, /modal-grid/, 'kein Feldraster mehr: Zeilen');
+  // Jede Auswahl haengt an ihrem Etikett.
+  for (const id of ['vital-type', 'vital-visibility', 'vital-measured-at']) {
+    assert.match(neu, new RegExp(`<label class="form-row__label" for="${id}">`), `${id} hat ein verknuepftes Etikett`);
+  }
+  assert.match(neu, /<div class="form-rows" id="vital-value-fields">/, 'die Wertefelder sind ein eigener Traeger - der Typwechsel tauscht nur ihn');
+  // Die Notiz bleibt ein freies Feld ohne Zeilenraster.
+  assert.match(neu, /<div class="form-field">\s*<label class="form-label" for="vital-note">/);
+
+  const bp = health.valueFieldsMarkup('bp', { id: 1, type: 'bp', value_num: 128, value_num2: 84, value_num3: 66 });
+  assert.match(bp, /<span class="form-row__label" id="vital-pair-label">health\.vitals\.metric\.bp<\/span>/, 'die Zeile heisst "Blutdruck"');
+  assert.match(bp, /<span class="form-composite" role="group" aria-labelledby="vital-pair-label">/);
+  assert.match(bp, /id="vital-sys" aria-label="health\.vitals\.field\.systolic" placeholder="120" value="128">/);
+  assert.match(bp, /<span class="form-composite__sep" aria-hidden="true">\/<\/span>/);
+  assert.match(bp, /id="vital-dia" aria-label="health\.vitals\.field\.diastolic" aria-describedby="vital-dia-unit" placeholder="80" value="84">/);
+  assert.match(bp, /<span class="form-composite__unit" id="vital-dia-unit">mmHg<\/span>/, 'die Einheit steht als Suffix am Paar');
+  assert.match(bp, /<label class="form-row__label" for="vital-pulse">health\.vitals\.field\.pulse<\/label>/, 'der Puls ist eine eigene Zeile daneben');
+  assert.match(bp, /id="vital-pulse" aria-describedby="vital-pulse-suffix" placeholder="72" value="66">/);
+  assert.ok(bp.indexOf('id="vital-sys"') < bp.indexOf('id="vital-dia"') && bp.indexOf('id="vital-dia"') < bp.indexOf('id="vital-pulse"'),
+    'Tastaturfolge: systolisch, diastolisch, Puls');
+  // Ein leeres Paar traegt Beispielwerte als Platzhalter, keinen Bestand.
+  const leer = health.valueFieldsMarkup('bp');
+  assert.match(leer, /id="vital-sys"[^>]*placeholder="120">/);
+  assert.doesNotMatch(leer, /id="vital-sys"[^>]*value=/);
+
+  // Einfacher Wert: Zahl und Einheit sind ein Feld; die Einheit ist Auswahl oder Text.
+  const gewicht = health.valueFieldsMarkup('weight');
+  assert.match(gewicht, /<label class="form-row__label" for="vital-value">health\.vitals\.metric\.weight<\/label>/);
+  assert.match(gewicht, /<select class="form-input" id="vital-unit" aria-label="health\.vitals\.field\.unit">/, 'die Einheitenauswahl hat einen eigenen Namen');
+  // Dauer: die Worte hinter den Zahlen sind die Etiketten der Teilfelder.
+  const schlaf = health.valueFieldsMarkup('sleep');
+  assert.match(schlaf, /id="vital-hours"><label class="form-composite__unit" for="vital-hours">health\.vitals\.field\.hours<\/label>/);
+  assert.match(schlaf, /id="vital-minutes"[^>]*><label class="form-composite__unit" for="vital-minutes">health\.vitals\.field\.minutes<\/label>/);
+  // Stimmung: gestapelte Zeile, die Skala ist nach dem Zeilenetikett benannt.
+  const stimmung = health.valueFieldsMarkup('mood');
+  assert.match(stimmung, /class="form-row form-row--stacked form-field"/);
+  assert.match(stimmung, /data-group="mood" role="group"\s+aria-labelledby="vital-mood-label"/);
+});
+
 test('R8 H9: PATCH einer Messung leert, was der Dialog nicht mehr zeigt', () => {
   assert.deepEqual(
     health.vitalPatchBody({ type: 'bp', value_num: 120, value_num2: 80, visibility: 'private', measured_at: '2026-06-15T08:30' }),
@@ -3219,7 +3666,11 @@ test('renderCycleShell() reicht beide Antworten getrennt weiter', () => {
   // Der Kalender bekommt beide: `own` fuer das Lesbare, `darf` fuer den Knopf.
   assert.match(fn, /cycleCalendarMarkup\(own, pms, darf\)/);
   // Alles, was nur handelt, haengt an `darf`.
-  assert.match(fn, /\$\{darf \? cycleTodayActionsMarkup\(\) : ''\}/);
+  // Seit R17 steht die Heute-Karte an zwei moeglichen Stellen (schmal vor den
+  // Kennzahlen, breit unter der Legende) - an `darf` haengt jede von ihnen.
+  const todayCalls = fn.match(/\$\{[^}]*cycleTodayActionsMarkup\([^)]*\)[^}]*\}/g) ?? [];
+  assert.equal(todayCalls.length, 3, 'Reichweite: Schwangerschaft, schmal, breit');
+  for (const call of todayCalls) assert.match(call, /^\$\{darf (\? |&& )/, `${call} haengt an darf`);
   assert.match(fn, /cycleHistoryMarkup\(darf\)/);
   assert.match(fn, /cycleFooterMarkup\(darf\)/);
   assert.match(fn, /cyclePregnancyMarkup\(prediction, darf\)/);
@@ -3234,8 +3685,11 @@ test('renderCycleShell() reicht beide Antworten getrennt weiter', () => {
 
 test('READ_SAFE_ACTIONS ist eine Positivliste und enthaelt nur lesende Aktionen', () => {
   const erlaubt = [...health.READ_SAFE_ACTIONS].sort();
-  assert.deepEqual(erlaubt, ['cancel', 'ov-go-cycle', 'ov-go-meds'],
-    'Dialog schliessen und zwei Tabwechsel - alles andere dieser Seite schreibt');
+  // R16: dazu der dritte Tabwechsel (Kartentitel "Letzte Vitalwerte") und der
+  // CSV-Export im Kopf - ein Download, der schon als Karte ohne Schreibrecht
+  // offenstand (dort als blosse Links, deshalb ohne `data-action`).
+  assert.deepEqual(erlaubt, ['cancel', 'health-export', 'ov-go-cycle', 'ov-go-meds', 'ov-go-vitals'],
+    'Dialog schliessen, drei Tabwechsel und der Export-Dialog - alles andere dieser Seite schreibt');
 
   // Und die Gegenprobe gegen den Quelltext: JEDE andere `data-action` der Seite
   // ist damit gesperrt. Kaeme morgen eine dazu, waere sie es auch - das ist der
@@ -3417,6 +3871,10 @@ const LAYOUT_CSS = readFileSync(new URL('../public/styles/layout.css', import.me
  * WELCHE Knoepfe ein Renderer verdrahten will. Die Verdrahtung hat kein Markup;
  * ohne diese Spur liefe „bei read haengt nichts" ins Leere.
  */
+// Die Aufgabenliste verdrahtet seit R16 den Wisch; dessen einmaliger Hinweis
+// (`maybeShowSwipeHint`, utils/swipe-row.js) liest den Pfad der Seite.
+globalThis.location = globalThis.location ?? { pathname: '/housekeeping' };
+
 function hkContainer() {
   return {
     html: '',
@@ -3585,8 +4043,12 @@ test('Besuchszeile mit `housekeeping: read`: Bearbeiten und Loeschen weg, der Za
 
 // Re-Critique 2026-09-27 (R11 H6): ein Tipp auf die Aufgabenzeile tat nichts,
 // mobil war der Stift das einzige Ziel. Wie die Geburtstagszeile (R8) ist die
-// Hauptspalte mit Schreibrecht jetzt der Knopf zum Bearbeiten; die Aktions-Icons
-// bleiben sichtbar. Bei `read` verspricht die Spalte kein Bearbeiten.
+// Hauptspalte mit Schreibrecht jetzt der Knopf zum Bearbeiten. Bei `read`
+// verspricht die Spalte kein Bearbeiten.
+//
+// R16 (Critique 2026-10-05, P1 Bausteine): der Stift doppelte genau diesen
+// Knopf und ist weg, der Papierkorb steht im Dialogfuss und auf dem Wisch.
+// Die Zeile fuehrt KEINE Aktionszone mehr.
 test('H6: die Aufgabenzeile der Haushaltshilfe oeffnet mit Schreibrecht das Bearbeiten - lesend verspricht sie nichts', () => {
   hkState({
     tasks: [{ id: 3, name: 'Fenster putzen', area: 'Wohnzimmer', frequency_days: 14, urgency_status: 'today', last_completed: '2026-07-01' }],
@@ -3598,13 +4060,102 @@ test('H6: die Aufgabenzeile der Haushaltshilfe oeffnet mit Schreibrecht das Bear
   assert.match(haupt[1], /Fenster putzen/, 'er traegt den Namen');
   assert.match(haupt[1], /housekeeping\.dueToday/, 'und die Metazeile samt Dringlichkeit');
   assert.doesNotMatch(haupt[1], /<(?:h\d|p|div)\b/, 'in einem Knopf steht nur Phrasing-Inhalt');
-  assert.match(schreiben.html, /class="row-action" type="button" data-edit-task="3"/, 'der Stift bleibt sichtbar (ignore.md)');
-  assert.ok(schreiben.gefragt.includes('[data-edit-task]'), 'beide Ziele laufen ueber dieselbe Verdrahtung');
+  assert.equal(schreiben.html.match(/data-edit-task="3"/g).length, 1, 'ein Bearbeiten-Ziel je Zeile, nicht zwei mit derselben Wirkung');
+  assert.doesNotMatch(schreiben.html, /row-action|list-row__actions|data-delete-task/, 'keine Zeilenaktion: Loeschen steht im Dialog und auf dem Wisch');
+  assert.match(schreiben.html, /<div class="swipe-row" data-swipe-id="3">[\s\S]*?swipe-reveal--done swipe-reveal--leading[\s\S]*?swipe-reveal--delete swipe-reveal--trailing/,
+    'die Wischflaechen: erledigen am Zeilenanfang, loeschen am Zeilenende');
+  assert.match(schreiben.html, /class="housekeeping-task__check check-ring"/, 'der Kreis ist der geteilte Abhakkreis');
+  assert.ok(schreiben.gefragt.includes('[data-edit-task]'), 'die Zeile ist verdrahtet');
+  assert.ok(schreiben.gefragt.includes('.swipe-row'), 'und der Wisch auch');
 
   const lesen = hkContainer();
   withAccess({ housekeeping: 'read' }, () => hk.renderTasks(lesen));
   assert.doesNotMatch(lesen.html, /list-row__main--interactive|data-edit-task/, 'lesend kein Bearbeiten-Versprechen');
+  assert.match(lesen.html, /class="swipe-row swipe-row--static"/, 'lesend ohne Wisch-Chevron');
+  assert.doesNotMatch(lesen.html, /swipe-reveal/, 'und ohne Wischflaechen');
+  assert.ok(!lesen.gefragt.includes('.swipe-row'), 'die Geste ist lesend nicht verdrahtet');
   assert.match(lesen.html, /<h2 class="list-row__name">Fenster putzen<\/h2>/, 'die Zeile bleibt Auskunft mit Ueberschrift');
+});
+
+// Review PR #1673: wohin der Fokus nach dem Loeschen geht. Die Modal-Schicht
+// sucht denselben Knopf wieder und kennt keinen Nachbarn - nach dem Loeschen
+// blieb ihr nur die Seitenwurzel.
+test('nach dem Loeschen aus dem Dialog bekommt die nachgerueckte Zeile den Fokus', () => {
+  const echtesDocument = globalThis.document;
+  const knopf = (id) => ({ dataset: { editTask: String(id) }, focus() { doc.activeElement = this; } });
+  const liste = (ids) => { const k = ids.map(knopf); return { k, querySelectorAll: (sel) => (sel === '[data-edit-task]' ? k : []) }; };
+  const body = { tagName: 'BODY' };
+  const doc = { body, activeElement: body };
+  globalThis.document = doc;
+  try {
+    // Die mittlere von drei Zeilen (Index 1) ist weg: die dritte rueckt nach.
+    let content = liste([1, 3]);
+    hk.focusTaskRowAfterDelete(content, 2, 1);
+    assert.equal(doc.activeElement, content.k[1], 'die Zeile an der alten Stelle');
+
+    // Es war die letzte: die neue letzte.
+    doc.activeElement = body;
+    content = liste([1, 2]);
+    hk.focusTaskRowAfterDelete(content, 3, 2);
+    assert.equal(doc.activeElement, content.k[1]);
+
+    // Die Seitenwurzel (Rueckfall der Modal-Schicht) gilt als frei.
+    doc.activeElement = { id: 'main-content' };
+    hk.focusTaskRowAfterDelete(content, 3, 0);
+    assert.equal(doc.activeElement, content.k[0]);
+
+    // Der Dialog schliesst noch (Ausgangsanimation), das Neuzeichnen war
+    // schneller: der Fokus in ihm ist keine Wahl des Nutzers.
+    doc.activeElement = { id: '', closest: (sel) => (sel === '.modal-overlay--closing' ? {} : null) };
+    hk.focusTaskRowAfterDelete(content, 3, 1);
+    assert.equal(doc.activeElement, content.k[1]);
+
+    // "Rueckgaengig" hat die Zeile zurueckgeholt: sie selbst.
+    doc.activeElement = body;
+    content = liste([1, 2, 3]);
+    hk.focusTaskRowAfterDelete(content, 2, 1);
+    assert.equal(doc.activeElement, content.k[1]);
+    hk.focusTaskRowAfterDelete(content, 3, 0);
+    assert.equal(doc.activeElement, content.k[1], 'ein gewaehlter Fokus bleibt, wo er ist');
+  } finally {
+    globalThis.document = echtesDocument;
+  }
+});
+
+// Review PR #1673: `deleteTask()` klappt die Zeile aus und zeichnet die Liste
+// ERST DANACH neu. Der Bearbeiten-Dialog rief `refocusAfterRender()` im selben
+// Atemzug wie das Loeschen - die alte Zeile stand noch, der Fokus galt als
+// heil, und das Neuzeichnen liess ihn fallen. `afterRepaint` laeuft nach dem
+// Neuzeichnen und sieht die Liste ohne die Zeile.
+test('deleteTask ruft afterRepaint erst nach dem Neuzeichnen der Liste', async () => {
+  const { mock } = await import('node:test');
+  const vorher = globalThis.__apiStub;
+  mock.timers.enable({ apis: ['setTimeout'] });
+  globalThis.__apiStub = { delete: async () => ({}) };
+  try {
+    const task = { id: 901, name: 'ZZ Fenster', area: 'Bad', frequency_days: 7, urgency_status: 'today', last_completed: '2026-07-01' };
+    hkState({ tab: 'tasks', tasks: [task, { ...task, id: 902, name: 'ZZ Boden' }] });
+    const content = hkContainer();
+    const seen = [];
+    withAccess({ housekeeping: 'write' }, () => {
+      hk.renderTasks(content);
+      assert.match(content.html, /ZZ Fenster/);
+      hk.deleteTask(task, content, () => seen.push(content.html));
+    });
+    assert.equal(seen.length, 0, 'im selben Atemzug steht die alte Liste noch - kein Rueckruf');
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.length, 1, 'nach dem Ausklappen und Neuzeichnen genau einmal');
+    assert.doesNotMatch(seen[0], /ZZ Fenster/, 'der Rueckruf sieht die Liste OHNE die Zeile');
+    assert.match(seen[0], /ZZ Boden/);
+    // Das Undo-Fenster laeuft ab: der Server loescht, die Liste bleibt.
+    mock.timers.runAll();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(seen.length, 1);
+  } finally {
+    mock.timers.reset();
+    if (vorher === undefined) delete globalThis.__apiStub; else globalThis.__apiStub = vorher;
+    hkState({});
+  }
 });
 
 test('Aufgaben-Tab mit `housekeeping: read`: kein Anlegen, kein Abhaken, keine Zeilenaktion - die Dringlichkeit bleibt', () => {
@@ -3625,7 +4176,7 @@ test('Aufgaben-Tab mit `housekeeping: read`: kein Anlegen, kein Abhaken, keine Z
 
   const schreiben = hkContainer();
   withAccess({ housekeeping: 'write' }, () => hk.renderTasks(schreiben));
-  for (const da of ['data-complete-task="3"', 'data-edit-task="3"', 'data-delete-task="3"']) {
+  for (const da of ['data-complete-task="3"', 'data-edit-task="3"', 'data-swipe-id="3"']) {
     assert.ok(schreiben.html.includes(da), `mit Schreibrecht steht ${da} da`);
   }
   // Die Liste ZUERST (Critique 2026-09-26): Vorlagen und Formular sitzen im
@@ -4349,7 +4900,13 @@ test('Dokument-Betrachter: Bearbeiten nur mit Schreibrecht auf die Dokumente', (
   const doc = {
     id: 31, name: 'Pass', category: 'identity', mime_type: 'image/png', file_size: 1200,
     storage_backend: 'local', visibility: 'family', status: 'active',
+    // Seit #1265 fragt der Stift auch die Besitzregel: das Dokument gehoert
+    // der Person, die hier sitzt. Das fremde Dokument faehrt
+    // test-inventory-documents-readonly-ui.js.
+    created_by: 7,
   };
+  const besitzerZuvor = documentsPage.state.currentUserId;
+  documentsPage.state.currentUserId = 7;
   const bearbeiten = /data-action="edit-document"/;
   // Eigenes Mini-DOM: das der Suite baut `test.after` oben ab, und unter
   // Node 22/24 laeuft dieser Hook schon vor einem Test, der erst nach einem
@@ -4365,6 +4922,7 @@ test('Dokument-Betrachter: Bearbeiten nur mit Schreibrecht auf die Dokumente', (
     const [fremd] = mitModal(() => withAccess({ documents: 'write', tasks: 'read' }, () => documentsPage.openDocumentViewer(doc)));
     assert.match(fremd.content, bearbeiten, 'ein FREMDES Modul auf read sperrt es nicht');
   } finally {
+    documentsPage.state.currentUserId = besitzerZuvor;
     abbau();
   }
 });
@@ -4394,8 +4952,12 @@ test('Kanon R5: Geburtstagszeile nennt die Person an Bearbeiten und Loeschen', (
       id: 5, name: 'Oma Ingrid', birth_date: '1955-03-01', next_birthday: '2027-03-01',
       days_until: 156, age_next: 72,
     });
-    assert.match(html, /class="row-action" data-action="edit" aria-label="common\.editNamed\{&quot;name&quot;:&quot;Oma Ingrid&quot;\}"/);
-    assert.match(html, /class="row-action row-action--danger" data-action="delete" aria-label="common\.deleteNamed\{&quot;name&quot;:&quot;Oma Ingrid&quot;\}"/);
+    // Seit R18 (2026-10-07) traegt die Zeile EINEN Mehr-Knopf; er nennt die
+    // Person, Bearbeiten und Loeschen sind seine Eintraege mit Wort.
+    assert.match(html, /class="row-action row-action--more popover-menu__trigger"[^>]*aria-label="common\.moreActionsNamed\{&quot;name&quot;:&quot;Oma Ingrid&quot;\}"/);
+    assert.match(html, /role="menuitem"\s+class="popover-menu__item"\s+data-action="edit" data-id="5">/);
+    assert.match(html, /role="menuitem"\s+class="popover-menu__item popover-menu__item--danger"\s+data-action="delete" data-id="5">/);
+    assert.equal((html.match(/class="row-action[\s"]/g) ?? []).length, 1, 'kein Stift und kein Papierkorb daneben');
   });
 });
 
@@ -4407,8 +4969,11 @@ test('Kanon R5: Haushaltshilfe nennt Aufgabe und Person an ihren Zeilenaktionen'
     });
     const aufgaben = hkContainer();
     withAccess({ housekeeping: 'write' }, () => hk.renderTasks(aufgaben));
-    assert.match(aufgaben.html, /data-edit-task="3"\s+aria-label="common\.editNamed\{&quot;name&quot;:&quot;Fenster putzen&quot;\}"/);
-    assert.match(aufgaben.html, /data-delete-task="3"\s+aria-label="common\.deleteNamed\{&quot;name&quot;:&quot;Fenster putzen&quot;\}"/);
+    // Die Aufgabenzeile fuehrt seit R16 keine Zeilenaktion mehr: der Kreis
+    // nennt die Aufgabe, der Zeilenkoerper traegt ihren Namen als Inhalt, und
+    // das Loeschen im Dialogfuss nennt sie wieder (openTaskEditModal()).
+    assert.match(aufgaben.html, /data-complete-task="3"\s+aria-label="housekeeping\.completeTask\{&quot;name&quot;:&quot;Fenster putzen&quot;\}"/);
+    assert.match(HK_CODE, /data-delete-task="\$\{esc\(task\.id\)\}"\s+aria-label="\$\{esc\(t\('common\.deleteNamed', \{ name: task\.name \}\)\)\}"/);
 
     hkState({ tab: 'staff', workers: [{ id: 7, display_name: 'Ana', phone: '0151 000' }] });
     const personal = hkContainer();
@@ -4424,9 +4989,13 @@ test('Kanon R5: Aufgabenkarte nennt die Aufgabe an Bearbeiten, Ablegen und Teila
   withAccess({ tasks: 'write' }, () => {
     const html = tasks.renderTaskCard(aufgabe({ title: 'Muell rausbringen' }));
     const titel = '\\{&quot;title&quot;:&quot;Muell rausbringen&quot;\\}';
-    assert.match(html, new RegExp(`class="row-action task-card__inline-action" data-action="edit-task"[^>]*aria-label="common\\.editNamed\\{&quot;name&quot;:&quot;Muell rausbringen&quot;\\}"`));
-    assert.match(html, new RegExp(`data-action="archive-task"[^>]*aria-label="tasks\\.archiveNamed${titel}"`));
-    assert.match(html, new RegExp(`data-action="add-subtask"[^>]*aria-label="tasks\\.subtaskAddNamed${titel}"`));
+    // Seit R18 (2026-10-07) traegt die Karte EINEN Mehr-Knopf; er nennt die
+    // Aufgabe, die drei Handlungen sind seine Eintraege mit Wort.
+    void titel;
+    assert.match(html, /class="row-action row-action--more task-card__inline-action popover-menu__trigger"[^>]*aria-label="common\.moreActionsNamed\{&quot;name&quot;:&quot;Muell rausbringen&quot;\}"/);
+    assert.match(html, /class="popover-menu__item"\s+data-action="edit-task" data-id="7">[\s\S]{0,160}common\.edit</);
+    assert.match(html, /class="popover-menu__item"\s+data-action="add-subtask" data-parent="7">[\s\S]{0,160}tasks\.subtaskAdd</);
+    assert.match(html, /class="popover-menu__item"\s+data-action="archive-task" data-id="7">[\s\S]{0,160}tasks\.archiveButton</);
   });
 });
 
@@ -4596,7 +5165,11 @@ test('R8 H14: Kontakt-Auswahl ist ein Knopf mit Auswahlkreis und Objektnamen, ke
 
 test('R8 H14: Dokument-Auswahl ist ein Auswahlkreis mit Objektnamen, keine native Checkbox', () => {
   const st = documentsPage.state;
-  const vorher = { mode: st.selectMode, sel: new Set(st.selected) };
+  const vorher = { mode: st.selectMode, sel: new Set(st.selected), ich: st.currentUserId, alle: st.allDocuments };
+  // Seit #1265 traegt nur ein Dokument einen Kreis, das die Person verwalten
+  // darf (Besitzregel): beide Dokumente hier gehoeren ihr.
+  st.currentUserId = 7;
+  st.allDocuments = [{ id: 4, name: 'Mietvertrag.pdf', created_by: 7 }, { id: 5, name: 'x', created_by: 7 }];
   // Eigenes document: die Sammelaktions-Pille sucht ihre Schicht - ohne Shell
   // gibt es keine, und der Test darf nicht vom Rest eines frueheren leben.
   const echtesDocument = globalThis.document;
@@ -4604,12 +5177,12 @@ test('R8 H14: Dokument-Auswahl ist ein Auswahlkreis mit Objektnamen, keine nativ
   try {
     st.selectMode = true;
     st.selected = new Set([4]);
-    const an = documentsPage.renderSelectBox({ id: 4, name: 'Mietvertrag.pdf' });
+    const an = documentsPage.renderSelectBox({ id: 4, name: 'Mietvertrag.pdf', created_by: 7 });
     assert.doesNotMatch(an, /type="checkbox"/);
     assert.match(an, /<button type="button" class="select-circle select-circle--on"/);
     assert.match(an, /data-select-id="4" aria-pressed="true"/);
     assert.match(an, /aria-label="documents\.selectDocument\{&quot;name&quot;:&quot;Mietvertrag\.pdf&quot;\}"/);
-    assert.match(documentsPage.renderSelectBox({ id: 5, name: 'x' }), /aria-pressed="false"/);
+    assert.match(documentsPage.renderSelectBox({ id: 5, name: 'x', created_by: 7 }), /aria-pressed="false"/);
 
     documentsPage.setContainerForTest({ querySelector: () => null, querySelectorAll: () => [] });
     const kreis = schalterKnoten({ 'aria-pressed': 'false' });
@@ -4624,6 +5197,8 @@ test('R8 H14: Dokument-Auswahl ist ein Auswahlkreis mit Objektnamen, keine nativ
   } finally {
     st.selectMode = vorher.mode;
     st.selected = vorher.sel;
+    st.currentUserId = vorher.ich;
+    st.allDocuments = vorher.alle;
     documentsPage.setContainerForTest(null);
     globalThis.document = echtesDocument;
   }

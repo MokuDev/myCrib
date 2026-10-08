@@ -438,9 +438,14 @@
  *
  * 26rem: die Trägerbreiten sind gemessen 358px (390er-Telefon) und 720px (ab
  * 768px). Der Schnitt liegt dazwischen, und auf dem breiten Träger stehen
- * beide Angaben in jeder Zeile. */
+ * beide Angaben in jeder Zeile.
+ *
+ * NUR MIT STEPPER (#1682): die 168px gelten fuer eine Zeile, in der Warenkorb
+ * UND Stepper stehen. Bei `pantry: read` gibt es keinen Stepper, die Bedienzone
+ * ist nur der Warenkorb, und die Textspalte hat den Platz wieder - dort bleibt
+ * das Datum stehen. */
 @container list-rows (max-width: 26rem) {
-  .pantry-row:has(.pantry-row__cart) .pantry-row__expiry {
+  .pantry-row:has(.pantry-row__cart):has(.pantry-stepper) .pantry-row__expiry {
     display: none;
   }
 }
@@ -482,17 +487,8 @@
  * Formular
  * -------------------------------------------------------- */
 
-/* Zwei Felder nebeneinander (Menge/Einheit, Ort/Kategorie), einspaltig sobald
- * 11rem pro Spalte nicht mehr passen. auto-fit misst das Modal, nicht den
- * Viewport - und das Modal ist bei size="md" auf 520px gedeckelt, folgt der
- * Fensterbreite also gar nicht. */
-/* 8rem statt 11rem (Re-Critique 2026-09-28, A4 P3-11): im 364px-Sheet passte
- * die Zeile nie zweispaltig - "1,5" und "kg" belegten je eine volle Zeile. */
-.pantry-form-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
-  gap: var(--space-3);
-}
+/* Zwei Felder nebeneinander (Menge/Einheit, Ort/Kategorie): `.form-pair` in
+ * layout.css (R17, E6) - die Regel stand hier und galt im Einkauf nie. */
 
 /* Löschen links, Abbrechen/Speichern rechts: die destruktive Aktion teilt sich
  * keine Kante mit der Primäraktion. */
@@ -505,4 +501,13 @@
   .pantry-stepper__btn {
     transition: none;
   }
+}
+
+/* DER LOESCH-WISCH DER VORRATSZEILE (R16 Schritt 2b, pantry.js rowEl()).
+ * Buehne und Reveal-Panel kommen aus layout.css (`.swipe-row`). Den Chevron
+ * am Zeilenende zeigt der Vorrat nicht: dort steht der "+"-Knopf des Steppers,
+ * und der Pfeil laege auf seinem Ring (gemessen 390px). Die Geste lernt man am
+ * einmaligen Nudge (maybeShowSwipeHint); der feste Ort bleibt der Dialogfuss. */
+.pantry-swipe::after {
+  display: none;
 }

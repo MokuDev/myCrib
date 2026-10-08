@@ -694,6 +694,57 @@ export function addMonths(ym, n) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/**
+ * Der Faelligkeitstag eines Darlehens in einem Monat, als Tagesschluessel (#1631).
+ *
+ * DIE EINE STELLE, AN DER GEKLEMMT WIRD: ein Tag, den der Monat nicht hat, wird
+ * zu dessen letztem - der 31. im April zum 30., im Februar zum 28. oder 29.
+ * Gerechnet wird am Schluessel, nicht an einem Zeitpunkt: `Date.UTC(y, m, 0)`
+ * fragt nur nach der Laenge des Monats, eine Zone kommt nicht vor, und "heute"
+ * auch nicht - der Faelligkeitstag einer Rate haengt nicht daran, wann jemand
+ * fragt.
+ *
+ * @param {string} ym       Monat "YYYY-MM"
+ * @param {unknown} dueDay  1 bis 31; alles andere heisst "kein Faelligkeitstag"
+ * @returns {string|null}   "YYYY-MM-DD" oder null
+ */
+export function dueDateInMonth(ym, dueDay) {
+  if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return null;
+  const match = /^(\d{4})-(\d{2})$/.exec(String(ym ?? ''));
+  if (!match) return null;
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  const lastDay = new Date(Date.UTC(Number(match[1]), month, 0)).getUTCDate();
+  return `${match[1]}-${match[2]}-${String(Math.min(dueDay, lastDay)).padStart(2, '0')}`;
+}
+
+/**
+ * Das Datum, das ein Darlehen fuer seine naechste Rate nennt (`next_due_date`).
+ *
+ * Mit Faelligkeitstag ist es dieser Tag im Faelligkeitsmonat (#1631) - keine
+ * Frage an die Uhr. Ohne Faelligkeitstag kennt das Darlehen nur den Monat, und
+ * dann entscheidet der Monat des Haushalts (#1741):
+ *   - liegt der Faelligkeitsmonat VOR dem laufenden, ist es dessen Erster. Wer
+ *     ein Darlehen von 2022 nachtraegt, bucht die Raten sonst alle in den Monat
+ *     des Tippens. Der Erste ist die Konvention, die "bereits gezahlte Raten"
+ *     (`seedPaidInstallments`) ohne Faelligkeitstag schon benutzen - eine
+ *     Buchungskonvention, keine Faelligkeit: die Karte nennt weiter den Monat.
+ *   - sonst (laufender oder kuenftiger Monat) null, und "Als bezahlt markieren"
+ *     bleibt bei heute.
+ *
+ * @param {string} ym       Faelligkeitsmonat "YYYY-MM"
+ * @param {unknown} dueDay  1 bis 31 oder kein Faelligkeitstag
+ * @param {string} today    Tagesschluessel des Haushalts (`todayKey(db)`), nie der UTC-Tag
+ * @returns {string|null}   "YYYY-MM-DD" oder null
+ */
+export function nextInstallmentDate(ym, dueDay, today) {
+  const onDueDay = dueDateInMonth(ym, dueDay);
+  if (onDueDay) return onDueDay;
+  if (dueDay != null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(ym ?? ''))) return null;
+  return ym < String(today ?? '').slice(0, 7) ? `${ym}-01` : null;
+}
+
 export function cents(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
@@ -758,7 +809,13 @@ export function bookingFor(direction) {
   return REPAYMENT_BOOKING[direction] || REPAYMENT_BOOKING.lent;
 }
 
-export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
+/**
+ * @param {object} loan
+ * @param {string} [baseCurrency]
+ * @param {string} [today]  Tagesschluessel des Haushalts; die Liste reicht ihn
+ *                          einmal durch, statt ihn je Darlehen neu zu lesen.
+ */
+export function loanSummaryRow(loan, baseCurrency = budgetCurrency(), today = todayKey(db.get())) {
   const payments = db.get().prepare(`
     SELECT p.*, u.display_name AS creator_name,
            b.title AS entry_title,
@@ -804,6 +861,8 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
   const currency = loan.currency || baseCurrency;
   const rate = currency === baseCurrency ? 1 : loanRate(loan);
 
+  const nextDueMonth = !settled ? addMonths(loan.start_month, paidInstallments) : null;
+
   return {
     ...loan,
     currency,
@@ -822,7 +881,12 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
     remaining_installments_forecast: forecastRemainingInstallments(loan, interest, paidInstallments),
     is_settled: settled,
     next_installment_number: !settled ? paidInstallments + 1 : null,
-    next_due_month: !settled ? addMonths(loan.start_month, paidInstallments) : null,
+    next_due_month: nextDueMonth,
+    // Der Tag dazu (#1631), wenn das Darlehen einen nennt. Ohne Faelligkeitstag
+    // der Erste des Monats, sobald dieser vorbei ist (#1741), sonst null, und
+    // "Als bezahlt markieren" bleibt bei heute. Die Oberflaeche reicht den Wert
+    // als paid_date durch, statt selbst zu rechnen.
+    next_due_date: nextDueMonth ? nextInstallmentDate(nextDueMonth, loan.due_day, today) : null,
     interest,
     payments,
   };
@@ -1058,15 +1122,48 @@ export function entryWithLoanMeta(id) {
 export const ACCOUNT_TYPE_KEYS = ['checking', 'savings', 'cash', 'credit', 'investment', 'other'];
 
 /**
+ * Eine Absage mit ihrem Grund (#1656, #1668).
+ *
+ * Der Satz bleibt, wie er war - er ist die zugesagte Antwort der API. Der Grund
+ * kommt dazu, damit die Seite die Absage am Feld und in der Sprache der
+ * Oberflaeche zeigen kann, statt den Satz des Servers durchzureichen. Wer hier
+ * einen Grund ergaenzt, ordnet ihn in `LOAN_REFUSALS` bzw. `BUDGET_REFUSALS`
+ * (public/pages/budget.js) ein; test:budget-ui haelt die Listen deckungsgleich.
+ *
+ * `extra` traegt, was der Satz der Oberflaeche nennen soll und nur der Server
+ * weiss - heute `max` (die Grenze, an der die Absage haengt).
+ */
+export const refusal = (reason, error, extra = {}) => ({ ...extra, reason, error });
+
+/** Die Fehler allgemeiner Validatoren (str/num/date/oneOf) unter einem Grund. */
+export const refusals = (reason, results) => results
+  .filter((result) => result.error)
+  .map((result) => refusal(reason, result.error));
+
+/**
+ * Absage aus einer Liste: alle Saetze wie bisher in `error`, Grund (und `max`)
+ * der ERSTEN in `reason` - ein Dialog zeigt ohnehin ein Feld nach dem anderen.
+ */
+export function refuse(res, errors, status = 400) {
+  const [first] = errors;
+  return res.status(status).json({
+    error: errors.map((e) => e.error).join(' '),
+    code: status,
+    reason: first.reason,
+    ...(first.max !== undefined ? { max: first.max } : {}),
+  });
+}
+
+/**
  * Prüft eine optionale Konto-Zuordnung aus dem Request.
  * @returns {{ value: number|null }|{ error: string }} value=null ⇒ keinem Konto zugeordnet.
  */
 export function validateAccountRef(raw) {
   if (raw === undefined || raw === null || raw === '') return { value: null };
   const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) return { error: 'account_id muss eine gültige Konto-ID sein.' };
+  if (!Number.isInteger(id) || id <= 0) return { error: 'account_id must be a valid account id.' };
   const row = db.get().prepare('SELECT id FROM budget_accounts WHERE id = ?').get(id);
-  if (!row) return { error: 'Konto nicht gefunden.' };
+  if (!row) return { error: 'Account not found.' };
   return { value: id };
 }
 

@@ -13,12 +13,13 @@ import {
   parseDateInput,
   t,
 } from '/i18n.js';
-import { esc } from '/utils/html.js';
+import { esc, REQUIRED_MARK } from '/utils/html.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { emptyStateHTML, mountLoadError } from '/utils/empty-state.js';
 import { todayKey } from '/utils/date.js';
 import { CURRENCY_CODES } from '/utils/currency-codes.js';
 import { wireSwipeRows, maybeShowSwipeHint } from '/utils/swipe-row.js';
+import { redrawList, collapseRow } from '/utils/list-motion.js';
 import { formatMoney, amountPlaceholder, amountStep, applyAmountFormat, amountIsSavable, smallestUnitLabel } from '/utils/money.js';
 import { attachOverlay } from '/utils/overlay-history.js';
 import { isNavModuleReadOnly } from '/permissions.js';
@@ -26,6 +27,7 @@ import { openDetailView } from '/components/detail-view.js';
 import { rowActionHtml } from '/utils/row-action.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { metricGlanceHtml, wireMetricGlance } from '/utils/metric-glance.js';
+import { leadCardClass } from '/utils/metric-card.js';
 
 // Auslastung, ab der ein Budget „knapp" ist - dieselbe Zahl wie im Plan
 // (budget-plans.js `toneForRatio`), damit beide Tabs dieselbe Grenze ziehen.
@@ -233,12 +235,18 @@ export async function render(target, { user } = {}) {
            Hauptbuch (.section-toolbar): Titel links, Suche mit
            --page-search-width, mobil in der Icon-Form. Kennzahlen stehen
            davor, damit Kopf und Liste zusammen bleiben; der Kopf wird nie neu
-           gebaut, sonst verloere die Suche beim Tippen ihren Fokus. -->
+           gebaut, sonst verloere die Suche beim Tippen ihren Fokus.
+
+           AUF DER BUEHNE, NICHT IN DER KARTE (R16 Schritt 2b, Reiter-Skelett
+           des Budgets): der Kopf stand samt Titel IN der weissen Flaeche der
+           Liste, waehrend "Transaktionen" und "Kategorie-Budgets" nebenan
+           ueber ihrem Traeger stehen. Jetzt h2.u-section-title mit den
+           Werkzeugen rechts, darunter der Zeilentraeger (.row-carrier). -->
       <div class="subscriptions-summary" id="subscriptions-summary"></div>
       <section class="subscriptions-list-section" aria-labelledby="subscriptions-list-title">
         <div class="subscriptions-section-head section-toolbar">
           <div class="subscriptions-section-head__lead">
-            <h2 id="subscriptions-list-title" tabindex="-1">${t('subscriptions.listTitle')}</h2>
+            <h2 class="u-section-title" id="subscriptions-list-title" tabindex="-1">${t('subscriptions.listTitle')}</h2>
             <span class="list-group__count" id="subscriptions-list-count"></span>
           </div>
           <span class="subscriptions-rates-slot" id="subscriptions-rates-slot"></span>
@@ -528,11 +536,11 @@ function bindToolbar() {
   });
 }
 
-async function reload(options) {
+async function reload(options, { motion = false } = {}) {
   try {
     await load(options);
     renderFilters();
-    renderContent();
+    renderContent({ motion });
   } catch (err) {
     window.yuvomi?.showToast(err.data?.error || t('subscriptions.loadError'), 'danger');
   }
@@ -547,7 +555,21 @@ function sortedSubscriptions() {
   });
 }
 
-function renderContent() {
+const SUBSCRIPTION_ROW = '.swipe-row[data-swipe-id]';
+
+/* `motion: true` setzt, wer die DATEN geaendert hat (Abo angelegt, gespeichert,
+ * verlaengert, geloescht): die neue Zeile zieht auf, und was dadurch die
+ * Stelle wechselt, gleitet (utils/list-motion.js). Traeger ist
+ * `#subscriptions-content` - `#subscriptions-list` darin baut jedes Zeichnen
+ * neu. Filter und Sortierung zeichnen ohne Bewegung neu - dort wechselt die
+ * Frage, nicht die Liste. */
+function renderContent({ motion = false } = {}) {
+  const content = container.querySelector('#subscriptions-content');
+  if (motion && content) redrawList(content, drawContent, { selector: SUBSCRIPTION_ROW, keyAttr: 'data-swipe-id' });
+  else drawContent();
+}
+
+function drawContent() {
   const content = container.querySelector('#subscriptions-content');
   const rows = sortedSubscriptions();
   // Kurs-Status/-Aktion nur, wenn überhaupt ein Abo in Fremdwährung läuft -
@@ -573,7 +595,7 @@ function renderContent() {
         </button>`);
   }
   setHtml(content, `
-      <div class="subscriptions-list row-divided" id="subscriptions-list">
+      <div class="subscriptions-list row-carrier" id="subscriptions-list">
         ${rows.length ? rows.map(renderCard).join('') : renderEmpty()}
       </div>
   `);
@@ -636,10 +658,11 @@ function renderSummary() {
     expanded: state.summaryExpanded,
     label: t('subscriptions.monthlyCost'),
     value: money(used),
+    lead: true,
     flows: [{ label: t('subscriptions.activeCount', { count: summary.active_count }) }, budgetFlow],
   })}
-    <section class="metric-grid${hasBudget ? ' metric-grid--quad' : ''} budget-glance-details${state.summaryExpanded ? ' is-expanded' : ''}" id="subscriptions-summary-details">
-      <article class="metric-card">
+    <section class="metric-grid metric-grid--led${hasBudget ? ' metric-grid--quad' : ''} budget-glance-details${state.summaryExpanded ? ' is-expanded' : ''}" id="subscriptions-summary-details">
+      <article class="metric-card ${leadCardClass(money(used))}">
         <div class="metric-card__label">${t('subscriptions.monthlyCost')}</div>
         <div class="metric-card__value">${money(used)}</div>
         <div class="metric-card__note">${t('subscriptions.activeCount', { count: summary.active_count })}</div>
@@ -760,13 +783,12 @@ function renderAreaChart(title, rows) {
   const peak = rows.reduce((best, row) => (row.amount > (best?.amount ?? 0) ? row : best), null);
   return `
     <article class="subscriptions-chart subscriptions-chart--area">
-      <div class="subscriptions-chart__head">
-        <h2>${title}</h2>
-        ${peak ? `<p class="subscriptions-chart__figure">
+      <h2 class="u-section-title subscriptions-chart__title">${title}</h2>
+      <div class="subscriptions-chart__card">
+      ${peak ? `<p class="subscriptions-chart__figure">
           <span>${esc(t('subscriptions.forecastPeak', { month: peak.label }))}</span>
           <strong>${money(peak.amount)}</strong>
         </p>` : ''}
-      </div>
       <svg class="subscriptions-area-chart" viewBox="0 0 100 52" preserveAspectRatio="none" aria-hidden="true">
         <polygon points="${areaPoints}"></polygon>
         <polyline points="${points}" vector-effect="non-scaling-stroke"></polyline>
@@ -777,6 +799,7 @@ function renderAreaChart(title, rows) {
       <ul class="sr-only">
         ${rows.map((row) => `<li>${esc(row.label)}: ${money(row.amount)}</li>`).join('')}
       </ul>
+      </div>
     </article>
   `;
 }
@@ -794,9 +817,8 @@ function renderBreakdown(title, rows) {
   const percent = getNumberFormat({ style: 'percent', maximumFractionDigits: 0 });
   return `
     <article class="subscriptions-chart">
-      <div class="subscriptions-chart__head">
-        <h2>${title}</h2>
-      </div>
+      <h2 class="u-section-title subscriptions-chart__title">${title}</h2>
+      <div class="subscriptions-chart__card">
       ${rows.length ? `<ul class="subscriptions-chart-rows">${rows.map((row) => `
         <li class="subscriptions-chart-row">
           <span class="subscriptions-chart-row__label" title="${esc(row.label)}">${esc(row.label)}</span>
@@ -805,6 +827,7 @@ function renderBreakdown(title, rows) {
           <span class="subscriptions-chart-row__share">${percent.format(row.amount / total)}</span>
         </li>
       `).join('')}</ul>` : `<p>${t('subscriptions.noAnalytics')}</p>`}
+      </div>
     </article>
   `;
 }
@@ -903,7 +926,7 @@ function renderCard(subscription) {
           </span>
           <span class="subscription-card__meta">
             <span class="subscription-card__due${overdue ? ' subscription-card__due--overdue' : ''}"><i data-lucide="${overdue ? 'triangle-alert' : 'calendar-clock'}" aria-hidden="true"></i><span>${formatDate(subscription.next_payment_date)} ·</span> <span>${dueLabel(subscription)}</span></span>
-            <span>${cycleLabel(subscription)}</span>
+            <span class="subscription-card__meta-cycle">${cycleLabel(subscription)}</span>
             <span class="subscription-card__meta-extra">${esc(rowPaymentMethodLabel(subscription))}</span>
             <span class="subscription-card__meta-extra"><i data-lucide="bell" aria-hidden="true"></i>${t('subscriptions.reminderMeta', { count: subscription.reminder_days })}</span>
             ${endInfo ? `<span><i data-lucide="${endInfo.icon}" aria-hidden="true"></i>${esc(endInfo.text)}</span>` : ''}
@@ -912,6 +935,7 @@ function renderCard(subscription) {
         <span class="subscription-card__cost">
           <strong>${money(subscription.amount, subscription.currency)}</strong>
           ${converted ? `<span>${converted}</span>` : ''}
+          <span class="subscription-card__cost-cycle">${cycleLabel(subscription)}</span>
         </span>
         ${ro ? '' : `<span class="sr-only">${t('common.edit')}</span>`}
       </button>
@@ -1044,11 +1068,11 @@ function currencyItems() {
 // anderen Feldern, traegt ein sichtbares Label und zeigt den GEWAEHLTEN Wert
 // („EUR · Euro"). Deshalb `type="text"` (die Rolle kommt aus role="combobox")
 // und die Feldform des Formulars, nicht die Suchkapsel (Komponenten-Kanon).
-function comboboxMarkup({ id, label, items, value = '', placeholder }) {
+function comboboxMarkup({ id, label, items, value = '', placeholder, required = false }) {
   const selected = items.find((item) => String(item.value) === String(value));
   return `
     <div class="form-group subscriptions-combobox" data-combobox="${id}">
-      <label class="form-label" for="${id}-search">${label}</label>
+      <label class="form-label" for="${id}-search">${label}${required ? REQUIRED_MARK : ''}</label>
       <div class="subscriptions-combobox__control">
         <i data-lucide="search" aria-hidden="true"></i>
         <input class="form-input" id="${id}-search" type="text" role="combobox"
@@ -1303,7 +1327,7 @@ export function openSubscriptionModal(subscription = null) {
         </div>
         <div class="subscription-form__identity-fields">
           <div class="form-group">
-            <label class="form-label" for="subscription-name">${t('subscriptions.nameLabel')}</label>
+            <label class="form-label" for="subscription-name">${t('subscriptions.nameLabel')}${REQUIRED_MARK}</label>
             <input class="form-input" id="subscription-name" maxlength="200" required value="${esc(initialName)}">
           </div>
           <div class="form-group">
@@ -1317,7 +1341,7 @@ export function openSubscriptionModal(subscription = null) {
         <h3><i data-lucide="receipt-text" aria-hidden="true"></i>${t('subscriptions.billingDetails')}</h3>
         <div class="subscription-form__billing-grid">
           <div class="form-group">
-            <label class="form-label" for="subscription-amount">${t('subscriptions.amountLabel')}</label>
+            <label class="form-label" for="subscription-amount">${t('subscriptions.amountLabel')}${REQUIRED_MARK}</label>
             <input class="form-input" id="subscription-amount" type="number"
                    min="0"
                    step="${amountStep(formCurrency, subscription?.amount ?? '')}"
@@ -1327,6 +1351,7 @@ export function openSubscriptionModal(subscription = null) {
           ${comboboxMarkup({
             id: 'subscription-currency',
             label: t('subscriptions.currencyLabel'),
+            required: true,
             items: currencyItems(),
             value: subscription?.currency || state.settings.base_currency,
             placeholder: t('subscriptions.currencySearchPlaceholder'),
@@ -1349,7 +1374,7 @@ export function openSubscriptionModal(subscription = null) {
         <h3><i data-lucide="calendar-clock" aria-hidden="true"></i>${t('subscriptions.renewalDetails')}</h3>
         <div class="form-grid-2">
           <div class="form-group">
-            <label class="form-label" for="subscription-next-date">${t('subscriptions.nextPaymentLabel')}</label>
+            <label class="form-label" for="subscription-next-date">${t('subscriptions.nextPaymentLabel')}${REQUIRED_MARK}</label>
             <yuvomi-datepicker id="subscription-next-date" type="date"
                    value="${esc(subscription?.next_payment_date || todayKey())}"></yuvomi-datepicker>
           </div>
@@ -1565,7 +1590,7 @@ async function saveSubscription(panel, existing, searchedLogoData = null) {
     if (existing) await api.put(`/budget/subscriptions/${existing.id}`, payload);
     else await api.post('/budget/subscriptions', payload);
     await closeModal({ force: true });
-    await reload();
+    await reload(undefined, { motion: true });
     refocusAfterRender();
     window.yuvomi?.showToast(t(existing ? 'subscriptions.savedToast' : 'subscriptions.addedToast'), 'success');
   } catch (err) {
@@ -1673,7 +1698,7 @@ async function renewSubscription(subscription) {
   if (!confirmed) return;
   try {
     const response = await api.post(`/budget/subscriptions/${subscription.id}/renew`, {});
-    await reload();
+    await reload(undefined, { motion: true });
     refocusAfterRender();
     const completed = response.data?.status === 'completed';
     window.yuvomi?.showToast(t(completed ? 'subscriptions.completedToast' : 'subscriptions.renewedToast'), 'success');
@@ -1689,7 +1714,11 @@ async function deleteSubscription(subscription) {
   if (!confirmed) return;
   try {
     await api.delete(`/budget/subscriptions/${subscription.id}`);
-    await reload();
+    // Die Zeile klappt aus, die Nachbarn ruecken nach - erst dann steht die
+    // Liste ohne sie neu (der Server hat schon geloescht; ohne Bewegung loest
+    // collapseRow sofort auf).
+    await collapseRow(container.querySelector(`#subscriptions-list .swipe-row[data-swipe-id="${subscription.id}"]`));
+    await reload(undefined, { motion: true });
     refocusAfterRender();
     window.yuvomi?.showToast(t('subscriptions.deletedToast'), 'success');
   } catch (err) {

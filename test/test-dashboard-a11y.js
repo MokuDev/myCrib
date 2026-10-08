@@ -82,6 +82,65 @@ test('die Signatur bleibt: fuenf Positionsargumente plus optionaler Siegel-Slug'
   assert.ok(!/widget__link/.test(html), 'ohne Ziel weiterhin kein Link');
 });
 
+// R18: DER SLUG DES SIEGELS IST EIN MODUL, KEIN STUECK ADRESSE. Das Budget-Widget
+// verlinkt auf `/budget?tab=budget`; der Slug wurde am ersten `/` geschnitten und
+// ergab `var(--module-budget?tab=budget, ...)` - ungueltig, das Siegel stand im
+// geerbten Violett. Der Text-Guard „wer ein Markensiegel baut, benennt eine
+// Herkunft" (test-frontend-audit.js) sah die Zeichenkette `--seal-accent` und
+// war gruen. Deshalb hier der AUFRUF: jedes Ziel, das dashboard.js einem
+// Widget-Kopf gibt, laeuft durch widgetHeader, und der Ton muss ein Token sein,
+// das tokens.css kennt.
+test('jedes Widget-Siegel nennt einen Modulton, den tokens.css kennt (R18)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const read = (rel) => readFileSync(new URL(rel, import.meta.url), 'utf8');
+  const known = new Set([...read('../public/styles/tokens.css').matchAll(/--module-([a-z-]+)\s*:/g)].map((m) => m[1]));
+  assert.ok(known.has('budget') && known.has('health'), 'Reichweite: die Modulliste wurde gelesen');
+
+  const src = read('../public/pages/dashboard.js');
+  const constants = Object.fromEntries(
+    [...src.matchAll(/^const ([A-Z_]+_ROUTE) = '([^']+)';/gm)].map((m) => [m[1], m[2]]));
+  const slugOf = (html) => html.match(/--seal-accent: var\(--module-([^,)]*)/)?.[1];
+
+  // Jeder Aufruf mit seinen Argumenten - ueber die Klammern, nicht ueber ein
+  // Muster: `t('nav.budget')` schliesst vor dem Ziel schon einmal.
+  const calls = [];
+  for (const m of src.matchAll(/(?<!function )widgetHeader\('([a-z-]+)'/g)) {
+    let depth = 0;
+    let end = m.index + 'widgetHeader'.length;
+    do {
+      if (src[end] === '(') depth += 1;
+      else if (src[end] === ')') depth -= 1;
+      end += 1;
+    } while (depth > 0);
+    calls.push([src.slice(m.index, end), m[1]]);
+  }
+  assert.ok(calls.length >= 30, `Reichweite: ${calls.length} Aufrufe gefunden`);
+
+  const offenders = [];
+  let viaConstant = 0;
+  for (const [text, id] of calls) {
+    const route = text.match(/'(\/[^']*)'/)?.[1];
+    const constant = text.match(/\b([A-Z_]+_ROUTE)\b/)?.[1];
+    const seal = text.match(/,\s*'([a-z-]+)'\)$/)?.[1] ?? null;
+    if (constant) viaConstant += 1;
+    const href = route ?? (constant ? constants[constant] : null);
+    if (constant) assert.ok(href, `${constant} ist aufloesbar`);
+    // Ohne Ziel und ohne benannte Herkunft bleibt nur, was der Aufruf selbst
+    // mitgibt (das Familie-Widget rechnet sein Ziel zur Laufzeit, nennt aber
+    // die Herkunft).
+    const slug = slugOf(widgetHeader(id, 'Titel', null, href, null, seal));
+    if (!slug) offenders.push(`${id}: kein Modulton (weder Ziel noch sealSlug) in ${text}`);
+    else if (!known.has(slug)) offenders.push(`${id}: --module-${slug} gibt es nicht (${text})`);
+  }
+  assert.ok(viaConstant >= 2, 'Reichweite: der Budget-Kopf (Route mit Query) ist dabei');
+  assert.deepEqual(offenders, []);
+
+  // Und die Regel selbst, an den Formen, die eine Adresse haben kann.
+  for (const href of ['/budget?tab=budget', '/budget#monat', '/budget/', '/budget/x?y=1']) {
+    assert.equal(slugOf(widgetHeader('budget', 'Budget', null, href)), 'budget', href);
+  }
+});
+
 test('das Raster hat eine eigene h2 - die Widgets haengen nicht unter „Heute wichtig"', () => {
   const html = renderDashboardLayout([{ id: 'clock', visible: true, size: '1x1' }], {}, null, 'EUR');
   const gridAt = html.indexOf('dashboard__grid');
@@ -494,14 +553,27 @@ test('Anpassen: der Speed-Dial ist ausgeblendet, und der Neuaufbau meldet den Sc
   assert.ok(/setLeaveGuard\(\(\) => customizeLeaveAllowed\(/.test(src), 'der Schutz ist die Rueckfrage von Abbrechen');
 });
 
+// navigate() steht seit #1657 in utils/router-navigate.js; der Router reicht
+// ihm den Verlassen-Schutz als Abhaengigkeit. Die Textguards unten lesen den
+// Kopf der Funktion deshalb dort und pruefen am Router die Uebergabe.
+const NAVIGATE_GETS_LEAVE_GUARD = /createNavigate\(routerState, \{[^}]*\bhasLeaveGuard, mayLeave\b[^}]*\}\)/;
+function navigateHead(readFileSync) {
+  const source = readFileSync(new URL('../public/utils/router-navigate.js', import.meta.url), 'utf8');
+  const start = source.indexOf('async function navigate(');
+  const lock = source.indexOf('state.isNavigating = true;', start);
+  assert.ok(start > 0 && lock > start, 'navigate() oder die Sperre nicht gefunden');
+  return source.slice(start, lock);
+}
+
 test('Router: jeder Wechsel einer angemeldeten Sitzung fragt den Verlassen-Schutz, bevor er navigiert (A7 P2-1)', async () => {
   const { readFileSync } = await import('node:fs');
   const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
   assert.match(router, /import \{[^}]*\bmayLeave\b[^}]*\} from '\/utils\/leave-guard\.js';/);
-  const head = router.slice(router.indexOf('async function navigate('), router.indexOf('isNavigating = true;', router.indexOf('async function navigate(')));
-  assert.match(head, /if \(currentUser && typeof userOrPushState !== 'object' &&[^\n]*!\(await mayLeave\(path\)\)\)/,
+  assert.match(router, NAVIGATE_GETS_LEAVE_GUARD, 'der Router reicht den Schutz an navigate() weiter');
+  const head = navigateHead(readFileSync);
+  assert.match(head, /if \(state\.currentUser && typeof userOrPushState !== 'object' &&[^\n]*!\(await mayLeave\(path\)\)\)/,
     'der Schutz steht VOR isNavigating = true - sonst blockierte die offene Rueckfrage jede weitere Navigation');
-  assert.match(head, /userOrPushState === false && currentPath\)[\s\S]*history\.pushState\(\{ path: /,
+  assert.match(head, /userOrPushState === false && state\.currentPath\)[\s\S]*history\.pushState\(\{ path: /,
     'ein abgelehntes Zurueck legt die Adresse zurueck');
 });
 
@@ -519,17 +591,15 @@ test('Router: ohne angemeldeten Waechter bleibt der Wechsel ohne Yield - zwei Kl
   // und gewartet wird daher nur, wenn eine Seite wirklich etwas zu verlieren hat.
   const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
   assert.match(router, /import \{ hasLeaveGuard, mayLeave \} from '\/utils\/leave-guard\.js';/);
-  const start = router.indexOf('async function navigate(');
-  const head = router.slice(start, router.indexOf('isNavigating = true;', start));
+  assert.match(router, NAVIGATE_GETS_LEAVE_GUARD, 'der Router reicht den Schutz an navigate() weiter');
+  const head = navigateHead(readFileSync);
   assert.match(head, /hasLeaveGuard\(\) && !\(await mayLeave\(path\)\)/,
     'erst der synchrone Blick auf den Waechter, dann das await');
 });
 
 test('Router: ein abgelehntes Zurueck legt die Adresse erst zurueck, wenn der Dialog seinen Marker zurueckgab', async () => {
   const { readFileSync } = await import('node:fs');
-  const router = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
-  const start = router.indexOf('async function navigate(');
-  const head = router.slice(start, router.indexOf('isNavigating = true;', start));
+  const head = navigateHead(readFileSync);
   // Im Browser gemessen: ohne das Warten stand nach "Abbrechen" /calendar in der
   // Adresse, waehrend die Uebersicht zu sehen war (test:overlay-history haelt den Mechanismus).
   assert.match(head, /await whenHistorySettled\(\);\s*\n\s*history\.pushState\(\{ path: stay \}/,

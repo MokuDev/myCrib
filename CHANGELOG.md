@@ -13,12 +13,32 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [Unreleased]
 
-- **Der fünfte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 49 weitere Commits bis zu deren
-  v2.75.0: Taschengeld, wiederkehrende Split-Ausgaben, Köchin oder Koch je Mahlzeit, Konto deaktivieren statt
-  löschen, Migrationen 231 bis 235 und der Gestaltungsdurchgang R18). Die Bildmarke bleibt unser eigenes Icon.
+- **Der fünfte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 65 weitere Commits bis zu deren
+  Stand vom 9. Oktober 2026, nach v2.75.0: Taschengeld, wiederkehrende Split-Ausgaben, Köchin oder
+  Koch je Mahlzeit, Konto deaktivieren statt löschen, Migrationen 231 bis 235, der
+  Gestaltungsdurchgang R18, Einkaufslisten-Auswahl in der Übersicht und Zahlungserinnerung je Abo).
+  Die Bildmarke bleibt unser eigenes Icon.
 
 ### Added
 
+- **Payment reminders can be turned off for each subscription** (#1708, from D#1226). Turn off the reminder
+  in the subscription dialog while keeping the subscription active and its cost in the budget.
+  Editing or renewing it keeps the reminder off. Existing subscriptions keep reminders enabled.
+- **Loans can be put in order by interest rate or by remaining balance** (#1706, from D#935). The
+  loans tab has a sort menu: highest rate first, smallest balance first, or by start as before.
+  Each loan now also names the month it is projected to end, which follows the payments you
+  actually booked and counts from today if instalments have not been recorded up to date. A loan in another currency is compared at its stored rate, a loan without
+  interest counts as 0 %, and paid-off loans stay at the end. In these two orders the loans you
+  took out come first and the money you lent follows as its own group. While the list is not in
+  its default order, a line above it says which order applies; tap it to change. The order is a calculation to read:
+  Yuvomi does not suggest which loan to pay first and does not move payments between loans.
+- **Choose which shopping lists the overview shows** (#1818, from D#1624). The shopping tile now
+  has options in "Customize": tick the lists you want on it. With nothing ticked it shows every
+  list with open items, as before. A list you picked stays on the tile even when everything on it
+  is bought, so it is one tap away when you want to add the first item. The tile shows up to
+  three lists; a further one you picked is named as "+1 more list". The choice is yours alone,
+  does not change what anyone else in the household sees, and only applies to the tile: the
+  today sheet, the wall and the menu keep counting every list.
 - **Rewards can hold pocket money: a money balance per child, credited on a schedule, paid out on
   request** (#1734, from D#916, asked by @trinitrion). The parents are the bank: they set an amount
   per week or per month and the day it is due, the child sees its balance, asks to withdraw a free
@@ -753,6 +773,106 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ### Fixed
 
+- **A wall tablet shows events again when the household overview is set to "Assigned to me"** (#1808).
+  A paired display follows the household default of the overview. If that default had the calendar
+  tile set to "Assigned to me", the tablet looked for events assigned to the tablet itself and
+  showed none - in the event list and in the week strip; tasks and the other tiles were not
+  affected. On a display the option now means all events; for members it works as before. The
+  hint under Settings > Wall tablets now says where a tablet takes its overview from and names
+  what it shows: calendar, tasks, rewards and weather.
+- **A locked field looks locked.** A field you cannot change looked exactly like one you can -
+  same text, same fill, same outline; only the mouse pointer gave it away, and on a phone nothing
+  did. Text, number and date fields, dropdowns and text areas now all show it the same way,
+  everywhere in the app: the fill goes, the outline turns quiet and the value steps back to grey
+  while staying easy to read. Settings and the reminder section used to fade such fields, which
+  made the value hard to read in light mode, and a locked date was close to invisible in both
+  modes; both now follow the one look. A locked dropdown drops its small arrow, so it reads as a
+  value rather than something to open, and a locked field no longer shows its example text: an
+  empty locked share in a split expense showed a grey "30" that looked like a value of 30. The
+  calendar button of a locked date also steps back when a whole group of fields is locked, not
+  only when the date itself is.
+- **A row on the overview opens what it shows** (#1821). A note on the overview opened the notes
+  page instead of the note, and so did a note found through search: the notes page now opens the
+  note it is asked for. A birthday row opens that birthday, on the phone as well, and so does a
+  birthday found through search. A bin without
+  an upcoming pickup leads to that bin, and "n open" for shopping in the today sheet opens the
+  list when only one list has open items.
+- **The keyboard focus stays on an overview row.** When the overview refreshed quietly - on
+  coming back to the tab, every quarter of an hour, at a day boundary - the focused row lost the
+  focus and Enter did nothing. Tabbing into a row in the instant after the page appeared could
+  lose it the same way. Both keep the focus now, and a dialog that a link opens directly keeps
+  it too.
+- **Overview rows that lead to one item open as fast as the others.** A row for an event, a
+  shopping list or a pantry filter did not preload the page behind it on hover or press, so its
+  first tap was slower than on any other row.
+- **"n open" for shopping counts every list.** With more than three lists that still had open
+  items, the today sheet and the wall added up only three of them and showed a smaller number
+  than the shopping page.
+- **A shopping list on the overview opens that list.** The shopping tile shows up to three lists,
+  the most recently changed first, but tapping any of them opened the shopping page on its first
+  list - tap "Drugstore" and you got "Weekly shop". Each row now opens its own list, by tap, click
+  and keyboard. The "All" link in the tile header still opens the shopping page as before.
+- **Starting on an older Node.js 22 says what is wrong instead of dying silently** (reported in
+  #1728). Without Docker, Yuvomi claimed to run on any Node.js 22, but before 22.14 the
+  server stopped right at startup without a single line of output, and so did the demo seed
+  script. The required version is now stated correctly as Node.js 22.14 or newer, and an older
+  one gets a one-line message that names the running version, what is needed, and that updating
+  Node.js fixes it. The Docker image ships its own Node.js 24 and was never affected.
+- **A wall tablet no longer offers to rearrange the overview or to search** (#1808). A paired
+  display showed the "Customise" button, let you rearrange the tiles, and answered "Done" with
+  "Token scope does not permit this operation." - a display changes no settings, and that
+  includes its own board. The search button beside it failed the same way. Both are gone on a
+  display. To decide what the tablet shows, arrange the overview as an administrator and choose
+  "Set as household default" while customising: a display never stores an arrangement of its
+  own, so it always follows that default.
+- **Waste: a calendar URL whose provider renames every entry on each download can be imported**
+  (#1795). Some providers hand out a new internal ID for every pickup each time the calendar is
+  fetched (limburg.net does). Yuvomi fetches the address once for the preview and once more to
+  apply it, took the new IDs for new content and refused every time with "The file content
+  changed since you last previewed it". The check now compares what the preview shows - which
+  waste type on which day, and how many - so the import goes through, and a calendar that really
+  changed in between is still refused. Later refreshes of such an address no longer report every
+  pickup as removed and added again. The refusal itself is now shown in the app's language.
+- **SSO sign-in no longer fails when `OIDC_REDIRECT_URI` is written differently from how a URL
+  is normally printed.** The first request to the provider sent the value exactly as written,
+  the second one - the code exchange - a rebuilt form of it, with the path of the incoming
+  request. The two differed with a default port written out (`https://host:443/...`), capital
+  letters in the host name, a query of its own, or a path the reverse proxy rewrites. A provider
+  has to refuse such an exchange, so the sign-in failed with `invalid_grant` after the login at
+  the provider had looked successful. Both requests now carry the same value, character for
+  character; the same goes for linking an account under Settings. Nothing changes for an
+  installation whose value was already in its plain form. A sign-in that is under way while the
+  update is installed is refused once and works on the second click (#1768).
+- **The installation guide says what `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM` does not do.** It
+  covers a provider that leaves `email_verified` out, not one that sends `email_verified: false`,
+  which authentik does by default since 2025.10. The guide and `.env.example` now name the fix
+  on the provider side (#1780).
+- **Blood pressure and its unit stay on one line in the health tiles.** In a narrow tile "mmHg"
+  dropped below "116/74". The size of the value used to follow the width of the whole row of
+  tiles, which says little where the row fills itself with as many tiles as fit; it now follows
+  the tile. A narrow tile shows the value one step smaller, the narrowest one also a smaller
+  unit, and on a very small phone the vitals page shows one tile per line instead of two that are
+  too narrow. Tiles in budget, housekeeping and inventory are unchanged.
+- **Screen readers name the field picker in the shift type dialog.** Under "Custom fields" the
+  dropdown next to "Add" had no name, so it was announced as an unnamed combo box with the first
+  field as its value. It is now announced as "Field to attach". Nothing changes on screen.
+- **In the shift planner "To" follows "From".** When adding an exception or an extra shift,
+  moving "From" past "To" left "To" where it was; "Add" then failed, and the message was the
+  server's English sentence in whatever language the app was set to. "To" now moves along with
+  "From", in the add dialog and in the two dialogs that edit an existing range. A range that is
+  still the wrong way round is named at the "To" field, in the language of the app, before
+  anything is sent. For API clients the refusal keeps its sentence and gains
+  `reason: "range_reversed"`.
+- **A meal dialog you did not touch no longer asks "Discard changes?".** If the household members
+  could not be loaded with the page, the meal dialog fetches them when it opens and fills in the
+  cook selection a moment later. Closing the dialog after that asked whether to discard changes,
+  although nothing had been changed. What you typed before the selection arrived still counts as
+  a change, as it should.
+- **Fast clicks on the month arrows in the budget land on the right month.** Clicking "next"
+  twice while a month was still loading moved one month instead of two, and going forward and
+  straight back could leave the wrong month on screen - whichever answer arrived last won. Each
+  click now counts from the month you asked for, and a late answer for a month you already left
+  is ignored. The same holds for "Current" and for swiping.
 - **The first visit no longer reloads itself and empties the login form.** One to four seconds
   after the very first load the page reloaded, and whatever had been typed into the login form
   was gone. The reload was meant for an update of the app, but it also fired when the app was

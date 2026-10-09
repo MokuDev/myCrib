@@ -2110,6 +2110,25 @@ nur das gerenderte Dokument sieht, ob eine Liste ueberhaupt verdrahtet ist.
   zurueckfaellt). **Das Suchfeld ist davon ausgenommen:** es ist ein Bedienelement und
   traegt die gefuellte Kapsel des Komponenten-Kanons (`--color-fill-field`, Kante
   transparent, Platzhalter in Sekundaertext), nicht die Formularkante.
+- **Gesperrt (`:disabled`, 2026-10-08) - EIN Aussehen an der Feldhaut**
+  (`.input:disabled, .form-input:disabled`, layout.css), keine Regel je Dialog: die Fuellung
+  faellt weg (`transparent`), die Kante wird die Kartenkante (`--color-border`; 1.4.11 gilt
+  dem bedienbaren Element), der Wert steht in `--color-text-secondary` und bleibt lesbar
+  (gemessen 6,19:1 hell, 6,66:1 dunkel im Dialog) - nie `--color-text-disabled`, nie ueber
+  `opacity` (Deckung multipliziert den Kontrast herunter, wie bei `--color-surface-receded`).
+  Die Regel hebt die Daempfung des Browsers ausdruecklich auf (`opacity: 1` gegen Chromes
+  0,7 an `select:disabled`, `-webkit-text-fill-color: currentColor` gegen WebKits
+  Fuellfarbe), sonst gilt der gerechnete Kontrast nicht. Zeiger `not-allowed`. **Kein
+  Platzhalter:** `:disabled::placeholder` ist `transparent` - sekundaer gegen tertiaer sind
+  1,10 / 1,14:1, ein leeres gesperrtes Feld laese sich sonst als gefuelltes. **Kein
+  Zeichen:** JEDE gesperrte Auswahl legt `--field-chevron` ab (das Bild laesst sich nicht
+  umfaerben); der Kalenderknopf des Datepickers dimmt ueber `.ydp__trigger:disabled`, also
+  auch im gesperrten `fieldset`. Unter `prefers-contrast: more` geht die Kante auf
+  `--color-text-secondary`. Die randlosen Auswahlen (Formularzeile, Einheit im
+  zusammengesetzten Feld) haben weder Kante noch Flaeche und stehen in Ruhe schon
+  sekundaer: sie nehmen zusaetzlich Tertiaer. Schalter und Knoepfe tragen keinen
+  Wert und dimmen weiter ueber die Deckung. `readonly` ist kein gesperrtes Feld und sieht
+  aus wie ein bedienbares (Ausnahme: `.input--fixed`, der von der Einladung vorgegebene Wert).
 - **Feldkanon:** ein `select` traegt `appearance: none` und sein eigenes Zeichen
   (`--field-chevron`, Lucide chevron-down, 16px, mit dem Feldpolster eingerueckt, in RTL
   gespiegelt); das Auswahlblatt bleibt das native. Dazu 32px Innenpolster am Ende
@@ -3868,7 +3887,12 @@ Angabe braeuchte einen zweiten Timer, nur damit sie sich selbst aktuell haelt.
   Fehlt ein Teil, bleibt seine Zeile leer, statt die naechste hochzuziehen; mit Subgrid teilen
   die Karten einer Rasterzeile dieselben vier Zeilenhoehen, ohne bleibt der Rueckfall mit
   festen Zeilen. Wert und Einheit stehen auf einer Grundlinie - dafuer meldet sich das Raster
-  als `metric-grid`-Container.
+  als `metric-grid`-Container. Fuellt sich das Raster selbst (`auto-fit`/`auto-fill`), sagt
+  die Breite der Reihe nichts ueber die Kachel: dort ist zusaetzlich die WERTZEILE ein Container
+  (`metric-tile` an `.metric-card__body`) und senkt den Wert auf Title 2, in der schmalsten
+  Kachel auf Title 3 mit der Einheit in Caption 1 (#1799, gemessen an "180/110 mmHg";
+  `test:metric-tile-fit-browser`). **Don't** die Kachel selbst zum Container machen: ihr
+  Layout-Containment schaltet das Subgrid ab, und die geteilten Zeilen sind weg.
 - **Do** eine Trendlinie in der Kennzahlkarte im MODULTON zeichnen, 1,5px mit einem Hauch
   Flaeche darunter (14 % auf 0), den letzten Punkt in Label-Farbe mit Ring in Kartenflaeche
   (`.metric-card__spark`). Kein Erfolgs- oder Gefahrenton: bei Vitalwerten ist "hoch" je nach

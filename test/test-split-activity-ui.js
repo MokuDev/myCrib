@@ -305,6 +305,49 @@ test('Datum: der Tag in der Haushaltszone, nicht der UTC-Tag', () => {
   }
 });
 
+test('geloeschte Ausgabe (#1382): Zeichen am Anlege-Eintrag, Loesch-Eintrag nennt sie ohne Zeichen', () => {
+  const vorher = { ...split.state };
+  const ausgabe = (extra = {}) => ({ id: 9, deleted_at: null, ...extra });
+  // Titel und Betrag stehen seit #1607 in den Metadaten des Eintrags.
+  const metadata = { title: 'Einkauf', amount_minor: 3000, amount: '30.00', currency: 'EUR' };
+  const zeichne = (activity, modus = 'write') => {
+    Object.assign(split.state, { activity, activityCursor: null, groupStatus: 'active' });
+    return withAccess({ budget: modus }, () => split.renderActivity());
+  };
+  try {
+    // Aktiv: die Zeile nennt die Ausgabe, kein Zeichen, nicht durchgestrichen.
+    const aktiv = zeichne([eintrag(1, { entity_id: 9, metadata, expense: ausgabe() })]);
+    const detail = /<span class="split-activity-payment">Einkauf · 30,00\s€<\/span>/;
+    assert.match(aktiv, detail);
+    assert.doesNotMatch(aktiv, /split-activity-item--reversed|split-activity-reversed/);
+
+    // Geloescht: bei jedem Recht das Zeichen und die durchgestrichene Zeile.
+    const weg = ausgabe({ deleted_at: '2026-09-21T08:00:00Z' });
+    for (const modus of ['write', 'read']) {
+      const html = zeichne([
+        eintrag(2, { type: 'expense_deleted', entity_id: 9, metadata, expense: weg }),
+        eintrag(1, { entity_id: 9, metadata, expense: weg }),
+      ], modus);
+      const [loeschung, anlage] = html.split('<div class="split-activity-item').slice(1);
+      assert.match(anlage, /^ split-activity-item--reversed"/, modus);
+      assert.match(anlage, /<span class="split-activity-reversed">splitExpenses\.expenseDeleted<\/span>/, modus);
+      assert.match(loeschung, /^"/, `${modus}: der Loesch-Eintrag ist nicht durchgestrichen`);
+      assert.match(loeschung, detail, modus);
+      assert.doesNotMatch(loeschung, /split-activity-reversed/, modus);
+      assert.doesNotMatch(html, /data-reverse-settlement/, `${modus}: keine Handlung`);
+    }
+
+    // Eine Serienbuchung legt ihre Ausgabe ohne `expense_created` an: ihr
+    // Eintrag traegt das Zeichen und muss deshalb sagen, welche Ausgabe.
+    const serie = zeichne([eintrag(3, { type: 'recurring_generated', entity_id: 9, metadata: { recurring_expense_id: 4, title: 'Miete' }, expense: weg })]);
+    assert.match(serie, /<span class="split-activity-payment">Miete<\/span>/);
+    assert.match(serie, /split-activity-item--reversed"/);
+    assert.match(serie, /<span class="split-activity-reversed">splitExpenses\.expenseDeleted<\/span>/);
+  } finally {
+    Object.assign(split.state, vorher);
+  }
+});
+
 // Migration v226 schreibt 'ledger_restored' ohne Akteur (#1382): der Eintrag
 // traegt den uebersetzten Typ und "System" statt eines Namens - und der Key
 // steht in jeder Sprache, sonst zeigte die Seite den rohen Key.
@@ -463,5 +506,19 @@ test('die Gruppenzahl steht am Kopf der Liste, mobil entfaellt ihre Kennzahlkart
   assert.ok(regel?.at.includes('@container split-page (max-width: 639px)'), 'nur schmal - am Desktop bleibt die Dreierreihe');
   assert.match(regel.body, /display:\s*none/, 'keine volle Zeile fuer eine Ziffer (59px fuer „2", 390x844)');
   const src = readFileSync(new URL('../public/pages/split-expenses.js', import.meta.url), 'utf8');
-  assert.match(src, /class="split-panel-title">\$\{t\('splitExpenses\.groups'\)\}<span class="list-group__count split-panel-count" id="split-group-count">/);
+  assert.match(src, /class="split-panel-title u-section-title">\$\{t\('splitExpenses\.groups'\)\}<span class="list-group__count split-panel-count" id="split-group-count">/);
+});
+
+// Review an #1767: die Kurzzeile liest seit R17 (E5) aus `state.balances`. Der
+// Zustand lebt auf Modulebene; lud der Einstieg die Gruppendaten nur MIT
+// aktiver Gruppe, stand nach dem Verlust der letzten Gruppe der alte Saldo
+// ueber dem Leerzustand. loadGroupData() leert ohne Gruppe - es muss nur
+// immer laufen.
+test('Einstieg ohne Gruppe leert die Salden der zuletzt gesehenen Gruppe', async () => {
+  const { readFileSync } = await import('node:fs');
+  const src = readFileSync(new URL('../public/pages/split-expenses.js', import.meta.url), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const fn = src.slice(src.indexOf('async function loadInitial()'), src.indexOf('async function loadGroupData()'));
+  assert.ok(fn.length > 0, 'loadInitial nicht gefunden - der Scanner greift nicht');
+  assert.doesNotMatch(fn, /if\s*\(state\.activeGroupId\)\s*await loadGroupData\(\)/, 'nicht nur mit aktiver Gruppe');
+  assert.match(fn, /^\s*await loadGroupData\(\);/m);
 });

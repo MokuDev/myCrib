@@ -221,6 +221,35 @@ test('(5) die geteilten Bausteine existieren an einer Stelle', async () => {
   }
 });
 
+// E13 (Critique R17): am Desktop haengen die Filter als Popover am Knopf. Die
+// Form steht global (layout.css) wie das Blatt - und sie hat weder Overlay
+// noch Unschaerfe: das ist ihr Sinn, die Liste dahinter filtert live.
+test('E13: das Filter-Popover hat kein Overlay und keine Unschaerfe, aber Ein- und Ausgang', () => {
+  const pop = rules(layoutCss).filter((r) => /^\.filter-popover\b/.test(r.selector));
+  assert.ok(topLevel(layoutCss, '.filter-popover').length >= 1, '.filter-popover gehoert in layout.css (global geladen)');
+  const backdrop = pop.find((r) => r.selector === '.filter-popover::backdrop');
+  assert.ok(backdrop && /background:\s*transparent/.test(backdrop.body), 'kein Abdunkeln hinter dem Popover');
+  for (const r of pop) assert.doesNotMatch(r.body, /backdrop-filter/, `${r.selector}: keine Unschaerfe`);
+  const base = topLevel(layoutCss, '.filter-popover')[0];
+  assert.match(base.body, /position:\s*fixed/);
+  assert.match(base.body, /inline-size:\s*min\(var\(--layout-rail-min\)/, 'Breite aus tokens.css');
+  assert.match(base.body, /overlay var\(--duration-xs\) allow-discrete/, 'der Ausgang laeuft, bevor es den Top-Layer verlaesst');
+  const open = topLevel(layoutCss, '.filter-popover:popover-open').find((r) => /transition/.test(r.body));
+  assert.ok(open && /var\(--duration-md\)/.test(open.body), 'Eingang in --duration-md wie das Popover-Menue');
+  assert.match(layoutCss, /@starting-style\s*\{\s*\.filter-popover:popover-open\s*\{[^}]*transform:\s*scale\(0\.96\)/,
+    'Eingang aus dem verkleinerten Zustand');
+  const sheet = read('../public/utils/filter-sheet.js');
+  assert.match(sheet, /export function filtersAsPopover\(/);
+  assert.match(sheet, /setAttribute\('popover', 'auto'\)/, 'Esc und Tipp daneben schliessen (Browser)');
+  // Das Popover haengt an document.body und ueberlebt den Seitentausch: ein
+  // Wechsel ohne Zeigerereignis (Zurueck des Browsers) liess es ueber der
+  // Zielseite stehen. Der Router raeumt es im synchronen Teil des Wechsels ab.
+  assert.match(sheet, /export function dismissFilterPopovers\(\)\s*\{[\s\S]*?getElementById\(id\)\?\.remove\(\)/);
+  const router = read('../public/router.js').replace(/\/\/.*$/gm, '');
+  const swap = router.slice(router.indexOf('const swap = () => {'), router.indexOf('style.cleanup();'));
+  assert.match(swap, /dismissFilterPopovers\(\);/, 'der Seitenwechsel raeumt offene Filter-Popover ab');
+});
+
 // R14 P12 (Re-Critique 2026-09-28, A1 P3-2): im Desktop-Kopf standen zwei
 // Hoehen - Suche und "..." 44px, Segment, Filter und angedockte Pille 40px,
 // gemessen in 12 Modulen bei 1440. Am Zeiger ist 40px die Regel (ignore.md,
@@ -264,6 +293,46 @@ test('R17 Z1: nur der markierte Zeitraum-Kopf loest seine Bar-Zeile in die Titel
     `Werkzeuge in Zeile 1 nur im markierten Zeitraum-Kopf (.${PERIOD_TITLE}, DESIGN.md „Variante: Zeitraum-Kopf")`);
 });
 
+// R17 Schritt 5 (Critique 2026-10-07, A1 P1): der Kalenderkopf mass mobil
+// eingeklappt dieselben 117px wie ausgeklappt - Titel und Siegel gingen, die
+// Zeile blieb. Eingeklappt steht der Stepper jetzt in Zeile 1 vor dem Menue;
+// Suche, Filter und "Heute" falten ins Menue (gemessen 390x844: 117 -> 65px).
+test('R17: der Kalenderkopf ist eingeklappt EINE Zeile, und was weicht, kommt im Menue wieder', () => {
+  const calendarCss = read('../public/styles/calendar.css');
+  const collapsed = rules(calendarCss).filter((r) => /\.cal-toolbar\.page-toolbar--capped\.is-collapsed/.test(r.selector));
+  assert.ok(collapsed.length >= 2, 'calendar.css traegt die Regeln fuer den eingeklappten Kopf');
+  for (const r of collapsed) {
+    assert.ok(r.at.some((a) => /max-width:\s*639px/.test(a)),
+      `"${r.selector}" gilt nur, wo das Ansichtsmenue steht (unter 640px) - darueber gibt es kein Menue, in das gefaltet wird`);
+    assert.match(r.selector, /\.page-toolbar--period-title/, 'nur im markierten Zeitraum-Kopf');
+  }
+  const center = collapsed.find((r) => /> \.page-toolbar__center$/.test(r.selector));
+  assert.equal(center && decl(center.body, 'order'), '0', 'der Zeitraum rueckt in Zeile 1, vor die Werkzeuge');
+  assert.match(center.body, /flex:\s*1 1 0/, 'und nimmt den Rest der Zeile statt einer eigenen');
+  const hidden = collapsed.find((r) => decl(r.body, 'display') === 'none');
+  assert.ok(hidden, 'die gefalteten Werkzeuge blenden eingeklappt aus');
+  for (const part of hidden.selector.split(',')) {
+    assert.match(part, /\[data-collapse-fold\]/, `"${part.trim()}" blendet nur aus, was als faltbar markiert ist`);
+  }
+  assert.match(hidden.selector, /\.cal-toolbar__filter-btn\[data-collapse-fold\]:not\(\.page-filter-btn--active\)/,
+    'ein aktiver Filter bleibt mit seiner Zahl stehen (Kopfregel 3)');
+
+  const calendarJs = read('../public/pages/calendar.js');
+  assert.match(calendarJs, /id="cal-views-menu"[^>]*data-collapse-fold-menu/, 'das Ansichtsmenue nimmt die gefalteten Werkzeuge auf');
+  assert.match(calendarJs, /id="cal-search"[^>]*data-collapse-fold/, 'die Suche ist markiert');
+  assert.match(calendarJs, /'#cal-filters'\)\.setAttribute\('data-collapse-fold'/, 'der Filter ist markiert');
+  assert.match(calendarJs, /id: 'cal-today'[\s\S]{0,200}'data-collapse-fold': true/, '"Heute" ist markiert');
+
+  const ux = read('../public/utils/ux.js');
+  const branch = ux.match(/const foldMenu = capped \?[\s\S]*?\n    \}\n/)?.[0] ?? '';
+  assert.match(branch, /\[data-collapse-fold-menu\]\[popovertarget\]/, 'der Kopf findet das markierte Menue');
+  assert.match(branch, /classList\.contains\('is-collapsed'\)/, 'Stellvertreter nur eingeklappt');
+  assert.match(branch, /getClientRects\(\)\.length === 0/,
+    'und nur fuer das, was gerade nicht zu sehen ist - sonst stuende dieselbe Handlung zweimal da');
+  assert.match(ux, /btn\.disabled \|\| btn\.inert/, 'ein inerter Reset ("Heute" im laufenden Zeitraum) ist kein Eintrag');
+  assert.match(ux, /reserve \+ shorter/, 'die Reserve-Regel rechnet mit der AUSGEKLAPPTEN Hoehe, sonst pendelt eine knappe Liste');
+});
+
 test('R17 Z1: die Variante steht nur im Markup der Module, die DESIGN.md nennt', () => {
   const pub = new URL('../public/', import.meta.url);
   const carriers = [];
@@ -277,4 +346,84 @@ test('R17 Z1: die Variante steht nur im Markup der Module, die DESIGN.md nennt',
   const design = read('../DESIGN.md');
   assert.match(design, /\*\*Variante: Zeitraum-Kopf \(Kalender\)\.\*\*/, 'DESIGN.md benennt die Variante');
   assert.ok(design.includes(PERIOD_TITLE), 'und nennt ihre Kennklasse');
+});
+
+// R16 (Critique 2026-10-05, P1 mobil): „Werkzeuge in der Titelzeile" (DESIGN.md,
+// Kopfregel mobil 1a). Traegt die Werkzeugzeile eines Kopfs hoechstens zwei
+// Icon-Knoepfe und weder Segment noch Stepper noch Tab-Leiste, stehen sie am
+// Ende der Titelzeile; die zweite Zeile entfaellt (114 -> 65px). Wie beim
+// Zeitraum-Kopf ist die Variante MARKIERT: die Klasse steht nur in den Modulen,
+// die DESIGN.md nennt, sie wirkt nur unter 768px, und kein Traeger fuehrt eine
+// Bar-Zeile - mit Tab-Leiste daneben waere es wieder die R9-Verdichtung, die
+// R14 zurueckgenommen hat. Wie viele Knoepfe ein Kopf zur Laufzeit zeigt, ist
+// Messarbeit (Handoff/Messmatrix), nicht dieser Guard.
+const TITLE_TOOLS = 'page-toolbar--title-tools';
+const TITLE_TOOLS_MODULES = [
+  'pages/birthdays.js', 'pages/contacts.js', 'pages/documents.js', 'pages/health.js', 'pages/inventory.js', 'pages/notes.js', 'pages/waste.js', 'settings/shell.js',
+];
+
+test('R16: Werkzeuge in der Titelzeile - nur markiert, nur mobil, nie neben einer Bar-Zeile', () => {
+  const pub = new URL('../public/', import.meta.url);
+  const carriers = [];
+  for (const dir of ['pages', 'utils', 'components', 'settings']) {
+    for (const f of readdirSync(new URL(`${dir}/`, pub)).filter((n) => n.endsWith('.js'))) {
+      if (`${dir}/${f}` === 'utils/page-layout.js') continue;
+      const src = readFileSync(new URL(`${dir}/${f}`, pub), 'utf8');
+      if (!src.includes(TITLE_TOOLS) && !/\btitleTools:\s*true\b/.test(src)) continue;
+      carriers.push(`${dir}/${f}`);
+      assert.doesNotMatch(src, /page-toolbar__bar|\bbar:\s/,
+        `${dir}/${f}: ein Kopf mit Bar-Zeile (Tab-Leiste, Segment) traegt seine Werkzeuge dort, nicht in der Titelzeile`);
+    }
+  }
+  assert.deepEqual(carriers.sort(), [...TITLE_TOOLS_MODULES].sort(),
+    'wer die Werkzeuge in die Titelzeile stellt, steht in DESIGN.md und in TITLE_TOOLS_MODULES');
+  assert.match(read('../public/utils/page-layout.js'), /titleTools && 'page-toolbar--title-tools'/,
+    'renderPageHeader reicht die Variante als Option durch');
+
+  const own = sheets.flatMap(({ file, css }) => rules(css).filter((r) => r.selector.includes(`.${TITLE_TOOLS}`))
+    .map((r) => ({ file, ...r })));
+  assert.ok(own.length >= 1, 'die Regel fehlt in layout.css');
+  for (const r of own) {
+    assert.equal(r.file, 'layout.css', `${r.file}: die Variante gehoert der Shell (${r.selector})`);
+    assert.ok(r.at.some((a) => /max-width:\s*767px/.test(a)),
+      `${r.selector}: nur unter 768px - ab dort hat die Titelzeile Feld und angedockte Pille`);
+  }
+  const title = own.find((r) => r.selector.endsWith(':not(.page-toolbar--in-group) > .page-toolbar__title')
+    && /flex:\s*1 1 0/.test(r.body));
+  assert.ok(title, 'der Titel gibt nach (Basis 0) - die Knoepfe haben kein Label zum Anschneiden');
+  assert.match(title.body, /white-space:\s*nowrap/, 'ein langer Titel kuerzt, er bricht nicht um (Kopfhoehe je Sprache gleich)');
+  assert.match(title.body, /text-overflow:\s*ellipsis/);
+
+  const design = read('../DESIGN.md');
+  assert.match(design, /\*\*1a\. Werkzeuge in der Titelzeile\.\*\*/, 'DESIGN.md benennt die Regel');
+  assert.ok(design.includes(TITLE_TOOLS), 'und nennt ihre Kennklasse');
+});
+
+// R16 (Critique 2026-10-05, P1 mobil): KENNZAHLEN ALS KURZZEILE. Inventar trug
+// 136px Kacheln vor der Liste (eine fuer „0"), die Haushaltshilfe ein 2x2-
+// Raster vor den Besuchen. Beide nutzen mobil die Kurzzeile des Budgets
+// (utils/metric-glance.js). Die steht dafuer in panel.css: budget.css laedt
+// nur im Budget, und die Zeile waere in jedem anderen Modul unsichtbar
+// (`display: none` als Basis) oder ungestylt gewesen.
+test('R16: die Kennzahl-Kurzzeile ist ein geteilter Baustein, und Inventar und Haushaltshilfe nutzen ihn', () => {
+  const panel = rules(read('../public/styles/panel.css'));
+  const phone = (r) => r.at.some((a) => /max-width:\s*639px/.test(a));
+  assert.ok(panel.some((r) => r.at.length === 0 && r.selector === '.budget-glance' && decl(r.body, 'display') === 'none'),
+    'ab 640px gibt es den Traeger nicht');
+  assert.ok(panel.some((r) => phone(r) && r.selector === '.budget-glance' && decl(r.body, 'display') === 'block'));
+  assert.ok(panel.some((r) => phone(r) && r.selector === '.budget-glance-details:not(.is-expanded)' && decl(r.body, 'display') === 'none'),
+    'eingeklappt stehen die Karten nicht');
+  assert.ok(panel.some((r) => phone(r) && r.selector === '.budget-glance-details > .metric-card--empty' && decl(r.body, 'display') === 'none'),
+    'eine leere Kennzahl entfaellt mobil');
+  assert.ok(panel.some((r) => r.selector === '.budget-glance__row'), 'die Zeile selbst steht in panel.css');
+  for (const [file, id, controls] of [
+    ['../public/pages/inventory.js', 'inventory-glance-more', 'inventory-metrics'],
+    ['../public/pages/housekeeping.js', 'housekeeping-glance-more', 'housekeeping-metrics'],
+  ]) {
+    const src = read(file);
+    assert.match(src, /import \{ metricGlanceHtml, wireMetricGlance \} from '\/utils\/metric-glance\.js';/, file);
+    assert.match(src, new RegExp(`id: '${id}',\\s*controls: '${controls}'`), `${file}: Zeile und Bereich gehoeren zusammen`);
+    assert.match(src, new RegExp(`class="metric-grid[^"]*budget-glance-details[^"]*" id="${controls}"`), `${file}: die Karten sind der aufklappbare Bereich`);
+    assert.match(src, new RegExp(`wireMetricGlance\\(\\w+, '${id}'`), `${file}: der Aufklapper ist verdrahtet`);
+  }
 });

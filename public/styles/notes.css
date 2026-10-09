@@ -162,6 +162,29 @@
   margin-top: var(--space-4);
 }
 
+/* KEINE ERZWUNGENE LEERZEILE ZWISCHEN DEN GRUPPEN (Critique R17; notes.js,
+ * syncGroupFlow). Fuellen die angepinnten Notizen ihre letzte Zeile nicht,
+ * beginnt der Kopf der naechsten Gruppe in der ersten freien Spalte dieser
+ * Zeile statt eine neue aufzumachen, und ihre Karten fliessen darunter weiter.
+ * Die angepinnten Nachzuegler nehmen dafuer zwei Zeilen ein (Kopf + erste
+ * Kartenzeile). Der Kopf sitzt UNTEN in seiner Zeile: ist der Nachzuegler
+ * hoeher als Kopf plus Karten, waechst die Kopfzeile mit - der Kopf bleibt bei
+ * seinen Karten statt bei der Oberkante des Nachbarn.
+ *
+ * Nur im Zeilenraster: natives Masonry (unten) kennt keine Zeilen, in die ein
+ * Kopf sich einreihen koennte, und packt die Luecke ohnehin anders. */
+@supports not (grid-template-rows: masonry) {
+  .notes-group__title.notes-group__title--inline {
+    grid-column: var(--notes-label-start, 1) / -1;
+    align-self: end;
+    margin-top: 0;
+  }
+
+  .note-card--trailing {
+    grid-row: span 2;
+  }
+}
+
 /* Lade-Zustand: Grid aufheben, damit die geteilte Skeleton-Liste
  * (Flex-Spalte) full-width erscheint — eine Lade-Sprache über alle Module. */
 .notes-grid[aria-busy="true"] {
@@ -691,19 +714,76 @@
 .note-mode-switch {
   display: inline-flex;
   gap: var(--space-1);
-  margin-bottom: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
-/* Leseansicht: gerendertes Markdown (.note-md-* aus typography.css) auf einer
- * dezent mit der Notizfarbe getönten Fläche (--note-color am .note-modal),
- * damit der Reader als „dieselbe Notiz, vergrößert" lesbar ist. Der Tint liegt
- * über transparent → theme-agnostisch; Text bleibt --color-text-primary für
- * durchgehend ≥4.5:1. Weiße Notizen ergeben keinen sichtbaren Tint. */
+/* --------------------------------------------------------
+ * Der Editor als Arbeitsflaeche (Critique 2026-10-05, R16).
+ *
+ * Gemessen bei 390x844: Formatierleiste 332x162 (dreireihig), Textfeld 332x160
+ * ab y=534 - unter der Tastaturlinie. Am Desktop ein 680x752-Modal mit einem
+ * Textfeld von 646x160. Das Feld, fuer das der Dialog da ist, war sein
+ * kleinstes Stueck.
+ *
+ * Jetzt: Titel und Text ohne Labelzeile (die Labels bleiben als Name, .sr-only),
+ * 8px statt 16px zwischen den Stuecken, und das Textfeld traegt eine
+ * Mindesthoehe, die das Blatt fuellt. Was dahinter kommt (Kategorien, "Weitere
+ * Einstellungen" mit Farbe und Anheften), liegt unter der Flaeche und scrollt.
+ * `field-sizing: content` laesst das Feld mit dem Text wachsen, wo der Browser
+ * es kann; sonst scrollt es in sich.
+ * -------------------------------------------------------- */
+.note-edit-view > .note-editor__title,
+.note-edit-view > .note-editor {
+  margin-bottom: var(--space-2);
+}
+
+.note-editor__title-input {
+  font-size: var(--type-card-title);
+  font-weight: var(--font-weight-semibold);
+}
+
+.note-editor__text {
+  min-height: max(18.75rem, 38vh);
+  min-height: max(18.75rem, 38dvh);
+  field-sizing: content;
+  resize: vertical;
+  line-height: var(--line-height-relaxed);
+}
+
+/* Breiter Dialog (lg, 680px): das Modal hat die Hoehe, das Feld nimmt sie. */
+@container modal-body (min-width: 600px) {
+  .note-editor__text {
+    min-height: max(25rem, 45vh);
+    min-height: max(25rem, 45dvh);
+  }
+}
+
+/* LESEANSICHT: DER DIALOGKOERPER TRAEGT DIE ZETTELFARBE (R18, 2026-10-07).
+ *
+ * Bis dahin stand das gerenderte Markdown in einem KASTEN: getoente Flaeche,
+ * 12px Radius und eine Kante in 50 % der Notizfarbe. Bei einem roten oder
+ * rosa Zettel war das ein rosa Kasten mit roetlicher Kante direkt ueber dem
+ * roten "Loeschen" im Fuss - die Form einer Fehlermeldung.
+ *
+ * Jetzt ist der Zettel der Koerper selbst: die Ansicht zieht sich mit
+ * negativem Rand ueber die Polsterung von `.modal-panel__body` (--space-4,
+ * layout.css) bis an Kopf- und Fusslinie, ohne Kante und ohne Radius. Die
+ * FARBE ist dieselbe wie vorher (--note-color zu --tint-surface ueber der
+ * Tafel) - Text bleibt --color-text-primary, die Kontrastrechnung der
+ * Zettelfarben gilt unveraendert. Weisse Notizen ergeben keinen Tint. */
 .note-read-view {
+  margin: calc(-1 * var(--space-4));
   padding: var(--space-4);
-  border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--note-color, transparent) var(--tint-surface), transparent);
-  border: 1px solid color-mix(in srgb, var(--note-color, transparent) var(--tint-hint), transparent);
+}
+
+/* EIN WEG ZUM BEARBEITEN. In der Leseansicht standen zwei: der Reiter
+ * "Bearbeiten" oben und der Primaerknopf "Bearbeiten" im Fuss. Der Knopf
+ * bleibt (er ist die Hauptaktion des Lesedialogs, Critique 2026-09-26); der
+ * Umschalter erscheint erst im Editor, wo "Lesen" die Vorschau ist und sonst
+ * kein Weg zurueck fuehrt. */
+.note-modal[data-view="read"] .note-mode-switch {
+  display: none;
 }
 
 .note-read__body {
@@ -726,7 +806,7 @@
 }
 
 .note-pane--enter {
-  animation: notePaneEnter 160ms var(--ease-out);
+  animation: notePaneEnter var(--duration-sm) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {

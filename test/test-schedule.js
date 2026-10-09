@@ -1010,9 +1010,11 @@ test('the Overrides section groups consecutive same-type days and edits/deletes 
   assert.match(schedulePage, /function overrideGroups\(overrides = state\.overrides\)/);
   assert.match(schedulePage, /function rangeDifference\(oldFrom, oldTo, newFrom, newTo\)/);
   assert.match(schedulePage, /data-form="override-edit"/);
-  assert.match(schedulePage, /data-action="delete-override-range"/);
+  // Seit R18 (2026-10-07) ein Eintrag im Mehr-Knopf der Zeile (editDeleteMenu),
+  // mit denselben data-Attributen, die action() liest.
+  assert.match(schedulePage, /remove: \{ action: 'delete-override-range', attrs: \{ 'data-from': group\.from, 'data-to': group\.to, 'data-user-id': group\.user_id \} \}/);
   assert.match(schedulePage, /overrideGroups\(\)\.find\(/);
-  const editBranch = schedulePage.slice(schedulePage.indexOf("form.dataset.form === 'override-edit'"), schedulePage.indexOf("await load();\n    // S-03 (Review zu #1099): dieser Speichervorgang baut JEDE Musterkarte neu"));
+  const editBranch = schedulePage.slice(schedulePage.indexOf("form.dataset.form === 'override-edit'"), schedulePage.indexOf('await reloadAfterWrite();', schedulePage.indexOf("form.dataset.form === 'override-edit'")));
   // confirmOverModal(), not confirmModal(): the create/edit form is still open
   // behind this confirm, and confirmModal() force-closes whatever modal is
   // already open (no stacking) before opening its own - it would have silently
@@ -1029,7 +1031,7 @@ test('the Overrides section groups consecutive same-type days and edits/deletes 
   // shared success path at the end of saveCreatedSchedule().
   assert.match(editBranch, /confirmOverModal\([\s\S]*closeOnConfirm:\s*false/, 'a failed save must find the form still parked, not already closed by the confirmation itself');
   assert.match(editBranch, /rangeDifference\(/, 'shrinking a range removes what fell outside it, not just fills the new span');
-  const deleteBranch = schedulePage.slice(schedulePage.indexOf("'delete-override-range'"), schedulePage.indexOf("'save-days'"));
+  const deleteBranch = schedulePage.slice(schedulePage.indexOf("button.dataset.action === 'delete-override-range'"), schedulePage.indexOf("button.dataset.action === 'open-create-extra'"));
   assert.match(deleteBranch, /confirmModal\(/, 'deleting a range confirms first, unlike the old single-day delete');
 });
 
@@ -1045,6 +1047,141 @@ test('saving a multi-day "replace" range parks the form through the confirmation
   );
   assert.match(replaceBranch, /confirmOverModal\(/, 'a multi-day replace confirms before writing, via the non-destructive confirmOverModal');
   assert.match(replaceBranch, /confirmOverModal\([\s\S]*closeOnConfirm:\s*false/, 'a failed /schedule/overrides/fill must find the form still parked, not already closed by the confirmation itself');
+});
+
+/* #1782: die Feld-Auswahl im Schichtart-Dialog hatte keinen Namen - kein Label,
+ * kein aria-label, kein aria-labelledby. Ein Screenreader sagte
+ * "Kombinationsfeld" und den Namen des ersten Feldes. Gelesen wird das Markup,
+ * das die echte shiftTypeFieldsEditor() schreibt, in beiden Zustaenden der
+ * Auswahl. */
+test('#1782: die Feld-Auswahl im Schichtart-Dialog traegt einen zugaenglichen Namen', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  const state = __test.scheduleState();
+  const savedFields = state.customFields;
+  state.customFields = [{ id: 11, name: 'Station' }, { id: 12, name: 'Fahrzeug' }];
+  try {
+    const editors = {
+      'mit waehlbarem Feld': __test.shiftTypeFieldsEditor({ id: 5, fields: [{ id: 11, name: 'Station', show_in_overlay: 0 }] }),
+      'leer und verborgen': __test.shiftTypeFieldsEditor({ id: 5, fields: state.customFields.map((f) => ({ ...f, show_in_overlay: 0 })) }),
+    };
+    for (const [label, html] of Object.entries(editors)) {
+      const selects = html.match(/<select\b[^>]*data-field-picker[^>]*>/g) ?? [];
+      assert.equal(selects.length, 1, `${label}: genau eine Feld-Auswahl`);
+      // Der Test-Stub von t() gibt den Schluessel zurueck: der Name kommt aus den Locales.
+      assert.match(selects[0], / aria-label="schedule\.fieldPickerLabel"/, `${label}: die Auswahl hat keinen zugaenglichen Namen`);
+    }
+    // Der Schluessel hat in der Referenzsprache einen Text, der nicht der Schluessel ist.
+    const de = JSON.parse(readFileSync(new URL('../public/locales/de.json', import.meta.url), 'utf8'));
+    assert.equal(typeof de.schedule.fieldPickerLabel, 'string');
+    assert.ok(de.schedule.fieldPickerLabel.trim().length > 0);
+  } finally {
+    state.customFields = savedFields;
+  }
+});
+
+/* #1775: ein im Schichtart-Dialog entferntes Feld liess sich im selben Dialog
+ * nicht wieder anhaengen - "Entfernen" loeschte nur die Zeile, und waren alle
+ * Felder angehaengt, gab es gar keine Auswahl. Gefahren wird die echte
+ * editorAction() an einem Formular aus Attrappen, die genau die DOM-Flaeche
+ * tragen, die sie anfasst; die Auswahl schreibt ihr Markup mit. */
+test('#1775: ein entferntes eigenes Feld kehrt in die Auswahl des Schichtart-Dialogs zurueck', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  const state = __test.scheduleState();
+  const savedFields = state.customFields;
+  const savedWindow = globalThis.window;
+  state.customFields = [{ id: 11, name: 'Station' }, { id: 12, name: 'Fahrzeug' }, { id: 13, name: 'Partner' }];
+  globalThis.window = { ...(savedWindow ?? {}), lucide: undefined };
+  try {
+    // Pure: waehlbar ist, was keine Zeile hat - Ids als Zahl oder Text.
+    assert.deepEqual(__test.availableTypeFields(state.customFields, ['11', 13]).map((f) => f.id), [12]);
+
+    // Markup: die Auswahl steht IMMER da, ohne waehlbares Feld verborgen.
+    const all = __test.shiftTypeFieldsEditor({ id: 5, fields: state.customFields.map((f) => ({ ...f, show_in_overlay: 0 })) });
+    assert.match(all, /<div class="schedule-type-field-add" data-field-add hidden><select class="form-input" data-field-picker="5"[^>]*><\/select>/,
+      'alle Felder angehaengt: die Auswahl ist da, leer und verborgen');
+    const some = __test.shiftTypeFieldsEditor({ id: 5, fields: [{ id: 11, name: 'Station', show_in_overlay: 0 }] });
+    assert.match(some, /<div class="schedule-type-field-add" data-field-add><select[^>]*><option value="12">Fahrzeug<\/option><option value="13">Partner<\/option><\/select>/);
+
+    // Das Formular: drei Zeilen, leere verborgene Auswahl.
+    const wrapper = { hidden: true, toggleAttribute(name, on) { if (name === 'hidden') this.hidden = on; } };
+    const picker = {
+      html: '', value: '',
+      replaceChildren() { this.html = ''; },
+      insertAdjacentHTML(_pos, html) {
+        this.html += html;
+        const options = [...html.matchAll(/<option value="(\d+)"( selected)?>/g)];
+        this.value = (options.find((m) => m[2]) ?? options[0])?.[1] ?? '';
+      },
+      closest: (sel) => (sel === '[data-field-add]' ? wrapper : null),
+    };
+    const rows = [];
+    const container = {
+      inserted: [],
+      get children() { return rows.length ? rows : this.inserted.filter((html) => html.includes('u-meta')); },
+      get lastElementChild() { return rows.at(-1) ?? null; },
+      querySelector: () => null,
+      insertAdjacentHTML(_pos, html) {
+        this.inserted.push(html);
+        const id = /data-custom-field-id="(\d+)"/.exec(html)?.[1];
+        if (id) rows.push(makeRow(id, /data-show-in-overlay checked/.test(html)));
+      },
+      parentElement: {},
+    };
+    const form = {
+      querySelector: (sel) => (sel === '[data-field-picker]' ? picker : sel === '[data-type-fields-rows]' ? container : null),
+      querySelectorAll: (sel) => (sel === '[data-type-field-row]' ? [...rows] : []),
+    };
+    function makeRow(id, overlay = false) {
+      const row = {
+        dataset: { customFieldId: String(id) },
+        overlay,
+        focused: 0,
+        remove() { rows.splice(rows.indexOf(row), 1); },
+        closest: (sel) => (sel === '[data-type-fields-rows]' ? container : null),
+        querySelector: (sel) => (sel === '[data-action="remove-type-field"]' ? { focus: () => { row.focused += 1; } }
+          : sel === '[data-show-in-overlay]' ? { checked: row.overlay } : null),
+      };
+      return row;
+    }
+    const removeButton = (row) => ({ dataset: { action: 'remove-type-field' },
+      closest: (sel) => (sel === '[data-type-field-row]' ? row : sel === 'form' ? form : null) });
+    const addButton = { dataset: { action: 'add-type-field' },
+      closest: (sel) => (sel === 'form' ? form : sel === '[hidden]' ? (wrapper.hidden ? wrapper : null) : null) };
+    for (const id of [11, 12, 13]) rows.push(makeRow(id));
+
+    // "Fahrzeug" steht im Overlay - der Haken muss das Entfernen ueberleben.
+    rows[1].overlay = true;
+
+    // Entfernen: das Feld steht wieder zur Wahl, die Auswahl wird sichtbar.
+    __test.editorAction(removeButton(rows[1]));
+    assert.deepEqual(rows.map((r) => r.dataset.customFieldId), ['11', '13']);
+    assert.equal(picker.html, '<option value="12">Fahrzeug</option>', 'das entfernte Feld ist zurueck in der Auswahl');
+    assert.equal(wrapper.hidden, false, 'und die Auswahl ist sichtbar - vorher gab es sie gar nicht');
+
+    // Noch eines: die Auswahl folgt der Reihenfolge der Feldliste.
+    __test.editorAction(removeButton(rows[0]));
+    assert.match(picker.html, /^<option value="11"[^>]*>Station<\/option><option value="12"[^>]*>Fahrzeug<\/option>$/);
+    assert.equal(picker.value, '12', 'die getroffene Wahl bleibt stehen');
+
+    // Wieder anhaengen: Zeile da, Feld aus der Auswahl.
+    __test.editorAction(addButton);
+    assert.deepEqual(rows.map((r) => r.dataset.customFieldId), ['13', '12']);
+    assert.equal(rows.at(-1).overlay, true,
+      'das wieder angehaengte Feld bringt seinen Overlay-Haken mit (Review): sonst schriebe Speichern ihn weg');
+    assert.equal(picker.html, '<option value="11">Station</option>');
+    assert.equal(wrapper.hidden, false);
+
+    // Das letzte: die Auswahl ist leer und verborgen, der Fokus geht auf die neue Zeile.
+    __test.editorAction(addButton);
+    assert.deepEqual(rows.map((r) => r.dataset.customFieldId), ['13', '12', '11']);
+    assert.equal(rows.at(-1).overlay, false, 'ein Feld ohne Haken kommt ohne Haken zurueck');
+    assert.equal(picker.html, '');
+    assert.equal(wrapper.hidden, true);
+    assert.equal(rows.at(-1).focused, 1, 'der Knopf, der eben noch den Fokus hatte, ist verborgen');
+  } finally {
+    state.customFields = savedFields;
+    globalThis.window = savedWindow;
+  }
 });
 
 // Real behaviour instead of a name-in-source check (PR #930 review): a text
@@ -1327,8 +1464,9 @@ test('the Extra shifts section groups consecutive same-type days and edits/delet
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
   assert.match(schedulePage, /function extraGroups\(extras = state\.extras\)/);
   assert.match(schedulePage, /data-form="extra-edit-range"/);
-  assert.match(schedulePage, /data-action="edit-extra-range"/);
-  assert.match(schedulePage, /data-action="delete-extra-range"/);
+  // Seit R18 (2026-10-07) Eintraege im Mehr-Knopf der Zeile (editDeleteMenu).
+  assert.match(schedulePage, /edit: \{ action: 'edit-extra-range', attrs: \{ 'data-ids': group\.ids\.join\(','\) \} \}/);
+  assert.match(schedulePage, /remove: \{ action: 'delete-extra-range', attrs: \{ 'data-ids': group\.ids\.join\(','\), 'data-user-id': group\.user_id, 'data-from': group\.from, 'data-to': group\.to \} \}/);
   assert.match(schedulePage, /extraGroups\(\)\.find\(/);
   assert.doesNotMatch(schedulePage, /function openExtraEditModal\(/, 'the single-row edit modal is fully replaced by the group modal');
   assert.doesNotMatch(schedulePage, /data-action="edit-extra"/, 'no single-row edit action should remain');
@@ -1344,7 +1482,7 @@ test('the Extra shifts section groups consecutive same-type days and edits/delet
   const deleteIndex = editBranch.indexOf('api.delete');
   assert.ok(postIndex < deleteIndex, 'the new rows must be created before the old ones are deleted, so a failed create never loses data');
 
-  const deleteBranch = schedulePage.slice(schedulePage.indexOf("'delete-extra-range'"), schedulePage.indexOf("'save-days'"));
+  const deleteBranch = schedulePage.slice(schedulePage.indexOf("button.dataset.action === 'delete-extra-range'"), schedulePage.indexOf('await reloadAfterWrite();\n    renderPage();\n    if (gefragt)'));
   assert.match(deleteBranch, /confirmModal\(/, 'deleting a range confirms first, matching the override range delete');
 });
 
@@ -1741,16 +1879,16 @@ test('patternDaysExceedingCycleLength() flags exactly the positions a shorter cy
   assert.equal(__test.patternDaysExceedingCycleLength(undefined, 3), null);
 });
 
-test('the pattern-update submit path prechecks cycle_length against pattern.days before PUTting, field-level not toast', () => {
+test('saving a pattern from its edit dialog prechecks cycle_length against the days IN THE DIALOG before PUTting, field-level not toast', () => {
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
-  const branch = schedulePage.slice(
-    schedulePage.indexOf("if (form.dataset.form === 'pattern-update')"),
-    schedulePage.indexOf("await load();", schedulePage.indexOf("if (form.dataset.form === 'pattern-update')")),
-  );
-  assert.match(branch, /patternDaysExceedingCycleLength\(pattern\?\.days, data\.cycle_length\)/);
+  const start = schedulePage.indexOf('async function savePatternEdit(event) {');
+  assert.ok(start !== -1, 'savePatternEdit() must exist');
+  const branch = schedulePage.slice(start, schedulePage.indexOf('\n}\n', start));
+  assert.match(branch, /const days = collectPatternDays\(form\);/);
+  assert.match(branch, /patternDaysExceedingCycleLength\(days\.filter\(\(day\) => day\.shift_type_id != null\), data\.cycle_length\)/);
   assert.match(branch, /reportFieldError\(form\.querySelector\('\[name="cycle_length"\]'\), t\('schedule\.cycleLengthTooShort', conflict\)\)/);
   assert.match(branch, /if \(conflict\) \{[\s\S]*return;\s*\}/, 'a detected conflict must bail out before the PUT');
-  assert.doesNotMatch(branch.slice(0, branch.indexOf('return;')), /api\.put\(`\/schedule\/patterns\/\$\{form\.dataset\.id\}`/, 'the PUT must not fire before the precheck has passed');
+  assert.doesNotMatch(branch.slice(0, branch.indexOf('return;', branch.indexOf('if (conflict)'))), /api\.put\(/, 'no PUT may fire before the precheck has passed');
 });
 
 test('scheduleErrorMessage() maps the three known raw server strings to humanized keys, and passes through anything unknown', async () => {
@@ -1846,22 +1984,80 @@ test('switching the statistics range outdates any request in flight, matching th
     schedulePage.indexOf("if (button.dataset.action === 'overview-week')"),
     schedulePage.indexOf("if (button.dataset.action === 'overview-view-mode')"),
   );
-  assert.match(overviewBranch, /await activateView\('overview'\)/, 'overview-week must route back through activateView(), which itself owns ++overviewRequestId - unlike statistics-range it does not need its own bump here');
+  assert.match(overviewBranch, /await activateView\('overview'(?:, \{[^}]*\})?\)/, 'overview-week must route back through activateView(), which itself owns ++overviewRequestId - unlike statistics-range it does not need its own bump here');
 });
 
-test('switching Planning sub-tabs while a pattern editor is dirty asks before discarding, and clears on save (S-03)', () => {
+test('R17/E1: shift types and plans are rows, edited in the create dialog with ONE save - no accordion, no inline form', async () => {
+  const { installMiniDom } = await import('./mini-dom.js');
+  installMiniDom();
+  const { __test } = await import('../public/pages/schedule.js');
+  // setOwnerContext() ersetzt den Zustand: erst danach greifen.
+  __test.setOwnerContext({ users: [{ id: 7, display_name: 'Ada' }], me: 7, mayManageOthers: true });
+  const st = __test.scheduleState();
+  const before = { types: st.types, patterns: st.patterns };
+  try {
+    st.types = [{ id: 3, name: 'Frueh', short_code: 'F', color: '#0891b2', start_time: '06:00', end_time: '14:00', created_by: 7, fields: [] }];
+    st.patterns = [{ id: 9, user_id: 7, name: 'Wechselschicht', anchor_date: '2026-10-05', cycle_length: 7, is_active: 1, days: [{ position: 0, shift_type_id: 3, field_values: {} }] }];
+    const typeRow = __test.shiftTypeRow(st.types[0]);
+    const patternRow = __test.patternRow(st.patterns[0]);
+    for (const [name, row] of [['shift type', typeRow], ['plan', patternRow]]) {
+      assert.match(row, /^<div class="list-row /, `${name}: a list row like overrides and extra shifts`);
+      assert.doesNotMatch(row, /<details|<summary|<form|<input|<select/, `${name}: the row carries no accordion and no inline form`);
+    }
+    assert.match(typeRow, /data-action="edit-shift-type" data-id="3"/);
+    assert.match(typeRow, /data-action="delete-shift" data-id="3"/);
+    assert.match(patternRow, /data-action="edit-pattern" data-id="9"/);
+    assert.match(patternRow, /data-action="delete-pattern" data-id="9"/);
+    assert.match(__test.planningPanel(), /<div class="row-carrier"><div class="list-row schedule-pattern-row"/, 'the plans stand in a row carrier');
+
+    // The day editor that used to live in the card, now a block of the dialog.
+    const editor = __test.patternDaysEditorHtml(st.patterns[0], true);
+    assert.equal((editor.match(/data-day-group="/g) || []).length, 7, 'one group per cycle day');
+    assert.doesNotMatch(editor, /data-action="save-days"|<button[^>]*type="submit"/, 'the day editor has no save button of its own');
+  } finally {
+    Object.assign(st, before);
+    __test.setOwnerContext({});
+  }
+
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
-  assert.match(schedulePage, /async function guardedActivateView\(id\)/);
-  const guardFn = schedulePage.slice(schedulePage.indexOf('async function guardedActivateView'), schedulePage.indexOf('function renderShell'));
-  assert.match(guardFn, /dirtyPatternIds\.size/);
-  assert.match(guardFn, /confirmModal\(/);
-  assert.match(guardFn, /scheduleTablist\?\.sync\(activeView\)/, 'cancelling must revert the tab bar without ever calling activateView()');
+  assert.doesNotMatch(schedulePage, /<details class="card schedule-details"|data-action="save-days"|data-action="save-shift-fields"/, 'no accordion card and no second save button anywhere');
+  for (const fn of ['openShiftTypeEditModal', 'openPatternEditModal']) {
+    const start = schedulePage.indexOf(`function ${fn}(`);
+    const body = schedulePage.slice(start, schedulePage.indexOf('\n}\n', start));
+    assert.match(body, /class="form-stack schedule-modal-form"/, `${fn}: the form class of the create dialog`);
+    assert.match(body, /modal-panel__footer modal-panel__footer--plain/, `${fn}: the footer of the create dialog`);
+    assert.equal((body.match(/type="submit"/g) || []).length, 1, `${fn}: exactly one save`);
+    assert.match(body, /openModal\(\{/);
+  }
+  // One save writes both halves.
+  const saveType = schedulePage.slice(schedulePage.indexOf('async function saveShiftTypeEdit('), schedulePage.indexOf('function openPatternEditModal('));
+  assert.match(saveType, /api\.put\(`\/schedule\/shift-types\/\$\{id\}`, formData\(form\)\);[\s\S]*api\.put\(`\/schedule\/shift-types\/\$\{id\}\/fields`, \{ fields \}\)/);
+  // Typing the cycle length runs on every keystroke (7 -> "1" -> "14"). Days
+  // beyond the typed length are hidden, never removed: removed groups came
+  // back empty and Save wrote them over the assigned ones (review of #1767).
+  const sync = schedulePage.slice(schedulePage.indexOf('function syncPatternDayGroups(form) {'), schedulePage.indexOf('function openPatternEditModal('));
+  assert.ok(sync.length > 0, 'syncPatternDayGroups() must exist');
+  assert.doesNotMatch(sync.replace(/\/\*[\s\S]*?\*\//g, ''), /\.remove\(\)/, 'no day group is removed while typing');
+  assert.match(sync, /group\.hidden = Number\(group\.dataset\.dayGroup\) >= cycleLength/);
+  assert.match(schedulePage, /form\.querySelectorAll\('\[data-day-group\]:not\(\[hidden\]\) \[data-day-row\]'\)/, 'hidden days are not collected');
+  assert.match(readFileSync(new URL('../public/styles/schedule.css', import.meta.url), 'utf8'), /\.schedule-day-group\[hidden\]\s*\{\s*display:\s*none/);
+  // Half written (review of #1767): when the fields request fails after the
+  // type was saved, the page reloads the server state instead of staying stale.
+  assert.match(saveType, /typeSaved = true;/);
+  assert.match(saveType, /catch \(error\) \{[\s\S]*if \(typeSaved\) \{[\s\S]*await reloadAfterWrite\(\); renderPage\(\);/);
+  const savePattern = schedulePage.slice(schedulePage.indexOf('async function savePatternEdit('), schedulePage.indexOf('\nfunction formData('));
+  assert.match(savePattern, /for \(const step of patternSaveOrder\(pattern\.cycle_length, data\.cycle_length\)\)/);
+  assert.match(savePattern, /api\.put\(`\/schedule\/patterns\/\$\{id\}`, data\)/);
+  assert.match(savePattern, /api\.put\(`\/schedule\/patterns\/\$\{id\}\/days`, \{ days \}\)/);
 
-  // Beide Speicherpfade, die eine Musterkarte betreffen, muessen ihre id wieder freigeben.
-  assert.match(schedulePage, /await api\.put\(`\/schedule\/patterns\/\$\{button\.dataset\.id\}\/days`, \{ days \}\);\s*\n\s*dirtyPatternIds\.delete\(String\(button\.dataset\.id\)\)/);
-  assert.match(schedulePage, /await api\.put\(`\/schedule\/patterns\/\$\{form\.dataset\.id\}`, data\);\s*\n\s*dirtyPatternIds\.delete\(String\(form\.dataset\.id\)\)/);
+  // The server refuses a cycle length that excludes stored days, and days
+  // beyond the stored length: shrinking writes the days first, growing the plan first.
+  assert.deepEqual(__test.patternSaveOrder(7, 5), ['days', 'pattern']);
+  assert.deepEqual(__test.patternSaveOrder(7, 8), ['pattern', 'days']);
+  assert.deepEqual(__test.patternSaveOrder(7, 7), ['pattern', 'days']);
 
-  assert.match(schedulePage, /onChange: \(id\) => \{ guardedActivateView\(id\); \}/, 'the tablist must route through the guard, not call activateView() directly');
+  const css = readFileSync(new URL('../public/styles/schedule.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.schedule-details/, 'the accordion card has no rules left');
 });
 
 // UX audit batch 3 (comprehension): S-04 cycle positions get real dates,
@@ -1977,60 +2173,134 @@ test('a new ACTIVE pattern creation and re-activating one via the Active toggle 
   assert.match(createBranch, /confirmOverModal\([\s\S]*closeOnConfirm:\s*false/, 'a failed POST /schedule/patterns must find the Add-entry modal still parked, not already closed by the confirmation itself');
   assert.ok(createBranch.indexOf('if (!confirmed) return;') < createBranch.indexOf("await api.post('/schedule/patterns', data);"));
 
-  const updateBranch = schedulePage.slice(
-    schedulePage.indexOf("if (form.dataset.form === 'pattern-update')"),
-    schedulePage.indexOf('await load();', schedulePage.indexOf("if (form.dataset.form === 'pattern-update')")),
-  );
-  assert.match(updateBranch, /data\.is_active && !pattern\?\.is_active/, 'the guard must only fire on an off -> on transition, not on every save');
-  assert.match(updateBranch, /findOverlappingActivePattern\(state\.patterns, pattern\?\.user_id, data\.valid_from \|\| null, data\.valid_until \|\| null, pattern\?\.id\)/);
-  assert.match(updateBranch, /confirmModal\(/, 'this form is inline (no modal open), so the plain confirmModal is correct here');
+  const start = schedulePage.indexOf('async function savePatternEdit(event) {');
+  const updateBranch = schedulePage.slice(start, schedulePage.indexOf('\n}\n', start));
+  assert.match(updateBranch, /data\.is_active && !pattern\.is_active/, 'the guard must only fire on an off -> on transition, not on every save');
+  assert.match(updateBranch, /findOverlappingActivePattern\(state\.patterns, pattern\.user_id, data\.valid_from \|\| null, data\.valid_until \|\| null, pattern\.id\)/);
+  // Since R17 the plan is edited in a dialog: the question must park it, and a
+  // failed PUT must find the typed fields still there.
+  assert.match(updateBranch, /confirmOverModal\([\s\S]*closeOnConfirm:\s*false/);
+  assert.doesNotMatch(updateBranch, /\bconfirmModal\(/, 'confirmModal would close the edit dialog and drop what was typed');
+  assert.ok(updateBranch.indexOf('if (!confirmed) return;') < updateBranch.indexOf('api.put('));
 });
 
-// Review of #1099, finding 4: dirtyPatternIds only used to clear on the
-// tab-switch discard, a save/delete of THAT SAME card, and the page-level
-// reset - saving a DIFFERENT pattern, deleting an override range, or a
-// successful create-modal save all run load()+renderPage() and silently
-// rebuild every pattern card, discarding another card's unsaved cycle-day
-// edits without ever asking, while its id stayed behind in the set (the next
-// tab switch then wrongly asked to discard edits that no longer exist).
-// Minimum accepted fix per the review: clear the set whenever the cards are
-// rebuilt this way. Every `await load();` outside the page-level render()
-// (which already gets a fresh `dirtyPatternIds = new Set()`) must clear it
-// before the matching renderPage() call.
-test('every load()+renderPage() rebuild outside the page reset clears dirtyPatternIds (S-03, #1099 finding 4)', () => {
+// R17/E1: a write reloads through ONE helper. The comparison view is the start
+// tab now, and a shift type or plan created from there has to appear in its
+// grid without a tab change - reloadAfterWrite() refetches the week as well.
+test('every write reloads through reloadAfterWrite(), which also refreshes the comparison week', () => {
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
-  const renderStart = schedulePage.indexOf('export async function render(container');
-  assert.ok(renderStart !== -1, 'render() must exist');
-  const beforeRender = schedulePage.slice(0, renderStart);
-  const afterRenderLoads = [...schedulePage.slice(renderStart).matchAll(/^\s*await load\(\);$/gm)];
-  // render() itself calls load() exactly once, followed by its own full
-  // `dirtyPatternIds = new Set()` reset rather than a `.clear()` call -
-  // excluded on purpose, it is not one of the rebuild sites this finding is
-  // about.
-  assert.equal(afterRenderLoads.length, 1, 'render() itself must call load() exactly once');
-
-  const loadSites = [...beforeRender.matchAll(/^\s*await load\(\);$/gm)];
-  assert.ok(loadSites.length >= 6, 'expected at least six load()+renderPage() rebuild sites before render()');
-  for (const match of loadSites) {
-    const after = beforeRender.slice(match.index, match.index + 700);
-    assert.match(
-      after,
-      /dirtyPatternIds\.clear\(\);[\s\S]*?renderPage\(\);/,
-      `load() at offset ${match.index} must clear dirtyPatternIds before its renderPage() rebuild`,
-    );
-  }
+  const loads = [...schedulePage.matchAll(/^\s*await load\(\);$/gm)];
+  assert.equal(loads.length, 2, 'load() is awaited in reloadAfterWrite() and in render(), nowhere else');
+  const start = schedulePage.indexOf('async function reloadAfterWrite() {');
+  const helper = schedulePage.slice(start, schedulePage.indexOf('\n}\n', start));
+  assert.match(helper, /await load\(\);\s*\n\s*if \(activeView !== 'overview'\) return;\s*\n\s*const requestId = \+\+overviewRequestId;\s*\n\s*try \{ await refreshOverview\(\); \}/);
+  assert.ok((schedulePage.match(/await reloadAfterWrite\(\);/g) || []).length >= 6, 'the save, delete and quick-start paths all go through it');
 });
 
-test('the initial tab lands on Shift types when the household has no shift types yet, otherwise stays on Planning (S-07)', () => {
+test('R17/E1: the first visit lands on the comparison view, whatever the data (replaces S-07)', () => {
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
   const renderFn = schedulePage.slice(schedulePage.indexOf('export async function render'), schedulePage.indexOf('export async function update'));
   const branchStart = renderFn.indexOf('} else if (!initialViewDecided) {');
   assert.ok(branchStart !== -1, 'the fallback branch must exist for a bare-root visit with no explicit deep link');
-  const fallbackBranch = renderFn.slice(branchStart, branchStart + 700);
-  assert.match(fallbackBranch, /activeView = state\.types\.length \? 'patterns' : 'shifts';/);
+  const fallbackBranch = renderFn.slice(branchStart, renderFn.indexOf('initialViewDecided = true;', branchStart) + 30);
+  assert.match(fallbackBranch, /\n\s*activeView = 'overview';\n/);
+  assert.doesNotMatch(fallbackBranch, /state\.types\.length \?/, 'no data-dependent start tab any more: the comparison view carries its own empty state');
   assert.match(fallbackBranch, /initialViewDecided = true;/);
-  // The decision must happen strictly after load() populated state.types, not before.
-  assert.ok(renderFn.indexOf('await load();') < branchStart);
+
+  // The comparison view is the first tab; the tab addresses stay.
+  const shellFn = schedulePage.slice(schedulePage.indexOf('function renderShell()'), schedulePage.indexOf('scheduleTablist = wireTablist('));
+  const order = [...shellFn.matchAll(/^\s*\['(\w+)', t\('schedule\.\w+'\)\],$/gm)].map((m) => m[1]);
+  assert.deepEqual(order, ['overview', 'shifts', 'patterns', 'statistics']);
+  const tabsJs = readFileSync(new URL('../public/utils/schedule-tabs.js', import.meta.url), 'utf8');
+  for (const route of ['/schedule', '/schedule/shifts', '/schedule/patterns', '/schedule/statistics', '/schedule/overview']) {
+    assert.ok(tabsJs.includes(`'${route}',`), `${route} stays a route`);
+  }
+});
+
+test('R17/E1: the comparison view opens with your own lane, unless you chose yourself', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  const pick = __test.initialOverviewSelection;
+  assert.deepEqual(pick({ saved: [], hasSaved: false, eligibleIds: [1, 2, 3], ownId: 2 }), [2], 'never chosen: your own lane');
+  assert.deepEqual(pick({ saved: [], hasSaved: false, eligibleIds: [1, 3], ownId: 2 }), [], 'you are not a selectable member: empty as before');
+  assert.deepEqual(pick({ saved: [], hasSaved: false, eligibleIds: [1, 2], ownId: null }), []);
+  assert.deepEqual(pick({ saved: [], hasSaved: true, eligibleIds: [1, 2, 3], ownId: 2 }), [], 'a cleared selection is a choice and stays empty');
+  assert.deepEqual(pick({ saved: [3, 1], hasSaved: true, eligibleIds: [1, 2, 3], ownId: 2 }), [1, 3], 'a saved selection wins, in household order');
+  const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
+  const loadFn = schedulePage.slice(schedulePage.indexOf('async function load() {'), schedulePage.indexOf('function monthKey('));
+  assert.match(loadFn, /selectedIds: initialOverviewSelection\(\{[\s\S]*?hasSaved: hasSavedOverviewSelection\(\),[\s\S]*?ownId: currentUserId,/);
+});
+
+test('R17/E1: without anything to compare the start tab leads to the first action', async () => {
+  const { installMiniDom } = await import('./mini-dom.js');
+  installMiniDom();
+  const { __test } = await import('../public/pages/schedule.js');
+  const st = __test.scheduleState();
+  const before = { types: st.types, patterns: st.patterns, overrides: st.overrides, extras: st.extras };
+  try {
+    Object.assign(st, { types: [], patterns: [], overrides: [], extras: [] });
+    const empty = __test.renderOverview();
+    assert.match(empty, /data-action="open-create"[^>]*data-view="shifts"|data-view="shifts"[^>]*data-action="open-create"/, 'empty household: the button adds a shift type');
+    assert.doesNotMatch(empty, /schedule-overview__toolbar|data-action="overview-week"/, 'no person picker and no week stepper above nothing');
+
+    st.types = [{ id: 1, name: 'Frueh', color: '#0891b2', start_time: '06:00', end_time: '14:00', fields: [] }];
+    const noPlan = __test.renderOverview();
+    assert.match(noPlan, /data-action="open-create"[^>]*data-view="patterns"|data-view="patterns"[^>]*data-action="open-create"/, 'shift types but no plan: the button adds a plan');
+    assert.doesNotMatch(noPlan, /schedule-overview__toolbar/);
+
+    st.patterns = [{ id: 2, user_id: 1, name: 'Plan', anchor_date: '2026-10-05', cycle_length: 7, is_active: 1, days: [] }];
+    assert.match(__test.renderOverview(), /schedule-overview__toolbar/, 'with a plan the comparison itself stands');
+  } finally {
+    Object.assign(st, before);
+  }
+});
+
+test('R17/E1: "Today" is one line of chips, not a card of list rows', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  __test.setOwnerContext({ users: [{ id: 7, display_name: 'Ada' }], me: 7 });
+  const st = __test.scheduleState();
+  const before = { entries: st.entries };
+  try {
+    st.entries = [
+      { user_id: 7, date_key: '2026-10-07', source: 'pattern', shift_type: { id: 3, name: 'Frueh', short_code: 'F', color: '#0891b2', start_time: '06:00', end_time: '14:00', fields: [] } },
+      { user_id: 7, date_key: '2026-10-07', source: 'pattern', shift_type: null },
+    ];
+    const html = __test.renderToday();
+    assert.equal((html.match(/class="schedule-today__entry /g) || []).length, 2, 'one chip per entry');
+    assert.doesNotMatch(html, /list-row|row-carrier|<p>/, 'no list rows, no carrier');
+    assert.equal((html.match(/role="button" tabindex="0" data-action="view-schedule-entry"/g) || []).length, 2, 'each chip still opens the detail (S-17)');
+    assert.match(html, /F · Frueh<\/span><span class="schedule-today__meta">Ada · 06:00-14:00</);
+    st.entries = [];
+    assert.match(__test.renderToday(), /^<span class="schedule-today__empty">/);
+  } finally {
+    Object.assign(st, before);
+    __test.setOwnerContext({});
+  }
+  const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
+  const cardFn = schedulePage.slice(schedulePage.indexOf('function renderTodayCard()'), schedulePage.indexOf('function wireShiftTypeFieldSortables('));
+  assert.doesNotMatch(cardFn, /card card--padded|u-section-title/, 'no card frame and no section title above the line');
+  assert.match(cardFn, /<section class="schedule-today" aria-labelledby="schedule-today-label"><h2 class="schedule-today__label" id="schedule-today-label">/);
+
+  const { eachRule } = await import('./css-rules.js');
+  const rules = [...eachRule(readFileSync(new URL('../public/styles/schedule.css', import.meta.url), 'utf8'))];
+  const strip = rules.find((r) => r.selector.trim() === '.schedule-today' && r.at.length === 0);
+  assert.match(strip?.body ?? '', /display:\s*flex/);
+  const entries = rules.find((r) => r.selector.trim() === '.schedule-today__entries');
+  assert.match(entries?.body ?? '', /overflow-x:\s*auto/, 'more chips than fit scroll sideways instead of stacking');
+  const chip = rules.find((r) => r.selector.trim() === '.schedule-today__entry');
+  assert.match(chip?.body ?? '', /min-height:\s*var\(--target-base\)/);
+  assert.match(chip?.body ?? '', /white-space:\s*nowrap/);
+});
+
+test('R17/E1: seven day columns fit the 996px stage for one person', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const rules = [...eachRule(readFileSync(new URL('../public/styles/schedule.css', import.meta.url), 'utf8'))];
+  const host = rules.find((r) => r.selector.trim() === '.schedule-overview' && /--schedule-lane-min/.test(r.body));
+  const rem = Number(/--schedule-lane-min:\s*([\d.]+)rem/.exec(host?.body ?? '')?.[1]);
+  assert.ok(rem > 0, 'the lane minimum is a rem value on .schedule-overview');
+  // 996px stage - 52px time column (44 + 8) - seven 12px day gaps = 860px for
+  // seven days; a lane adds 3px of its own. With 8rem the Sunday stood 36px out.
+  const perDay = (996 - 52 - 7 * 12) / 7;
+  assert.ok(rem * 16 + 3 <= perDay, `a day needs ${rem * 16 + 3}px, the stage gives ${perDay.toFixed(1)}px`);
 });
 
 test('an explicit tab deep link (URL path) always wins over the remembered tab, but the bare root still falls back to it (S-10)', () => {
@@ -2044,7 +2314,7 @@ test('an explicit tab deep link (URL path) always wins over the remembered tab, 
 
 test('switching tabs navigates through the router (URL + history entry), and the router registers one exact route per tab (S-10)', () => {
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
-  const guardedFn = schedulePage.slice(schedulePage.indexOf('async function guardedActivateView'), schedulePage.indexOf('/**\n * Builds the toolbar'));
+  const guardedFn = schedulePage.slice(schedulePage.indexOf('function navigateToView(id) {'), schedulePage.indexOf('/**\n * Builds the toolbar'));
   assert.match(guardedFn, /window\.yuvomi\?\.navigate\(scheduleRouteForView\(id\)\)/, 'a tab click must go through navigate(), not a bare activateView() call, or the URL never updates');
 
   const routerJs = readFileSync(new URL('../public/router.js', import.meta.url), 'utf8');
@@ -2173,9 +2443,9 @@ test('a read-only Schedule member can still save their own reminder offset and w
 
 test('the Statistics owner select is self-only for non-admins, full list for admins (S-13)', () => {
   const schedulePage = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
-  assert.match(schedulePage, /formField\(t\('schedule\.owner'\), '<select class="input" required name="user_id">' \+ userOptions\(canManageOthers \? selectedUser : currentUserId\) \+ '<\/select>'\)/);
+  assert.match(schedulePage, /formField\(t\('schedule\.owner'\), '<select class="form-input" required name="user_id">' \+ userOptions\(canManageOthers \? selectedUser : currentUserId\) \+ '<\/select>'\)/);
   // Must NOT be the raw, unfiltered state.users list anymore (the original finding).
-  assert.ok(!schedulePage.includes("formField(t('schedule.owner'), '<select class=\"input\" required name=\"user_id\">' + state.users.map"));
+  assert.ok(!schedulePage.includes("formField(t('schedule.owner'), '<select class=\"form-input\" required name=\"user_id\">' + state.users.map"));
 });
 
 test('the shift-type preset picker groups presets by template, respecting the household template toggles (S-22)', () => {
@@ -2358,7 +2628,7 @@ test('statistics range: a narrow field shows a select with the same choices inst
 
   // Both forms render from ONE list and switch through ONE setter.
   const render = schedulePage.slice(schedulePage.indexOf('function renderStatistics('), schedulePage.indexOf('function emptyPatternState('));
-  assert.match(render, /class="input schedule-stat-range__select"[^>]*aria-label="' \+ esc\(t\('schedule\.statisticsRange'\)\)/);
+  assert.match(render, /class="form-input schedule-stat-range__select"[^>]*aria-label="' \+ esc\(t\('schedule\.statisticsRange'\)\)/);
   assert.equal((render.match(/STATISTICS_RANGES\.map\(/g) ?? []).length, 2, 'segment and select must both be built from STATISTICS_RANGES');
 });
 
@@ -2485,12 +2755,12 @@ test('jedes Feld der Schichtplan-Dialoge hat einen zugaenglichen Namen (A2 P1-1)
   globalThis.__advancedSection = (inner) => inner;
   try {
     const html = [
-      __test.formField('Vorlage', '<select class="input" name="shift_preset"><option>x</option></select>'),
+      __test.formField('Vorlage', '<select class="form-input" name="shift_preset"><option>x</option></select>'),
       __test.shiftFields({}),
       __test.patternFields({}),
       __test.reminderOffsetField(null),
-      __test.formField('Raum', '<input class="input" data-field-value="3" data-id="9" maxlength="500" value="">'),
-      __test.formField('Notiz', '<textarea class="input" name="note"></textarea>'),
+      __test.formField('Raum', '<input class="form-input" data-field-value="3" data-id="9" maxlength="500" value="">'),
+      __test.formField('Notiz', '<textarea class="form-input" name="note"></textarea>'),
     ].join('');
     const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]));
     const labelled = new Set([...html.matchAll(/<label\b[^>]*\sfor="([^"]+)"/g)].map((m) => m[1]));
@@ -2628,4 +2898,295 @@ test('P12: the comparison fits seven days of one person into the desktop width',
   assert.ok(!rules.some((r) => sel(r, '.schedule-overview__lane') && /min-width\s*:\s*220px/.test(r.body)), 'keine 220px-Spur im CSS');
   assert.ok(rules.some((r) => sel(r, '.schedule-overview__day:not(.schedule-overview__gutter)') && /flex\s*:\s*1 1 0/.test(r.body)),
     'die Tage teilen sich die Breite statt auf ihrer Mindestbreite zu stehen');
+});
+
+/* R16 (Critique 2026-10-05, P1 mobil): BEDIENFLAECHE VOR DEM INHALT. Vergleich
+ * 263px (Personenwahl in drei Chipreihen, Ansicht + Stepper + Label auf zwei
+ * Zeilen), Auswertung 257px (Formularkarte, je Feld eine Zeile). Beide sind
+ * mobil zwei Zeilen: gemessen 110 bzw. 104px, Inhalt ab y=248 bzw. 242. */
+test('R16: Vergleich und Auswertung tragen mobil zwei Bedienzeilen', async () => {
+  const { eachRule } = await import('./css-rules.js');
+  const css = readFileSync(new URL('../public/styles/schedule.css', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
+  const all = [...eachRule(css)].map((r) => ({ ...r, selector: r.selector.trim() }));
+  const at = (re) => all.filter((r) => r.at.some((a) => re.test(a)));
+  const phone = at(/max-width:\s*767px/);
+  const body = (list, sel) => list.filter((r) => r.selector === sel).map((r) => r.body).join(';');
+
+  // Der Stepper ist EIN Rasterkind: ohne den Kasten fielen Pfeile und Label einzeln ins Raster.
+  // Seit R16 Schritt 2 in der Reihenfolge des Zeitraum-Kopfs: zurueck, Wert,
+  // vor, dahinter der Reset - im Markup, nicht per `order` (Tab-Folge).
+  // Seit R16 Schritt 2b kommt das Markup aus dem geteilten Baustein
+  // (utils/period-stepper.js); "Heute" verbirgt sich, wenn heute zu sehen ist.
+  assert.match(src, /<div class="schedule-overview__stepper">\$\{periodStepperHtml\(\{[\s\S]*?'data-direction': 'prev'[\s\S]*?schedule-overview__week-label[\s\S]*?'data-direction': 'next'[\s\S]*?current: showsToday[\s\S]*?'data-direction': 'today'[\s\S]*?<\/div>/);
+  assert.match(src, /const showsToday = weekDays\.includes\(todayKey\(\)\);/);
+  const stepper = src.match(/<div class="schedule-overview__stepper">[\s\S]*?<\/div>/)[0];
+  assert.doesNotMatch(stepper, /calendar\.back|calendar\.forward/, 'die Pfeile nennen ihr Objekt (Woche/Tag), nicht nur die Richtung');
+  assert.match(stepper, /calendar\.prevWeek[\s\S]*calendar\.nextWeek/);
+  assert.doesNotMatch(body(phone, '.schedule-overview__stepper > [data-direction="today"]'), /order:/, 'keine zweite Reihenfolge im Stylesheet');
+  assert.match(body(phone, '.schedule-overview__toolbar'), /grid-template-areas:\s*"view people"\s*"step step"/);
+  assert.match(body(phone, '.schedule-overview__week-nav'), /display:\s*contents/);
+  assert.match(body(phone, '.schedule-overview__toolbar > .user-ms > .user-ms__options'), /flex-wrap:\s*nowrap/,
+    'die Personen sind EINE scrollende Reihe');
+  assert.match(body(phone, '.schedule-overview__toolbar > .user-ms > .user-ms__options'), /overflow-x:\s*auto/);
+  // Die mobile Regel muss NACH der Basisregel stehen (gleiche Spezifitaet): davor verlor sie still.
+  const order = all.map((r, i) => [r, i]).filter(([r]) => r.selector === '.schedule-overview__toolbar');
+  const baseAt = order.find(([r]) => r.at.length === 0)?.[1];
+  const phoneAt = order.find(([r]) => r.at.some((a) => /max-width:\s*767px/.test(a)))?.[1];
+  assert.ok(baseAt >= 0 && phoneAt > baseAt, 'die mobile Bedienflaeche steht hinter ihrer Basisregel');
+
+  const narrow = at(/max-width:\s*639px/);
+  assert.match(body(narrow, '.schedule-stat-filters'), /grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)/,
+    'Person und Zeitraum stehen nebeneinander');
+  const labels = narrow.find((r) => r.selector.includes('.schedule-stat-range > .form-label'));
+  assert.match(labels?.body ?? '', /clip-path:\s*inset\(50%\)/, 'die Feld-Labels bleiben im Baum');
+});
+
+/* #1777: "Bis" folgte "Von" nicht, und die Absage des Servers stand englisch
+ * im Toast. Drei Dinge, jedes am laufenden Code:
+ *   (1) der Server gibt der Absage einen `reason` mit, der Satz bleibt;
+ *   (2) "Bis" zieht mit, sobald "Von" es ueberholt - gefahren wird die echte
+ *       wireRangeFollow() an Feld-Attrappen, die `change` melden wie der
+ *       Datepicker;
+ *   (3) die Pruefung des Dialogs: die echte saveCreatedSchedule() mit Von nach
+ *       Bis meldet den Fehler AM FELD "Bis" und sendet nichts. */
+test('#1777: a reversed range is refused with reason range_reversed, the sentence stays', async () => {
+  const fill = await call('POST', '/overrides/fill', { as: ALICE, body: { user_id: ALICE.id, from: '2027-03-10', to: '2027-03-01', shift_type_id: null } });
+  assert.deepEqual(fill, { status: 400, body: { error: 'from must be before to.', code: 400, reason: 'range_reversed' } });
+  const clear = await call('DELETE', `/overrides?user_id=${ALICE.id}&from=2027-04-10&to=2027-04-01`, { as: ALICE });
+  assert.deepEqual(clear, { status: 400, body: { error: 'from must be before to.', code: 400, reason: 'range_reversed' } });
+  const list = await call('GET', '/overrides?from=2027-04-10&to=2027-04-01', { as: ALICE });
+  assert.equal(list.body.reason, 'range_reversed');
+  const entries = await call('GET', '/entries?from=2027-04-10&to=2027-04-01', { as: ALICE });
+  assert.deepEqual(entries, { status: 400, body: { error: 'from must be before to.', code: 400, reason: 'range_reversed' } });
+
+  // Mit einem zweiten Fehler im selben Satz bleibt der reason - am Wortlaut hinge er nicht mehr.
+  const two = await call('POST', '/overrides/fill', { as: ADMIN, body: { user_id: 99999, from: '2027-03-10', to: '2027-03-01', shift_type_id: null } });
+  assert.equal(two.status, 400);
+  assert.equal(two.body.error, 'from must be before to. user_id does not exist.');
+  assert.equal(two.body.reason, 'range_reversed');
+
+  // Gegenproben: ein fremdes Konto ist eine 403 ohne diesen reason, und eine
+  // andere 400 traegt ihn nicht.
+  const foreign = await call('POST', '/overrides/fill', { as: ALICE, body: { user_id: BOB.id, from: '2027-03-10', to: '2027-03-01', shift_type_id: null } });
+  assert.equal(foreign.status, 403);
+  assert.equal('reason' in foreign.body, false);
+  const other = await call('GET', '/entries?from=not-a-date&to=2027-04-01', { as: ALICE });
+  assert.equal(other.status, 400);
+  assert.equal('reason' in other.body, false);
+
+  // Die Oberflaeche liest den reason der ECHTEN Antwort, nicht den Satz.
+  const { __test } = await import('../public/pages/schedule.js');
+  assert.equal(__test.scheduleErrorMessage({ data: fill.body }), 'schedule.rangeOrderError');
+  assert.equal(__test.scheduleErrorMessage({ data: two.body }), 'schedule.rangeOrderError');
+});
+
+/** Feld-Attrappe mit genau der Flaeche, die der Datepicker den Dialogen bietet. */
+function rangeFieldStub(name, value) {
+  const listeners = new Map();
+  return {
+    name, value,
+    addEventListener(type, fn) { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+    /** Wie `_emit()` im Datepicker: der Wert steht, dann kommt `change`. */
+    pick(next) { this.value = next; for (const fn of listeners.get('change') ?? []) fn({ currentTarget: this, target: this }); },
+  };
+}
+
+function rangeFormStub(fields, extra = {}) {
+  return {
+    ...extra,
+    fields,
+    querySelector(selector) {
+      const name = /^\[name="([^"]+)"\]$/.exec(selector)?.[1];
+      return fields.find((field) => field.name === name) ?? null;
+    },
+    querySelectorAll() { return []; },
+  };
+}
+
+test('#1777: "Bis" folgt "Von", sobald "Von" daran vorbeizieht - in beiden Feldpaaren', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  assert.equal(typeof __test.wireRangeFollow, 'function', 'kein Dialog verdrahtet Von und Bis miteinander');
+  for (const [fromName, toName] of [['range_from', 'range_to'], ['from', 'to']]) {
+    const from = rangeFieldStub(fromName, '2026-10-07');
+    const to = rangeFieldStub(toName, '2026-10-07');
+    __test.wireRangeFollow(rangeFormStub([from, to]));
+
+    from.pick('2026-10-08');
+    assert.equal(to.value, '2026-10-08', `${toName} zieht mit`);
+
+    // Gegenproben: ein frueheres "Von" laesst "Bis" stehen (der Zeitraum wird
+    // laenger), und "Bis" selbst zu verschieben bewegt "Von" nie.
+    from.pick('2026-10-01');
+    assert.equal(to.value, '2026-10-08', 'ein frueheres Von verlaengert den Zeitraum');
+    to.pick('2026-10-20');
+    assert.equal(from.value, '2026-10-01');
+    from.pick('2026-11-02');
+    assert.equal(to.value, '2026-11-02', 'ueber die Monatsgrenze');
+    // Ein geleertes "Von" raeumt "Bis" nicht ab.
+    from.pick('');
+    assert.equal(to.value, '2026-11-02');
+  }
+  // Ein Formular ohne Zeitraum (Schichtart anlegen) wirft nicht.
+  assert.doesNotThrow(() => __test.wireRangeFollow(rangeFormStub([rangeFieldStub('name', 'Frueh')])));
+});
+
+test('#1777: jeder Dialog mit Von und Bis verdrahtet das Mitziehen', () => {
+  // Die Funktion oben misst das Verhalten; hier steht, dass die drei Dialoge
+  // sie auch RUFEN - je einmal, direkt vor dem Verdrahten des Sendens.
+  const page = readFileSync(new URL('../public/pages/schedule.js', import.meta.url), 'utf8');
+  const forms = page.split("form?.addEventListener('submit', saveCreatedSchedule);").length - 1;
+  const wired = page.split("wireRangeFollow(form);\n      form?.addEventListener('submit', saveCreatedSchedule);").length - 1;
+  assert.equal(forms, 3, 'drei Dialoge senden ueber saveCreatedSchedule()');
+  assert.equal(wired, forms);
+});
+
+test('#1777: Von nach Bis meldet der Dialog am Feld "Bis" und sendet nichts', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  assert.equal(typeof __test.saveCreatedSchedule, 'function', 'saveCreatedSchedule() ist fuer den Test nicht erreichbar');
+  const saved = {
+    FormData: globalThis.FormData, api: globalThis.__apiStub, report: globalThis.__reportFieldError,
+    confirm: globalThis.__confirmOverModal, close: globalThis.__closeModal, window: globalThis.window,
+  };
+  const sent = [];
+  const reported = [];
+  const toasts = [];
+  // Was ein echtes FormData aus dem Formular laese: die Felder, die nicht `disabled` sind.
+  globalThis.FormData = class {
+    constructor(form) { this.form = form; }
+    * [Symbol.iterator]() { for (const field of this.form.fields) if (!field.disabled) yield [field.name, field.value]; }
+  };
+  const record = (method) => async (path, body) => { sent.push([method, path, body]); return { data: {} }; };
+  globalThis.__apiStub = { post: record('POST'), put: record('PUT'), delete: record('DELETE'), get: async () => ({ data: [] }) };
+  globalThis.__reportFieldError = (field, message) => reported.push([field?.name, message]);
+  globalThis.__confirmOverModal = async () => true;
+  globalThis.__closeModal = async () => true;
+  globalThis.window = { ...(saved.window ?? {}), yuvomi: { showToast: (text, kind) => toasts.push([text, kind]) } };
+
+  const submit = async (kind, fields) => {
+    sent.length = 0; reported.length = 0; toasts.length = 0;
+    const form = rangeFormStub(fields, { dataset: { form: kind }, elements: { reminder_enabled: { checked: false }, is_active: { checked: true } } });
+    await __test.saveCreatedSchedule({ preventDefault() {}, currentTarget: form });
+    return { sent: [...sent], reported: [...reported], toasts: [...toasts] };
+  };
+  const field = (name, value, disabled = false) => ({ ...rangeFieldStub(name, value), disabled });
+
+  try {
+    // Der Fall aus dem Ticket: Zusatzschicht, Von 08.10., Bis noch 07.10.
+    const extra = await submit('pattern-create', [
+      field('mode', 'add'), field('user_id', '1'), field('shift_type_id', '1'), field('note', ''),
+      field('range_from', '2026-10-08'), field('range_to', '2026-10-07'),
+    ]);
+    assert.deepEqual(extra.sent, [], 'nichts geht an den Server');
+    assert.deepEqual(extra.reported, [['range_to', 'schedule.rangeOrderError']], 'die Meldung steht am Feld "Bis"');
+    assert.deepEqual(extra.toasts, [], 'und es gibt keinen Toast');
+
+    // Dieselbe Pruefung im Modus "Abweichung" und in beiden Bearbeiten-Dialogen.
+    const replace = await submit('pattern-create', [
+      field('mode', 'replace'), field('user_id', '1'), field('shift_type_id', ''), field('note', ''),
+      field('range_from', '2026-10-08'), field('range_to', '2026-10-07'),
+    ]);
+    assert.deepEqual([replace.reported, replace.sent], [[['range_to', 'schedule.rangeOrderError']], []]);
+    for (const kind of ['override-edit', 'extra-edit-range']) {
+      const edit = await submit(kind, [
+        field('user_id', '1'), field('shift_type_id', '1'), field('note', ''), field('ids', '7'),
+        field('original_from', '2026-10-01'), field('original_to', '2026-10-03'),
+        field('from', '2026-10-08'), field('to', '2026-10-07'),
+      ]);
+      assert.deepEqual([edit.reported, edit.sent], [[['to', 'schedule.rangeOrderError']], []], kind);
+    }
+
+    // GEGENPROBEN - die Pruefung haelt nichts auf, was gehen soll.
+    // Ein richtiger Zeitraum geht raus, ohne Meldung am Feld.
+    const ok = await submit('pattern-create', [
+      field('mode', 'add'), field('user_id', '1'), field('shift_type_id', '1'), field('note', ''),
+      field('range_from', '2026-10-07'), field('range_to', '2026-10-08'),
+    ]);
+    assert.deepEqual(ok.reported, []);
+    assert.equal(ok.sent[0]?.[1], '/schedule/extras/fill');
+    assert.deepEqual([ok.sent[0][2].from, ok.sent[0][2].to], ['2026-10-07', '2026-10-08']);
+    // Im Modus "Muster" ist das Feldpaar `disabled`: was dort steht, zaehlt nicht.
+    const pattern = await submit('pattern-create', [
+      field('mode', 'pattern'), field('user_id', '1'), field('name', 'Woche'), field('cycle_length', '7'), field('anchor_date', '2026-10-05'),
+      field('range_from', '2026-10-08', true), field('range_to', '2026-10-07', true),
+    ]);
+    assert.deepEqual(pattern.reported, []);
+  } finally {
+    globalThis.FormData = saved.FormData;
+    globalThis.__apiStub = saved.api;
+    globalThis.__reportFieldError = saved.report;
+    globalThis.__confirmOverModal = saved.confirm;
+    globalThis.__closeModal = saved.close;
+    globalThis.window = saved.window;
+  }
+});
+
+/* #1777, Review: die Meldung an "Bis" blieb stehen, wenn der Zeitraum ueber
+ * "Von" richtiggestellt wurde. reportFieldError() raeumt nur ab, wenn das Feld
+ * SELBST `input` oder `change` meldet - und weder eine Korrektur an "Von" noch
+ * der Setter `to.value =` des Mitziehens meldet an "Bis" etwas. Die Attrappe
+ * bildet genau das nach: Attribute, Listener, und ein Setter, der schweigt. */
+test('#1777: die Meldung an "Bis" faellt, wenn "Von" den Zeitraum richtigstellt', async () => {
+  const { __test } = await import('../public/pages/schedule.js');
+  const field = (name, value) => {
+    const listeners = new Map();
+    const attributes = new Map();
+    return {
+      name, value,
+      getAttribute: (key) => attributes.get(key) ?? null,
+      setAttribute: (key, val) => attributes.set(key, String(val)),
+      addEventListener(type, fn) { listeners.set(type, [...(listeners.get(type) ?? []), fn]); },
+      removeEventListener(type, fn) { listeners.set(type, (listeners.get(type) ?? []).filter((item) => item !== fn)); },
+      dispatchEvent(event) { for (const fn of [...(listeners.get(event.type) ?? [])]) fn(event); return true; },
+      /** Wie `_emit()` im Datepicker: der Wert steht, dann kommt `change`. */
+      pick(next) { this.value = next; this.dispatchEvent(new Event('change', { bubbles: true })); },
+    };
+  };
+  // Was das echte reportFieldError() am Feld tut (components/modal.js): markieren,
+  // und beim naechsten `input`/`change` DIESES Feldes wieder abraeumen.
+  const markInvalid = (input) => {
+    input.setAttribute('aria-invalid', 'true');
+    const clear = () => {
+      input.removeEventListener('input', clear);
+      input.removeEventListener('change', clear);
+      input.setAttribute('aria-invalid', 'false');
+    };
+    input.addEventListener('input', clear);
+    input.addEventListener('change', clear);
+  };
+  const dialog = (fromValue, toValue) => {
+    const from = field('range_from', fromValue);
+    const to = field('range_to', toValue);
+    __test.wireRangeFollow(rangeFormStub([from, to]));
+    return { from, to };
+  };
+
+  // (1) Verkehrt herum gemeldet, dann "Von" ZURUECK vor "Bis": der Zeitraum
+  //     stimmt, "Bis" wurde nie angefasst.
+  const a = dialog('2026-10-08', '2026-10-07');
+  markInvalid(a.to);
+  a.from.pick('2026-10-06');
+  assert.equal(a.to.value, '2026-10-07', '"Bis" bleibt, wo es war');
+  assert.equal(a.to.getAttribute('aria-invalid'), 'false', 'die Meldung an "Bis" steht auf einem gueltigen Feld');
+
+  // (2) Verkehrt herum gemeldet, dann "Von" noch weiter: "Bis" zieht mit, und
+  //     der Setter allein raeumt nichts ab.
+  const b = dialog('2026-10-08', '2026-10-07');
+  markInvalid(b.to);
+  b.from.pick('2026-10-09');
+  assert.equal(b.to.value, '2026-10-09');
+  assert.equal(b.to.getAttribute('aria-invalid'), 'false', 'nach dem Mitziehen steht die Meldung noch');
+
+  // (3) Das Mitziehen meldet `change` an "Bis" - wer darauf hoert, erfaehrt den neuen Wert.
+  const c = dialog('2026-10-07', '2026-10-07');
+  const heard = [];
+  c.to.addEventListener('change', () => heard.push(c.to.value));
+  c.from.pick('2026-10-10');
+  assert.deepEqual(heard, ['2026-10-10']);
+
+  // GEGENPROBEN: ohne Meldung und ohne Mitziehen bleibt "Bis" still, und eine
+  // Meldung faellt NICHT, solange der Zeitraum verkehrt herum bliebe - das kann
+  // er nach dem Mitziehen nicht, also zaehlt hier nur die Stille.
+  c.from.pick('2026-10-01');
+  assert.deepEqual(heard, ['2026-10-10'], 'ein frueheres "Von" ohne Meldung meldet an "Bis" nichts');
 });

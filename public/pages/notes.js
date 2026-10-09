@@ -7,7 +7,8 @@
 import { api } from '/api.js';
 import { openModal as openSharedModal, closeModal, btnError, advancedSection, reportFieldError } from '/components/modal.js';
 import { wireCategoryScopeHelp } from '/components/category-manager.js';
-import { stagger, vibrate, scheduleUndoableDelete, wireScrollFade } from '/utils/ux.js';
+import { stagger, vibrate, scheduleUndoableDelete, wireScrollFade, acknowledgeCheck } from '/utils/ux.js';
+import { redrawList } from '/utils/list-motion.js';
 import { t } from '/i18n.js';
 import { esc, renderMarkdownLight } from '/utils/html.js';
 import { rowActionHtml } from '/utils/row-action.js';
@@ -15,7 +16,7 @@ import { splitKeepingLineEndings } from '/utils/markdown-checklist.js';
 import { renderMarkdownToolbar, wireMarkdownToolbar } from '/utils/markdown-toolbar.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
-import { pageToolsMenuHtml, installPopoverMenus } from '/utils/popover-menu.js';
+import { pageToolsMenuHtml, pageToolsActionEl, installPopoverMenus } from '/utils/popover-menu.js';
 import { findPageFab } from '/utils/fab.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { emptyStateHTML } from '/utils/empty-state.js';
@@ -199,6 +200,7 @@ async function toggleCheck(noteId, box) {
   }
 
   paintCheck(noteId, line, checked);
+  acknowledgeCheck(box, { checked });
   vibrate(10);
 
   try {
@@ -237,7 +239,7 @@ export async function render(container, { user, signal }) {
   // Spalten stutzen. Kopf und Koerper enden deshalb beide an der Nutzbreite.
   container.insertAdjacentHTML('beforeend', `
     <div class="notes-page app-page app-page--full" data-composition="full">
-      <div class="page-toolbar notes-toolbar">
+      <div class="page-toolbar page-toolbar--title-tools notes-toolbar">
         <h1 class="page-toolbar__title">${t('notes.title')}</h1>
         ${renderPageSearch({ id: 'notes-search', label: t('notes.searchPlaceholder'), placeholder: t('notes.searchPlaceholder'), value: state.filterQuery, clearLabel: t('common.searchClear'), className: 'notes-toolbar__search page-toolbar__center' })}
         ${/* KATEGORIEN VERWALTEN STEHT IM WERKZEUGMENUE (Kopfregel mobil,
@@ -289,6 +291,21 @@ export async function render(container, { user, signal }) {
     throw err;
   }
   const grid = container.querySelector('#notes-grid');
+  // Die Spaltenzahl folgt der Breite (Container-Abfragen): der Fluss zwischen
+  // den Gruppen rechnet bei jedem Wechsel neu (syncGroupFlow).
+  if (typeof ResizeObserver === 'function') {
+    let columnsSeen = '';
+    const flowRo = new ResizeObserver(() => {
+      const now = getComputedStyle(grid).gridTemplateColumns.split(' ').length;
+      if (String(now) === columnsSeen) return;
+      columnsSeen = String(now);
+      syncGroupFlow(grid);
+    });
+    flowRo.observe(grid);
+    signal?.addEventListener('abort', () => flowRo.disconnect(), { once: true });
+  }
+  // Und am Fenster: ein Beobachter schweigt, solange der Tab verdeckt ist.
+  window.addEventListener('resize', () => syncGroupFlow(grid), { signal, passive: true });
   grid.addEventListener('click', async (e) => {
     // EIN RIEGEL FUER ALLE SCHREIB-ZWEIGE dieses Handlers (anpinnen, loeschen,
     // abhaken). Das Markup oben nimmt die Affordanz, das hier nimmt auch dem
@@ -325,6 +342,7 @@ export async function render(container, { user, signal }) {
   });
 
   renderNotesAndFilters();
+  openNoteFromQuery();
 
   const filterFade = wireScrollFade(container.querySelector('#notes-filters'));
   signal?.addEventListener('abort', () => filterFade.destroy(), { once: true });
@@ -337,7 +355,7 @@ export async function render(container, { user, signal }) {
   // geteilten Popover-Mechanik, der Klick ueber `data-action` am Kopf.
   installPopoverMenus(_container);
   _container.querySelector('.notes-toolbar')?.addEventListener('click', (e) => {
-    if (e.target.closest('.popover-menu__item[data-action="manage-categories"]') && !readOnly()) {
+    if (pageToolsActionEl(e.target, 'manage-categories') && !readOnly()) {
       // Der Fokus steht auf einem Eintrag, den das Menue gerade versteckt hat;
       // der Dialog gaebe ihn beim Schliessen dorthin zurueck und er fiele aufs
       // Dokument. Also vorher auf den Knopf, der das Menue geoeffnet hat.
@@ -362,9 +380,9 @@ export async function render(container, { user, signal }) {
 // --------------------------------------------------------
 
 /** Kategorienchips haengen von den Zuordnungen in state.notes ab. */
-function renderNotesAndFilters() {
+function renderNotesAndFilters({ motion = false } = {}) {
   renderFilters();
-  renderGrid();
+  renderGrid({ motion });
 }
 
 /**
@@ -480,9 +498,28 @@ function visibleNotes() {
   });
 }
 
-function renderGrid() {
+const NOTE_CARD = '.note-card[data-id]';
+
+/* `motion: true` setzt, wer die DATEN geaendert hat (Notiz angelegt,
+ * gespeichert, angepinnt, geloescht, per "Rueckgaengig" zurueckgeholt): die
+ * neue Karte zieht auf, und was dadurch die Stelle wechselt, gleitet
+ * (utils/list-motion.js). Die Karte, die geht, klappt hier NICHT vorher aus:
+ * im Raster haelt die Nachbarkarte die Zeilenhoehe, das Ausklappen liesse nur
+ * ein Loch stehen - die Nachbarn gleiten stattdessen in die Luecke (FLIP).
+ * Filter und Suche zeichnen ohne Bewegung neu - dort wechselt die Frage,
+ * nicht die Liste. */
+function renderGrid({ motion = false } = {}) {
   const grid = _container.querySelector('#notes-grid');
   if (!grid) return;
+  if (motion) {
+    redrawList(grid, () => drawGrid(grid), { selector: NOTE_CARD, keyAttr: 'data-id' });
+    return;
+  }
+  drawGrid(grid);
+  stagger(grid.querySelectorAll('.note-card'), { host: grid });
+}
+
+function drawGrid(grid) {
   grid.removeAttribute('aria-busy');
 
   const q = state.filterQuery.trim().toLowerCase();
@@ -520,7 +557,59 @@ function renderGrid() {
   grid.replaceChildren();
   grid.insertAdjacentHTML('beforeend', html);
   if (window.lucide) lucide.createIcons({ el: grid });
-  stagger(grid.querySelectorAll('.note-card'), { host: grid });
+  // In der Zeichenfunktion, nicht danach: die Listenbewegung (FLIP) misst die
+  // Karten direkt nach ihr - sie sollen dort stehen, wo sie bleiben.
+  syncGroupFlow(grid);
+}
+
+/**
+ * KEINE ERZWUNGENE LEERZEILE ZWISCHEN DEN GRUPPEN (Critique R17).
+ *
+ * Der Kopf „Weitere Notizen" spannte ueber alle Spalten und begann damit immer
+ * eine neue Zeile. Fuellen die angepinnten Notizen ihre letzte Zeile nicht -
+ * fuenf Notizen in vier Spalten -, blieb der Rest dieser Zeile leer: bei 1280
+ * stand die fuenfte allein (240 von 996px, 432px hoch), und „Weitere Notizen"
+ * begann erst bei y=988.
+ *
+ * Jetzt fliessen die weiteren Notizen in diese Zeile: der Kopf beginnt in der
+ * ersten freien Spalte und reicht bis zum Rand, die angepinnten Nachzuegler
+ * daneben nehmen zwei Zeilen (Kopf + erste Kartenzeile) ein. Beide Koepfe
+ * bleiben, jeder steht ueber seinen Karten. Mit einer Spalte (Telefon) gibt es
+ * keine Nachzuegler und es bleibt alles, wie es war.
+ *
+ * Das Raster bleibt das Raster (`display: grid`, die Spalten aus den
+ * Container-Abfragen in notes.css; Guard in test-frontend-audit.js). Hier wird
+ * nur GELESEN, wie viele Spalten gerade gelten - eine Container-Abfrage kann
+ * `Anzahl mod Spalten` nicht rechnen.
+ *
+ * @param {HTMLElement|null} grid `#notes-grid`
+ */
+function syncGroupFlow(grid) {
+  if (!grid?.querySelectorAll) return;
+  const label = grid.querySelectorAll('.notes-group__title')[1] ?? null;
+  for (const card of grid.querySelectorAll('.note-card--trailing')) card.classList.remove('note-card--trailing');
+  label?.classList.remove('notes-group__title--inline');
+  label?.style.removeProperty('--notes-label-start');
+  if (!label) return;
+  const pinned = [...grid.querySelectorAll('.note-card--pinned')];
+  const columns = typeof getComputedStyle === 'function'
+    ? getComputedStyle(grid).gridTemplateColumns.split(' ').filter((track) => /\d/.test(track)).length
+    : 1;
+  const { trailing, labelStart } = groupFlow(pinned.length, columns);
+  if (!trailing) return;
+  for (const card of pinned.slice(-trailing)) card.classList.add('note-card--trailing');
+  label.classList.add('notes-group__title--inline');
+  label.style.setProperty('--notes-label-start', String(labelStart));
+}
+
+/**
+ * Wie viele angepinnte Notizen stehen in einer angebrochenen letzten Zeile,
+ * und in welcher Spaltenlinie beginnt der Kopf der naechsten Gruppe?
+ * @returns {{trailing: number, labelStart: number}} `trailing: 0` = die Zeile ist voll
+ */
+function groupFlow(pinnedCount, columns) {
+  const trailing = columns > 1 && pinnedCount > 0 ? pinnedCount % columns : 0;
+  return { trailing, labelStart: trailing + 1 };
 }
 
 /**
@@ -735,6 +824,40 @@ function renderCategoryEditor(selectedIds = []) {
 }
 
 /**
+ * Loest `?open=<id>` ein (#1821): die Suche und die Notizzeile der Uebersicht
+ * nennen EINE Notiz, also geht sie auf - derselbe Weg wie der Tipp auf ihre
+ * Karte (Leseansicht zuerst, bei Nur-lesen nur sie). Bis hierher las diese
+ * Seite den Parameter nie: der Treffer landete auf der Liste.
+ *
+ * Gesucht wird in ALLEN geladenen Notizen, nicht in der gefilterten Ansicht -
+ * ein gemerkter Filter darf den Link nicht verschlucken. Eine Notiz, die es
+ * nicht (mehr) gibt oder die diese Person nicht sieht, steht nicht in der
+ * Antwort: dann bleibt die Liste, ohne Fehler.
+ *
+ * Der Parameter verlaesst danach die Adresse. Die Notiz wohnt in einem Dialog,
+ * nicht in einer Spalte - bliebe er stehen, schluege sie bei jedem Zurueck auf
+ * diese Seite und bei jedem Neuladen wieder auf. Die uebrigen Parameter und
+ * der Anker bleiben, wie sie sind.
+ *
+ * Nur Ziffern gelten als Id: `5e0` und `0x5` sind fuer `Number()` auch 5,
+ * gemeint ist damit keine Notiz.
+ */
+function openNoteFromQuery(loc = window.location, hist = window.history) {
+  const params = new URLSearchParams(loc.search ?? '');
+  const raw = params.get('open');
+  if (raw === null) return false;
+  params.delete('open');
+  const rest = params.toString();
+  const path = `${loc.pathname}${rest ? `?${rest}` : ''}${loc.hash ?? ''}`;
+  if (typeof hist?.replaceState === 'function') hist.replaceState({ ...(hist.state ?? {}), path }, '', path);
+  if (!/^\d+$/.test(raw)) return false;
+  const note = state.notes.find((n) => n.id === Number(raw));
+  if (!note) return false;
+  openNoteModal({ mode: 'edit', note });
+  return true;
+}
+
+/**
  * Der Zettel bei `notes: read`: Leseansicht, sonst nichts.
  *
  * Warum ein eigener Dialog und nicht der bestehende mit abgeschalteten Teilen:
@@ -807,17 +930,23 @@ function openNoteModal({ mode, note = null }) {
 
       <div class="note-edit-view" id="note-pane-edit" data-pane="edit" role="tabpanel"
            aria-labelledby="note-tab-edit"${initialView === 'edit' ? '' : ' hidden'}>
-    <div class="form-group">
-      <label class="form-label" for="note-title">${t('notes.titleLabel')}</label>
-      <input type="text" class="form-input" id="note-title"
-             placeholder="${t('notes.titlePlaceholder')}" value="${esc(isEdit && note.title ? note.title : '')}">
+    <!-- DER EDITOR IST EINE ARBEITSFLAECHE (Critique 2026-10-05, R16). Titel
+         und Text standen als zwei Formularfelder mit Label untereinander, das
+         Textfeld sechs Zeilen hoch (160px) und mobil ab y=534 - unter der
+         Tastaturlinie. Der Dialog ist fuer genau dieses Feld da. Die Labels
+         bleiben als Namen (sr-only), der Platzhalter sagt Sehenden dasselbe;
+         das Textfeld traegt die Mindesthoehe der Flaeche (notes.css,
+         .note-editor__text). -->
+    <div class="form-group note-editor__title">
+      <label class="form-label sr-only" for="note-title">${t('notes.titleLabel')}</label>
+      <input type="text" class="form-input note-editor__title-input" id="note-title"
+             placeholder="${t('notes.titleLabel')}" value="${esc(isEdit && note.title ? note.title : '')}">
     </div>
-    <div class="form-group">
-      <label class="form-label" for="note-content">${t('notes.contentLabel')} <span class="form-label__hint">${t('notes.contentMarkdownHint')}</span></label>
+    <div class="form-group note-editor">
+      <label class="form-label sr-only" for="note-content">${t('notes.contentLabel')} <span class="form-label__hint">${t('notes.contentMarkdownHint')}</span></label>
       ${renderMarkdownToolbar()}
-      <textarea class="form-input" id="note-content" rows="6"
-                placeholder="${t('notes.contentPlaceholder')}"
-                style="resize:vertical;">${esc(isEdit ? note.content : '')}</textarea>
+      <textarea class="form-input note-editor__text" id="note-content" rows="12"
+                placeholder="${t('notes.contentPlaceholder')}">${esc(isEdit ? note.content : '')}</textarea>
     </div>
     ${renderCategoryEditor(isEdit ? (note.categories || []).map((category) => category.id) : [])}
     ${advancedSection(`
@@ -850,7 +979,7 @@ function openNoteModal({ mode, note = null }) {
           <i data-lucide="trash-2" class="icon-md" aria-hidden="true"></i>${t('common.delete')}
         </button>` : ''}
         <button type="button" class="btn btn--secondary" id="note-modal-cancel" data-editor-only>${t('common.cancel')}</button>
-        <button type="button" class="btn btn--primary" id="note-modal-save" data-editor-only>${isEdit ? t('common.save') : t('common.create')}</button>
+        <button type="button" class="btn btn--primary" id="note-modal-save" data-editor-only>${isEdit ? t('common.save') : t('common.add')}</button>
         ${isEdit ? `<button type="button" class="btn btn--primary" id="note-modal-edit" data-reader-only>${t('common.edit')}</button>` : ''}
       </div>
     </div>`;
@@ -920,7 +1049,13 @@ function openNoteModal({ mode, note = null }) {
         // Im Lese-Modus steht rechts "Bearbeiten" als Primaerknopf: sonst war
         // "Loeschen" die einzige und damit lauteste Fussaktion (Critique
         // 2026-09-26) - die zerstoerende Handlung als Hauptweg.
+        // Der Umschalter verschwindet in der Leseansicht (notes.css, EIN Weg
+        // zum Bearbeiten). Stand der Fokus auf seinem Reiter "Lesen", fiele
+        // er mit dem Reiter auf <body> - er geht auf den Knopf, der jetzt
+        // der Weg zurueck ist.
+        const focusWasOnSwitch = view === 'read' && modeSwitch?.contains(document.activeElement);
         syncFooter(view);
+        if (focusWasOnSwitch) (panel.querySelector('#note-modal-edit') ?? readPane).focus();
         modeTabs.forEach((b) => {
           const on = b.dataset.view === view;
           b.classList.toggle('sub-tab--active', on);
@@ -1306,7 +1441,7 @@ function openNoteModal({ mode, note = null }) {
             state.notes.sort((a, b) => b.pinned - a.pinned);
           }
           closeSavedEditorWhenActive();
-          renderNotesAndFilters();
+          renderNotesAndFilters({ motion: true });
           window.yuvomi?.showToast(mode === 'create' ? t('notes.createdToast') : t('notes.savedToast'), 'success');
         } catch (err) {
           window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
@@ -1315,7 +1450,7 @@ function openNoteModal({ mode, note = null }) {
           noteSavePending = false;
           categoryCreateButton.disabled = false;
           saveBtn.disabled    = false;
-          saveBtn.textContent = isEdit ? t('common.save') : t('common.create');
+          saveBtn.textContent = isEdit ? t('common.save') : t('common.add');
         }
       });
     },
@@ -1399,7 +1534,7 @@ async function togglePin(id) {
     const note = state.notes.find((n) => n.id === id);
     if (note) note.pinned = res.data.pinned;
     state.notes.sort((a, b) => b.pinned - a.pinned);
-    renderGrid();
+    renderGrid({ motion: true });
   } catch (err) {
     window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
   }
@@ -1427,7 +1562,7 @@ async function deleteNote(id) {
   closeModal({ force: true });
   const note = state.notes.find((n) => n.id === id);
   state.notes = state.notes.filter((n) => n.id !== id);
-  renderNotesAndFilters();
+  renderNotesAndFilters({ motion: true });
   vibrate([30, 50, 30]);
 
   scheduleUndoableDelete({
@@ -1436,7 +1571,7 @@ async function deleteNote(id) {
     restore: (err) => {
       if (note) {
         state.notes = [...state.notes, note].sort((a, b) => b.pinned - a.pinned);
-        renderNotesAndFilters();
+        renderNotesAndFilters({ motion: true });
       }
       if (err) window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
     },
@@ -1452,9 +1587,13 @@ async function deleteNote(id) {
  */
 export const __test = {
   renderNoteCard, notesEmptyStateHtml, renderNoteReadHtml, pinMarkup,
+  // R17: die weiteren Notizen fliessen in die angebrochene Zeile der angepinnten.
+  groupFlow, syncGroupFlow,
   CHECKLIST_OPTS, readOnly, state,
   // Der Dialog kommt mit, weil seine Aussage KEIN Markup dieser Seite ist:
   // welchen Inhalt der Zettel bekommt, sieht nur der, der `openModal` die
   // Optionen abnimmt.
   openNoteModal,
+  // #1821: der Tiefenlink `?open=<id>` wird am Programm gemessen.
+  openNoteFromQuery,
 };

@@ -8,16 +8,14 @@ import { createLogger } from '../logger.js';
 import * as db from '../db.js';
 import { buildSplits, insertExpenseLedger, membershipRefusal, SplitInputError } from './split-expenses.js';
 import { todayKey } from '../utils/timezone.js';
+import { addInterval, nextRunNotBefore } from '../utils/interval-date.js';
 
 const log = createLogger('SplitExpenseScheduler');
 
-function addInterval(dateText, frequency) {
-  const date = new Date(`${dateText}T00:00:00Z`);
-  if (frequency === 'weekly') date.setUTCDate(date.getUTCDate() + 7);
-  if (frequency === 'monthly') date.setUTCMonth(date.getUTCMonth() + 1);
-  if (frequency === 'yearly') date.setUTCFullYear(date.getUTCFullYear() + 1);
-  return date.toISOString().slice(0, 10);
-}
+// Der Schritt einer Serie (`addInterval`) und das Zaehlen bis zum ersten Termin
+// ab heute (`nextRunNotBefore`) stehen in server/utils/interval-date.js: die
+// Taschengeld-Gutschrift (#1734) rueckt durch dieselbe Rechnung weiter, und
+// eine zweite daneben muesste dieser erst wieder gleichen.
 
 function insertActivity(database, groupId, actorId, type, entityType, entityId, metadata = {}) {
   database.prepare(`
@@ -49,7 +47,11 @@ function readSnapshot(recurring) {
   return snapshot;
 }
 
-function generateRecurringExpense(database, recurring) {
+// Die Anteile, die diese Serie HEUTE buchen wuerde - oder der Wurf, der sagt,
+// warum nicht. Die EINE Rechnung fuer den Buchungslauf und fuer die Frage der
+// Liste, ob eine Serie buchbar ist (`unbookableReason`, #1647): eine zweite
+// Pruefung daneben zeigte "buchbar" an, waehrend der Lauf pausiert.
+function resolveRecurringSplits(database, recurring) {
   const snapshot = readSnapshot(recurring);
   const participants = Array.isArray(snapshot.participants) ? snapshot.participants : [recurring.payer_id];
   const splits = buildSplits({
@@ -66,6 +68,11 @@ function generateRecurringExpense(database, recurring) {
   // Beteiligten ueberhaupt IDs sind.
   const refusal = membershipRefusal(database, recurring.group_id, recurring.payer_id, splits.map((split) => split.user_id));
   if (refusal) throw new RecurringNotBookable('not_a_member', refusal);
+  return splits;
+}
+
+function generateRecurringExpense(database, recurring) {
+  const splits = resolveRecurringSplits(database, recurring);
   const expenseId = database.prepare(`
     INSERT INTO expenses
       (group_id, title, description, amount_minor, currency, converted_amount_minor, converted_currency,
@@ -97,7 +104,7 @@ function generateRecurringExpense(database, recurring) {
 
   insertActivity(database, recurring.group_id, recurring.created_by, 'recurring_generated', 'expense', expenseId, { recurring_expense_id: recurring.id, title: recurring.title });
   database.prepare('UPDATE recurring_expenses SET next_run_date = ? WHERE id = ?')
-    .run(addInterval(recurring.next_run_date, recurring.frequency), recurring.id);
+    .run(addInterval(recurring.next_run_date, recurring.frequency, recurring.anchor_day), recurring.id);
   return expenseId;
 }
 
@@ -113,6 +120,22 @@ function pauseReason(err) {
   if (err instanceof RecurringNotBookable) return err.reason;
   if (err instanceof SplitInputError) return 'split_invalid';
   return null;
+}
+
+// Warum der Lauf diese Serie am naechsten Termin pausieren wuerde, oder null.
+// Derselbe Grund, den `recurring_auto_paused` in den Verlauf schreibt - hier
+// aber am HEUTIGEN Stand gemessen: nach einer Bearbeitung, die die Aufteilung
+// repariert, ist er weg, auch wenn die Serie noch pausiert ist. Ein Fehler, der
+// kein "unbuchbar" ist, wird weitergeworfen wie im Lauf.
+function unbookableReason(database, recurring) {
+  try {
+    resolveRecurringSplits(database, recurring);
+    return null;
+  } catch (err) {
+    const reason = pauseReason(err);
+    if (!reason) throw err;
+    return reason;
+  }
 }
 
 // Pausiert die Serie und schreibt den Grund in den Verlauf der Gruppe - die App
@@ -185,4 +208,4 @@ function startScheduler() {
   }, 60 * 60 * 1000).unref();
 }
 
-export { generateRecurringExpense, processDueRecurringExpenses, startScheduler };
+export { generateRecurringExpense, nextRunNotBefore, processDueRecurringExpenses, startScheduler, unbookableReason };

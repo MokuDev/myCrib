@@ -9,6 +9,7 @@ import { openModal as openSharedModal, closeModal, selectModal, advancedSection,
 import { t, formatDate, getLocale } from '/i18n.js';
 import { esc } from '/utils/html.js';
 import { stagger, wireScrollFade, scheduleUndoableDelete } from '/utils/ux.js';
+import { redrawList, collapseRow } from '/utils/list-motion.js';
 import { renderSkeletonList } from '/utils/skeleton.js';
 import { renderPageSearch, wirePageSearch } from '/utils/page-search.js';
 import { previewKind } from '/utils/document-preview.js';
@@ -39,7 +40,9 @@ import {
 import { wireTablist } from '/utils/tablist.js';
 import { attachSegmentIndicator } from '/utils/segment-indicator.js';
 import { firstRovingStop, repairRovingStops, wireRovingToolbars } from '/utils/roving-toolbar.js';
-import { isNavModuleReadOnly } from '/permissions.js';
+import { isPermAdmin } from '/permissions.js';
+import { mayWritePath } from '/utils/module-access.js';
+import { readRowHtml } from '/utils/read-row.js';
 import {
   DOCUMENT_DEFAULT_VISIBILITY,
   DOCUMENT_SORTS,
@@ -139,6 +142,8 @@ let state = {
   otherStatusHits: null,
   folders: [],
   members: [],
+  // Wer hier sitzt - fuer die Besitzregel (mayManage). Aus dem Router-Kontext.
+  currentUserId: null,
   dmsAccounts: [],
   activeUploadBackend: 'local',
   // Mobil ist die kompakte LISTE der Default: die Grid-Karte kostet bei 375px
@@ -205,8 +210,50 @@ let _pageController = null;
 let _thumbs = null;
 let _thumbObserver = null;
 
+/**
+ * Darf dieses Konto in die Dokumente schreiben? Regel 1 in
+ * utils/module-access.js. Als Funktion, damit jedes Neuzeichnen neu fragt.
+ *
+ * WAS BEI `read` BLEIBT: Suche, Status-Segment, Kategorie- und Fristen-Chips,
+ * Ordnerbaum und Pfad, Sortierung und Ansicht, die Karte mit Ablauf, Ablageort
+ * und Sichtbarkeit als ZEICHEN - und Ansehen, Vorschau, Herunterladen und
+ * Teilen (das Teilen-Menue des Geraets, kein Serveraufruf). WAS GEHT:
+ * Hochladen (FAB, Leerzustand samt Einladungstext), Ordner anlegen,
+ * umbenennen, verschieben und loeschen, das Dokument-Menue mit Bearbeiten,
+ * Verschieben, Archivieren und Loeschen, der Bearbeiten-Stift im Betrachter
+ * und die Mehrfachauswahl, die nur fuer diese Handlungen da ist.
+ *
+ * KEIN WANDTABLETT: ein Display fuehrt `documents` nicht in seiner Scope-Liste
+ * (server/display-scopes.js) und erreicht diese Seite nicht.
+ */
+function readOnly() {
+  return !mayWritePath('/documents');
+}
+
+/**
+ * Darf dieses Konto DIESES Dokument aendern, verschieben, archivieren oder
+ * loeschen? Zwei Riegel, wie am Server: das Schreibrecht aufs Modul (der
+ * Pfad-Guard) UND die Besitzregel - angelegt hat es die Person selbst, oder sie
+ * ist Admin (`canManageDocument()` in server/services/document-access.js, an
+ * PUT, PATCH /archive und DELETE von routes/documents.js).
+ *
+ * Bis #1265 fragte die Oberflaeche keinen der beiden: jedes sichtbare Dokument
+ * trug das volle Menue, und Speichern, Archivieren oder Loeschen eines fremden
+ * Familien-Dokuments endete mit „Not authorized" - das Loeschen erst nach dem
+ * Rueckgaengig-Fenster, wenn die Karte schon weg war.
+ *
+ * `state.isAdmin` kommt vom Server (`/documents/meta/options`), `isPermAdmin()`
+ * aus `/auth/me`; beide meinen dieselbe Rolle, eines genuegt.
+ */
+function mayManage(doc) {
+  if (!doc || readOnly()) return false;
+  if (isPermAdmin() || state.isAdmin === true) return true;
+  return state.currentUserId != null && Number(doc.created_by) === Number(state.currentUserId);
+}
+
 export async function render(container, context = {}) {
   _container = container;
+  state.currentUserId = context.user?.id ?? null;
   _pageController?.abort();
   _pageController = createPageController(context.signal);
   _thumbs = createDocumentThumbs({ signal: _pageController.signal, renderers: browserThumbRenderers() });
@@ -222,7 +269,7 @@ export async function render(container, context = {}) {
            "Zum Inhalt springen" der Shell (router.js): `.sr-only`, sichtbar
            nur bei Tastaturfokus (layout.css, .sr-only:focus-visible). */ ''}
       <a class="sr-only documents-skip" href="#documents-list" data-documents-skip>${t('documents.skipToDocuments')}</a>
-      <div class="page-toolbar page-toolbar--wrap documents-toolbar">
+      <div class="page-toolbar page-toolbar--wrap page-toolbar--title-tools documents-toolbar">
         <h1 class="page-toolbar__title">${t('documents.title')}</h1>
         ${renderPageSearch({ id: 'documents-search', label: t('documents.searchPlaceholder'), placeholder: t('documents.searchPlaceholder'), value: state.query, clearLabel: t('common.searchClear'), className: 'documents-toolbar__search page-toolbar__center' })}
         <div class="page-toolbar__actions">
@@ -288,9 +335,10 @@ export async function render(container, context = {}) {
               <span class="documents-folder-browser__toggle-label">${esc(t('documents.allDocuments'))}</span>
               <i data-lucide="chevron-down" aria-hidden="true" class="documents-folder-browser__chevron"></i>
             </button>
+            ${readOnly() ? '' : `
             <button class="documents-folder-browser__add" id="documents-folder-add" type="button" aria-label="${t('documents.addFolderButton')}" title="${t('documents.addFolderButton')}">
               <i data-lucide="folder-plus" aria-hidden="true"></i>
-            </button>
+            </button>`}
           </div>
           <ul class="documents-folder-browser__list row-carrier" id="documents-folder-browser"></ul>
         </aside>
@@ -326,12 +374,12 @@ export async function render(container, context = {}) {
 
 // Alle abhängigen Flächen nach einer Datenänderung neu zeichnen. Die Facetten-
 // Zähler (Kategorie + Ordner) hängen voneinander ab, deshalb nie einzeln aufrufen.
-function renderAll() {
+function renderAll({ motion = false } = {}) {
   renderCategoryChips();
   renderExpiringChip();
   renderFolderBrowser();
   renderBreadcrumb();
-  renderDocuments();
+  renderDocuments({ motion });
 }
 
 /**
@@ -525,6 +573,23 @@ function documentsToolsMenuHtml() {
       <i data-lucide="arrow-up-down" class="icon-md" aria-hidden="true"></i>
     </button>
     <div class="popover-menu documents-tools-menu" id="documents-tools-menu" popover role="menu" aria-label="${esc(label)}">
+      ${/* ANSICHT IM MENUE, NUR UNTER 768px (R16, Kopfregel mobil 1a). Der
+           Ansichts-Umschalter ist ein Segment und hielt damit eine eigene
+           Werkzeugzeile; als Einfachauswahl im Menue (wie die Ansichtswahl
+           des Kalenders) bleiben Lupe und Menue uebrig, und die stehen in
+           der Titelzeile. documents.css blendet je Breite EINEN der beiden
+           Wege aus. */ ''}
+      <div class="popover-menu__group documents-tools-menu__view" role="group" aria-labelledby="documents-tools-view-label">
+        <div class="popover-menu__label" id="documents-tools-view-label">${esc(t('documents.viewToggle'))}</div>
+        ${[['grid', t('documents.gridView'), 'layout-grid'], ['list', t('documents.listView'), 'list']].map(([view, text, icon]) => {
+          const on = state.view === view;
+          return `
+        <button type="button" role="menuitemradio" aria-checked="${on}" class="popover-menu__item" data-view-choice="${view}">
+          ${check(on)}<span>${esc(text)}</span><i data-lucide="${icon}" class="icon-md popover-menu__item-trail" aria-hidden="true"></i>
+        </button>`;
+        }).join('')}
+      </div>
+      <div class="popover-menu__separator documents-tools-menu__view" role="separator"></div>
       <div class="popover-menu__group" role="group" aria-labelledby="documents-tools-sort-label">
         <div class="popover-menu__label" id="documents-tools-sort-label">${esc(t('documents.sortLabel'))}</div>
         ${SORTS.map((sort) => {
@@ -546,7 +611,12 @@ function documentsToolsMenuHtml() {
         </button>`;
         }).join('')}
       </div>
-      <div class="popover-menu__separator" role="separator"></div>
+      ${/* DIE MEHRFACHAUSWAHL IST NUR FUER HANDLUNGEN DA (Verschieben,
+           Archivieren, Loeschen) und faellt bei `read` samt Trennlinie weg
+           (#1265). Mit Schreibrecht, aber ohne ein eigenes Dokument in der
+           Ansicht blendet syncToolsMenu den Einstieg aus. */ ''}
+      ${readOnly() ? '' : `
+      <div class="popover-menu__separator" role="separator" data-select-separator></div>
       <button type="button" role="menuitem" class="popover-menu__item" data-action="enter-select">
         <i data-lucide="list-checks" class="icon-md" aria-hidden="true"></i><span>${esc(t('documents.selectLabel'))}</span>
       </button>
@@ -557,7 +627,7 @@ function documentsToolsMenuHtml() {
       </button>
       <button type="button" role="menuitem" class="popover-menu__item" data-action="select-archive" hidden>
         <i data-lucide="archive" class="icon-md" aria-hidden="true"></i><span>${esc(t('documents.archiveAction'))}</span>
-      </button>
+      </button>`}
     </div>`;
 }
 
@@ -569,10 +639,19 @@ function syncToolsMenu() {
     item.setAttribute('aria-checked', String(on));
     item.querySelector('.popover-menu__item-check')?.classList.toggle('popover-menu__item-check--hidden', !on);
   };
+  menu.querySelectorAll('[data-view-choice]').forEach((item) => paint(item, item.dataset.viewChoice === state.view));
   menu.querySelectorAll('[data-sort]').forEach((item) => paint(item, item.dataset.sort === state.sort));
   menu.querySelectorAll('[data-sort-direction]').forEach((item) => paint(item, item.dataset.sortDirection === state.sortDirection));
   const select = menu.querySelector('[data-action="enter-select"]');
-  if (select) select.disabled = state.selectMode;
+  if (select) {
+    select.disabled = state.selectMode;
+    // Ohne ein Dokument, das diese Person verwalten darf, gaebe es nichts
+    // auszuwaehlen (Besitzregel, mayManage) - dann kein Einstieg.
+    const nothingToSelect = !state.selectMode && !state.allDocuments.some(mayManage);
+    select.hidden = nothingToSelect;
+    const separator = menu.querySelector('[data-select-separator]');
+    if (separator) separator.hidden = nothingToSelect;
+  }
   // Die Sammel-Eintraege gibt es nur waehrend der Auswahl; Archivieren erst
   // mit einem Dokument darin, und im Archiv heisst es Wiederherstellen.
   const all = menu.querySelector('[data-action="select-all"]');
@@ -608,11 +687,20 @@ function bindToolsMenu() {
   menu?.addEventListener('click', (e) => {
     const item = e.target.closest('.popover-menu__item');
     if (!item || item.disabled) return;
-    if (item.dataset.sort) {
+    if (item.dataset.viewChoice) {
+      // Derselbe Weg wie der Umschalter im Kopf: sein Klick-Handler haelt
+      // Zustand, Speicher und Zeichnung an EINER Stelle.
+      if (item.dataset.viewChoice !== state.view) {
+        _container.querySelector(`.documents-view-toggle [data-view="${item.dataset.viewChoice}"]`)?.click();
+      }
+      syncToolsMenu();
+    } else if (item.dataset.sort) {
       // Ein neuer Schluessel beginnt in seiner natuerlichen Richtung.
       if (item.dataset.sort !== state.sort) setSort(item.dataset.sort);
     } else if (item.dataset.sortDirection) {
       if (item.dataset.sortDirection !== state.sortDirection) setSort(state.sort, item.dataset.sortDirection);
+    } else if (readOnly()) {
+      // Ansicht und Sortierung oben sind Lesen; alles ab hier ist die Auswahl.
     } else if (item.dataset.action === 'enter-select') {
       enterSelectMode();
     } else if (item.dataset.action === 'select-all') {
@@ -706,6 +794,7 @@ function bindPageEvents() {
       el.classList.toggle('documents-view-toggle__btn--active', active);
       el.setAttribute('aria-pressed', String(active));
     });
+    syncToolsMenu();
     renderDocuments();
   });
   _container.querySelector('#documents-list')?.addEventListener('click', handleDocumentAction);
@@ -934,7 +1023,7 @@ function emptyStateFor() {
       description: t('documents.emptyFilterDescription'),
       actions: [
         { id: 'documents-empty-reset', label: t('documents.resetFiltersAction'), icon: 'filter-x', variant: 'primary' },
-        { id: 'documents-empty-upload', label: t('documents.emptyPrimary'), icon: 'upload', variant: 'secondary' },
+        ...(readOnly() ? [] : [{ id: 'documents-empty-upload', label: t('documents.emptyPrimary'), icon: 'upload', variant: 'secondary' }]),
       ],
     };
   }
@@ -948,6 +1037,12 @@ function emptyStateFor() {
         { id: 'documents-empty-active', label: t('documents.showActiveAction'), icon: 'corner-up-left', variant: 'primary' },
       ],
     };
+  }
+  // Bei `read` nur die Auskunft: die Beschreibung („Lade Familiendokumente
+  // hoch ...") laedt zu der Handlung ein, die die Knoepfe darunter meinen, und
+  // faellt mit ihnen weg (Regel 9 in utils/module-access.js).
+  if (readOnly()) {
+    return { variant: 'empty', icon: 'folder-open', title: t('documents.emptyTitle'), actions: [] };
   }
   return {
     variant: 'empty',
@@ -988,7 +1083,24 @@ function renderEmptyState(list) {
   if (state.query) probeOtherStatusSearch();
 }
 
-function renderDocuments() {
+const DOCUMENT_ITEM = ':is(.document-card, .document-row)[data-id]';
+
+/* `motion: true` setzt, wer die DATEN geaendert hat (hochgeladen, archiviert,
+ * geloescht, per "Rueckgaengig" zurueckgeholt): das neue Dokument zieht auf,
+ * und was dadurch die Stelle wechselt, gleitet (utils/list-motion.js). Filter,
+ * Suche, Ordner- und Ansichtswechsel zeichnen ohne Bewegung neu - dort
+ * wechselt die Frage, nicht die Liste. */
+function renderDocuments({ motion = false } = {}) {
+  const list = _container.querySelector('#documents-list');
+  if (motion && list) {
+    redrawList(list, drawDocuments, { selector: DOCUMENT_ITEM, keyAttr: 'data-id' });
+    return;
+  }
+  drawDocuments();
+  if (list) stagger(list.querySelectorAll('.document-card, .document-row'), { host: list });
+}
+
+function drawDocuments() {
   // Jeder Rerender (Moduswechsel, Filter, Löschen) ersetzt die Karten samt
   // Menü-Anker. Ein offenes Kontextmenü hinge sonst als Geister-Popover im
   // Top-Layer, weil weder Scroll- noch Resize-Listener feuern.
@@ -998,6 +1110,8 @@ function renderDocuments() {
   list.removeAttribute('aria-busy');
   const docs = filteredDocuments();
   list.className = listClasses();
+  // Der Einstieg in die Auswahl haengt an den geladenen Dokumenten (mayManage).
+  syncToolsMenu();
   if (!docs.length) {
     renderEmptyState(list);
     return;
@@ -1009,7 +1123,6 @@ function renderDocuments() {
   repairRovingStops(list);
   wireThumbnails(list);
   wireLocalThumbs(list);
-  stagger(list.querySelectorAll('.document-card, .document-row'), { host: list });
 }
 
 // Facetten-Zähler: jede Achse zählt unter Berücksichtigung der jeweils ANDEREN
@@ -1181,7 +1294,7 @@ function renderFolderBrowser() {
         <span class="list-row__name documents-folder-item__name" title="${esc(item.name)}">${esc(item.name)}</span>
         ${showCounts ? `<span class="documents-folder-item__count">${counts.get(item.id) || 0}</span>` : ''}
       </button>
-      ${item.managed ? `
+      ${item.managed && !readOnly() ? `
       ${rowActionHtml({ icon: 'more-vertical', className: 'documents-folder-item__menu', label: t('documents.folderActionsFor', { name: item.name }), attrs: { 'data-folder-menu': item.id, title: t('documents.folderActionsFor', { name: item.name }), 'aria-haspopup': 'menu', 'aria-expanded': 'false' } })}` : ''}
     </li>`;
   }).join(''));
@@ -1295,6 +1408,9 @@ function positionContextMenu(menu, anchorBtn) {
 }
 
 function openFolderMenu(folder, anchorBtn) {
+  // Alle vier Eintraege schreiben (Unterordner, Umbenennen, Verschieben,
+  // Loeschen) - bei `read` gibt es das Menue nicht.
+  if (readOnly()) return;
   openContextMenu(anchorBtn, `
     <button class="documents-context-menu__item" type="button" role="menuitem" data-menu-action="subfolder">
       <i data-lucide="folder-plus" aria-hidden="true"></i><span>${t('documents.newSubfolder')}</span>
@@ -1326,6 +1442,7 @@ function openFolderMenu(folder, anchorBtn) {
  * anbietet, ist trotzdem eine schlechte Auswahl.
  */
 async function moveFolder(folder) {
+  if (readOnly()) return;
   const forbidden = folderSubtree(folder.id);
   const options = [
     { value: '', label: t('documents.folderRootLevel') },
@@ -1355,6 +1472,9 @@ async function moveFolder(folder) {
 // (bearbeiten, archivieren, an DMS senden, löschen) — hält die Zeile auf zwei
 // Primäraktionen (Ansehen/Download) + Kebab begrenzt.
 function openDocumentMenu(doc, anchorBtn) {
+  // Ohne Verwaltungsrecht hat das Menue keinen Eintrag ausser „Ansehen" - dann
+  // gibt es den Kebab gar nicht (renderActions) und das Auge bleibt stehen.
+  if (!mayManage(doc)) return;
   const archived = doc.status === 'archived';
   const canPushDms = documentStorageBackend(doc) !== 'dms' && state.dmsAccounts.length > 0;
   // ANSEHEN STEHT HIER, WENN DIE LEISTE ES NICHT ZEIGT. Die kompakte Zeile
@@ -1390,6 +1510,7 @@ function openDocumentMenu(doc, anchorBtn) {
 }
 
 async function renameFolder(folder) {
+  if (readOnly()) return;
   const newName = await promptModal(t('documents.renameFolder'), folder.name);
   if (!newName || newName === folder.name) return;
   try {
@@ -1467,6 +1588,7 @@ function folderDeleteChoice(folder, impact) {
 }
 
 async function deleteFolder(folder) {
+  if (readOnly()) return;
   let impact;
   try {
     const response = await api.get(`/documents/folders/${folder.id}/delete-impact`);
@@ -1640,6 +1762,16 @@ function renderDocIconSlot(doc) {
 function renderThumbSlot(doc, className) {
   const local = documentThumbKind(doc) ? ' data-local-thumb' : '';
   return `<div class="${className} document-thumb"${local}>${renderDocIconSlot(doc)}</div>`;
+}
+
+/* IN DER LISTE STEHT DAS KATEGORIE-GLYPH, KEINE VORSCHAU (R18, 2026-10-07).
+ * Die Zeile zeigte dieselbe Vorschau wie die Karte, auf 42px: von einem Blatt
+ * blieb ein weisses Quadrat mit grauem Rauschen, neunmal untereinander. In
+ * der Liste liest man am Zeichen, WAS es ist (Medizin, Schule, Finanzen) -
+ * das Bild gehoert der Rasteransicht und dem Betrachter. Die Zeile laedt
+ * damit auch keine Vorschauen mehr. */
+function renderRowGlyph(doc) {
+  return `<div class="document-row__icon"><i data-lucide="${CATEGORY_ICONS[doc.category] || 'file'}" aria-hidden="true"></i></div>`;
 }
 
 /* HANDSCHRIFT DES MODULS (Critique 2026-09-25, Entscheidung 2): ein lokales
@@ -1820,12 +1952,28 @@ function storageBadgeHtml(doc) {
 // (utils/roving-toolbar.js): Tab springt von Dokument zu Dokument und landet
 // auf „Ansehen", Pfeil links/rechts laeuft durch die Leiste. Sichtbar und
 // klickbar bleiben alle drei - versteckt wird nichts, nur die Tab-Kette kuerzer.
+//
+// DER KEBAB FOLGT DEM DOKUMENT, NICHT NUR DEM MODUL (#1265). Sein Menue traegt
+// nur Handlungen (Bearbeiten, Verschieben, Archivieren, An DMS senden,
+// Loeschen), und die nimmt der Server nur von der Person an, die das Dokument
+// angelegt hat, oder von einem Admin (mayManage). Fuer alle anderen - `read`
+// aufs Modul oder ein fremdes Dokument - gibt es ihn nicht; Ansehen und
+// Herunterladen sind Lesen und bleiben.
 function renderActions(doc) {
   return `
     ${rowActionHtml({ icon: 'eye', action: 'view', label: t('documents.viewNamed', { name: doc.name }), attrs: { 'data-id': doc.id, tabindex: '0', title: t('documents.viewAction') } })}
     ${rowActionHtml({ icon: 'download', href: `/api/v1/documents/${doc.id}/download`, label: t('documents.downloadNamed', { name: doc.name }), attrs: { download: true, tabindex: '-1', title: t('documents.downloadAction') } })}
-    ${rowActionHtml({ icon: 'more-vertical', action: 'menu', label: t('common.moreActionsNamed', { name: doc.name }), attrs: { 'data-id': doc.id, tabindex: '-1', title: t('nav.more'), 'aria-haspopup': 'menu', 'aria-expanded': 'false' } })}
+    ${mayManage(doc) ? rowActionHtml({ icon: 'more-vertical', action: 'menu', label: t('common.moreActionsNamed', { name: doc.name }), attrs: { 'data-id': doc.id, tabindex: '-1', title: t('nav.more'), 'aria-haspopup': 'menu', 'aria-expanded': 'false' } }) : ''}
   `;
+}
+
+/**
+ * Kennzeichen einer Aktionsleiste OHNE Kebab. Die kompakte Zeile unter 30rem
+ * behaelt damit ihr Auge: dort raeumt documents.css es sonst weg, weil das
+ * Menue „Ansehen" fuehrt - ohne Menue waere die Zeile fuer die Tastatur zu.
+ */
+function readBarAttr(doc) {
+  return mayManage(doc) ? '' : ' data-read-bar';
 }
 
 // Auswahlkreis im Icon-Slot: im Auswahlmodus ersetzt er die Einzelaktionen,
@@ -1837,7 +1985,9 @@ function renderActions(doc) {
 // Ein Knopf mit `aria-pressed` und dem Dokumentnamen im Label; der Tipp
 // laeuft wie jeder Tipp auf die Karte durch `handleDocumentAction`.
 function renderSelectBox(doc) {
-  if (!state.selectMode) return '';
+  // Auswaehlen heisst hier: gleich verschieben, archivieren oder loeschen. Ein
+  // Dokument, das diese Person nicht verwalten darf, traegt keinen Kreis.
+  if (!state.selectMode || !mayManage(doc)) return '';
   const on = state.selected.has(doc.id);
   return `
     <button type="button" class="select-circle${on ? ' select-circle--on' : ''}"
@@ -1868,7 +2018,7 @@ function renderGridCard(doc) {
       </div>
       <div class="document-card__foot">
         <span class="document-card__date">${formatDate(doc.updated_at)}</span>
-        ${state.selectMode ? renderSelectBox(doc) : `<div class="document-card__actions" role="toolbar" aria-label="${esc(t('documents.actionsFor', { name: doc.name }))}">${renderActions(doc)}</div>`}
+        ${state.selectMode ? renderSelectBox(doc) : `<div class="document-card__actions" role="toolbar" aria-label="${esc(t('documents.actionsFor', { name: doc.name }))}"${readBarAttr(doc)}>${renderActions(doc)}</div>`}
       </div>
     </article>
   `;
@@ -1881,7 +2031,7 @@ function renderListItem(doc) {
   const selected = state.selectMode && state.selected.has(doc.id);
   return `
     <article class="list-row document-row${selected ? ' is-selected' : ''}" data-id="${doc.id}">
-      ${state.selectMode ? renderSelectBox(doc) : renderThumbSlot(doc, 'document-row__icon')}
+      ${state.selectMode && mayManage(doc) ? renderSelectBox(doc) : renderRowGlyph(doc)}
       <div class="list-row__main document-row__body">
         <h2 class="list-row__name document-row__title">${esc(doc.name)}</h2>
         <div class="list-row__meta document-row__meta">${renderMeta(doc, { showSize: false })}</div>
@@ -1890,7 +2040,7 @@ function renderListItem(doc) {
         <span class="document-row__date">${formatDate(doc.updated_at)}</span>
         <span class="document-row__size">${formatFileSize(doc.file_size)}</span>
       </div>
-      ${state.selectMode ? '' : `<div class="document-row__actions" role="toolbar" aria-label="${esc(t('documents.actionsFor', { name: doc.name }))}">${renderActions(doc)}</div>`}
+      ${state.selectMode ? '' : `<div class="document-row__actions" role="toolbar" aria-label="${esc(t('documents.actionsFor', { name: doc.name }))}"${readBarAttr(doc)}>${renderActions(doc)}</div>`}
     </article>
   `;
 }
@@ -1899,6 +2049,8 @@ function renderListItem(doc) {
 function toggleDocumentSelection(card) {
   if (!card) return;
   const id = Number(card.dataset.id);
+  // Der Tipp auf eine Karte ohne Kreis waehlt nichts aus (Besitzregel).
+  if (!mayManage(state.allDocuments.find((doc) => doc.id === id))) return;
   const next = !state.selected.has(id);
   if (next) state.selected.add(id);
   else state.selected.delete(id);
@@ -1939,7 +2091,13 @@ function handleDocumentAction(e) {
   if (doc) runDocumentAction(btn.dataset.action, doc);
 }
 
+/** Was jedes Konto darf, das die Seite sieht. Alles andere fragt mayManage(). */
+const READ_SAFE_ACTIONS = new Set(['view']);
+
 async function runDocumentAction(action, doc) {
+  // POSITIVLISTE, zweite Linie hinter dem Markup: eine morgen ergaenzte
+  // Menue-Aktion ist ohne Verwaltungsrecht standardmaessig zu (Regel 2).
+  if (!READ_SAFE_ACTIONS.has(action) && !mayManage(doc)) return;
   if (action === 'view') openDocumentViewer(doc);
   if (action === 'edit') openDocumentModal(doc);
   if (action === 'move') {
@@ -1955,7 +2113,7 @@ async function runDocumentAction(action, doc) {
       await api.patch(`/documents/${doc.id}/archive`, { archived: doc.status !== 'archived' });
       window.yuvomi?.showToast(doc.status === 'archived' ? t('documents.restoredToast') : t('documents.archivedToast'), 'success');
       await loadDocuments();
-      renderAll();
+      renderAll({ motion: true });
     } catch (err) {
       window.yuvomi?.showToast(err.data?.error ?? t('common.unknownError'), 'danger');
     }
@@ -1989,17 +2147,31 @@ async function runDocumentAction(action, doc) {
 // (früher wurde hier fest nach Namen sortiert, was die Datums-Sortierung des
 // Servers zerschoss).
 function deleteDocuments(docs) {
+  // Vor dem optimistischen Entfernen: sonst verschwaende die Karte, und der
+  // Server gaebe sie nach dem Rueckgaengig-Fenster mit einer Fehlermeldung zurueck.
+  docs = docs.filter(mayManage);
   if (!docs.length) return;
   const ids = new Set(docs.map((doc) => doc.id));
   const owner = _container;
   state.allDocuments = state.allDocuments.filter((doc) => !ids.has(doc.id));
   applyFilters();
-  renderAll();
+  // In der Liste klappt die Zeile aus, die Nachbarn ruecken nach, erst dann
+  // steht die Liste ohne sie neu (der Zustand ist schon geaendert: ein
+  // Neuzeichnen, das dazwischenkommt, zeigt dasselbe Ergebnis ohne Bewegung).
+  // Im Raster haelt die Nachbarkarte die Zeilenhoehe - dort gleiten die
+  // Nachbarn in die Luecke (FLIP in redrawList).
+  const leaving = state.view === 'list'
+    ? [...(owner?.querySelectorAll('#documents-list .document-row[data-id]') ?? [])]
+      .filter((row) => ids.has(Number(row.dataset.id)))
+    : [];
+  Promise.all(leaving.map((row) => collapseRow(row))).then(() => {
+    if (_container === owner) renderAll({ motion: true });
+  });
 
   const restore = () => {
     state.allDocuments = [...state.allDocuments, ...docs];
     applyFilters();
-    renderAll();
+    renderAll({ motion: true });
   };
 
   const message = docs.length === 1
@@ -2028,6 +2200,7 @@ function deleteDocuments(docs) {
 // --------------------------------------------------------
 
 function enterSelectMode() {
+  if (readOnly()) return;
   state.selectMode = true;
   state.selected.clear();
   syncToolsMenu();
@@ -2089,11 +2262,11 @@ function updateSelectUI() {
 }
 
 function selectedDocuments() {
-  return state.allDocuments.filter((doc) => state.selected.has(doc.id));
+  return state.allDocuments.filter((doc) => state.selected.has(doc.id) && mayManage(doc));
 }
 
 function toggleSelectAll() {
-  const visible = filteredDocuments();
+  const visible = filteredDocuments().filter(mayManage);
   const allOn = visible.length > 0 && visible.every((doc) => state.selected.has(doc.id));
   visible.forEach((doc) => (allOn ? state.selected.delete(doc.id) : state.selected.add(doc.id)));
   renderDocuments();
@@ -2194,9 +2367,20 @@ export const __test = {
   // R8 H14: der Auswahlkreis als Programm (Markup und Tipp).
   state, renderSelectBox, toggleDocumentSelection,
   setContainerForTest(container) { _container = container; },
+  // #1265: Nur-lesen und Besitzregel. Die Suite faehrt Markup und Handler.
+  readOnly, mayManage, READ_SAFE_ACTIONS,
+  renderActions, renderGridCard, renderListItem, emptyStateFor,
+  documentsToolsMenuHtml, runDocumentAction, deleteDocuments,
+  openDocumentModal, openFolderModal, openFolderMenu, openDocumentMenu,
+  renameFolder, moveFolder, deleteFolder, enterSelectMode, toggleSelectAll,
+  archiveSelected, moveSelected, selectedDocuments, viewerDetailsHtml, saveDocument,
 };
 
 function openDocumentModal(doc = null) {
+  // DER EINE RIEGEL fuer Hochladen und Bearbeiten: FAB, Leerzustand,
+  // Tastenkuerzel „n" (klickt den FAB), Menue und Stift im Betrachter enden
+  // hier. Anlegen braucht das Modulrecht, Bearbeiten dazu die Besitzregel.
+  if (doc ? !mayManage(doc) : readOnly()) return;
   const isEdit = !!doc;
   let modalPanel = null;
 
@@ -2839,6 +3023,7 @@ async function saveFolderUpload(panel, payload) {
 }
 
 async function saveDocument(event, doc, panel) {
+  if (doc ? !mayManage(doc) : readOnly()) { event?.preventDefault?.(); return; }
   event.preventDefault();
   const form = event.target;
   const error = form.querySelector('#document-error');
@@ -2915,7 +3100,7 @@ async function saveDocument(event, doc, panel) {
     }
     closeModal({ force: true });
     await loadDocuments();
-    renderAll();
+    renderAll({ motion: true });
     refocusAfterRender();
   } catch (err) {
     error.textContent = friendlyError(err);
@@ -2935,6 +3120,7 @@ async function saveDocument(event, doc, panel) {
  * eine Ansage ist und keine Ueberraschung.
  */
 function openFolderModal({ parentId = null } = {}) {
+  if (readOnly()) return;
   const preselected = parentId ?? (Number.isInteger(Number(state.folderId)) && Number(state.folderId) > 0
     ? Number(state.folderId)
     : null);
@@ -2960,7 +3146,8 @@ function openFolderModal({ parentId = null } = {}) {
         </div>
         <div id="document-folder-error" class="form-error" role="alert" hidden></div>
         <div class="modal-panel__footer modal-panel__footer--plain">
-          <button type="submit" class="btn btn--primary">${t('documents.createFolderAction')}</button>
+          <button type="button" class="btn btn--secondary" data-action="close-modal">${t('common.cancel')}</button>
+          <button type="submit" class="btn btn--primary">${t('common.add')}</button>
         </div>
       </form>
     `,
@@ -3001,6 +3188,7 @@ function openFolderModal({ parentId = null } = {}) {
 // --------------------------------------------------------
 
 function openDmsLinkModal() {
+  if (readOnly()) return;
   if (!state.dmsAccounts.length) return;
   openSharedModal({
     title: t('documents.linkFromDms'),
@@ -3255,7 +3443,7 @@ async function linkDmsDocument(item, accountId) {
     });
     closeModal({ force: true });
     await loadDocuments();
-    renderAll();
+    renderAll({ motion: true });
     refocusAfterRender();
     return true;
   } catch (err) {
@@ -3375,9 +3563,42 @@ function formatFileSize(bytes) {
 // Document Viewer
 // --------------------------------------------------------
 
-/** Nur-lesen-Regel (#467): eine Handlung, die am Server im 403 endete, steht nicht da. */
-function canEditDocuments() {
-  return !isNavModuleReadOnly('documents');
+/**
+ * Was der Bearbeiten-Dialog zeigt und der Betrachter sonst nicht: Beschreibung,
+ * Sichtbarkeit samt freigegebenen Personen, Erinnerungs-Vorlauf und der
+ * Archiv-Status. Wer das Dokument verwalten darf, findet das hinter dem Stift.
+ * Fuer alle anderen - `read` aufs Modul oder ein fremdes Dokument - ist der
+ * Betrachter die Leseansicht (Regel 9 in utils/module-access.js): die Werte
+ * stehen dort, wo der Tipp ohnehin landet, mit den Beschriftungen des Dialogs.
+ * Name, Kategorie, Ordner, Groesse und Ablauf traegt die Meta-Zeile schon.
+ *
+ * Die Sichtbarkeit folgt derselben Haushaltsregel wie das Feld im Dialog
+ * (hidesPrivacyControls): wo es dort nicht steht, steht es hier nicht.
+ */
+function viewerDetailsHtml(doc) {
+  if (mayManage(doc)) return '';
+  const names = (doc.allowed_member_ids || [])
+    .map((id) => [...(state.directory ?? []), ...state.members].find((person) => Number(person.id) === Number(id))?.display_name)
+    .filter(Boolean);
+  const showsPrivacy = !hidesPrivacyControls('documents');
+  const rows = [
+    readRowHtml({ icon: 'align-left', label: t('documents.descriptionLabel'), value: doc.description || '', multiline: true }),
+    showsPrivacy
+      ? readRowHtml({ icon: doc.visibility === 'private' ? 'lock' : 'users', label: t('documents.visibilityLabel'), value: t(`documents.visibility.${doc.visibility || DOCUMENT_DEFAULT_VISIBILITY}`) })
+      : '',
+    showsPrivacy && doc.visibility === 'restricted'
+      ? readRowHtml({ icon: 'user-check', label: t('documents.allowedMembersLabel'), value: names.join(', ') })
+      : '',
+    doc.expires_at && doc.expiry_reminder_days != null
+      ? readRowHtml({ icon: 'bell', label: t('documents.expiryReminderLabel'), value: String(doc.expiry_reminder_days) })
+      : '',
+    doc.status === 'archived'
+      ? readRowHtml({ icon: 'archive', label: t('documents.statusLabel'), value: t('documents.statusArchived') })
+      : '',
+  ].join('');
+  // `.detail-view__rows` stellt den Abstand der geteilten Lesezeilen
+  // (detail-view.css), wie in den Leseansichten von Geburtstagen und Einkauf.
+  return rows.trim() ? `<div class="document-viewer__details detail-view__rows">${rows}</div>` : '';
 }
 
 function openDocumentViewer(doc) {
@@ -3392,6 +3613,8 @@ function openDocumentViewer(doc) {
 
   // pdf.js-Viewer hält Worker + Dokument im Speicher; beim Schließen freigeben.
   let pdfTeardown = null;
+  // Der Fokus-Waechter des eingebauten PDF-Betrachters (keepFocusOutOfUnclickedPdf).
+  let releasePdfFocus = null;
 
   // Teilen über das Teilen-Menü des Geräts (D#1014). Ob es geht, steht beim
   // Öffnen fest - utils/web-share.js beantwortet Typ und Browser in einer
@@ -3409,14 +3632,35 @@ function openDocumentViewer(doc) {
   let shareFile = null;
   // Der Ausloeser des Betrachters - fuer den Wechsel nach "Bearbeiten" (unten).
   const opener = document.activeElement;
+  // Per Tastatur geoeffnet? Der Browser weiss es: er zeigt den Fokusring am
+  // Ausloeser nur dann. Ein alter Browser ohne den Selektor wirft - dann gilt
+  // "nein", und der Fokus-Waechter des PDFs nimmt nichts zurueck.
+  let openedByKeyboard = false;
+  try { openedByKeyboard = opener?.matches?.(':focus-visible') === true; } catch { /* Selektor unbekannt */ }
 
   openSharedModal({
     title: doc.name,
     size: 'xl',
     content: `
-      <div class="document-viewer">
+      <div class="document-viewer" id="document-viewer-root">
         <div class="document-viewer__meta">
-          <span><i data-lucide="${CATEGORY_ICONS[doc.category] || 'folder'}" aria-hidden="true"></i>${categoryLabel}</span>
+          ${/* SCHMAL IST DER META-BLOCK EINE ZEILE, DIE AUFKLAPPT (R17 Schritt 5,
+                Critique 2026-10-07 A6 P2). Gemessen 390x844: 172px Meta ueber
+                einem 460px hohen Dokument, davon 53px der Hinweis, warum Teilen
+                nicht geht. Der Knopf nennt die Kategorie und klappt Ordner,
+                Groesse, Ablauf, Hinweis und Lesezeilen auf; die Aktionen
+                daneben und ein Ablauf in Warnfarbe bleiben stehen. Ab 640px
+                ist er unsichtbar und alles steht da wie bisher
+                (documents.css). Der Hinweis selbst bleibt: SPEC.md (D#1014)
+                sagt ihn zu - er steht nur nicht mehr dauerhaft im Bild. */ ''}
+          <button type="button" class="btn btn--ghost btn--sm document-viewer__info-toggle"
+                  aria-expanded="false" aria-controls="document-viewer-root"
+                  aria-label="${t('common.showDetails')}" title="${t('common.showDetails')}">
+            <i data-lucide="${CATEGORY_ICONS[doc.category] || 'folder'}" aria-hidden="true"></i>
+            <span>${categoryLabel}</span>
+            <i data-lucide="chevron-down" class="document-viewer__info-chevron" aria-hidden="true"></i>
+          </button>
+          <span class="document-viewer__category"><i data-lucide="${CATEGORY_ICONS[doc.category] || 'folder'}" aria-hidden="true"></i>${categoryLabel}</span>
           ${doc.folder_name && !folderRepeatsCategory(doc.folder_name, categoryLabel) ? `<span><i data-lucide="folder" aria-hidden="true"></i>${esc(doc.folder_name)}</span>` : ''}
           <span>${formatFileSize(doc.file_size)}</span>
           ${expiryViewerHtml(doc)}
@@ -3428,7 +3672,7 @@ function openDocumentViewer(doc) {
             </a>` : ''}
             ${previewKind(doc.mime_type) === 'pdf' ? `
             ${rowActionHtml({ icon: 'external-link', href: previewUrl, label: t('documents.openInTabNamed', { name: doc.name }), attrs: { target: '_blank', rel: 'noopener noreferrer', title: t('documents.viewerOpenInTab') } })}` : ''}
-            ${canEditDocuments() ? `
+            ${mayManage(doc) ? `
             ${rowActionHtml({ icon: 'pencil', action: 'edit-document', label: t('common.editNamed', { name: doc.name }), attrs: { title: t('common.edit') } })}` : ''}
             ${shareSupport === 'ok' ? `
             ${rowActionHtml({ icon: 'share-2', action: 'share', label: t('documents.shareNamed', { name: doc.name }), attrs: { disabled: true, 'aria-busy': 'true', title: t('documents.sharePreparing') } })}` : ''}
@@ -3439,6 +3683,7 @@ function openDocumentViewer(doc) {
           </span>
           ${shareSupport !== 'ok' ? `<p class="document-viewer__note">${t(SHARE_NOTE_KEYS[shareSupport])}</p>` : ''}
         </div>
+        ${viewerDetailsHtml(doc)}
         <div class="document-viewer__body" id="document-viewer-body">
           ${renderViewerContent(doc, previewUrl, downloadUrl)}
         </div>
@@ -3446,12 +3691,22 @@ function openDocumentViewer(doc) {
     `,
     onClose() {
       if (typeof pdfTeardown === 'function') pdfTeardown();
+      releasePdfFocus?.();
       shareAbort.abort();
       shareFile = null;
     },
     onSave(panel) {
       if (window.lucide) window.lucide.createIcons({ el: panel });
       if (shareSupport === 'ok') prepareShare(panel);
+      releasePdfFocus = keepFocusOutOfUnclickedPdf(panel, { keyboard: openedByKeyboard });
+      // Der Meta-Block klappt schmal auf und zu (documents.css blendet aus,
+      // was die Klasse nicht freigibt; ab 640px ist der Knopf unsichtbar).
+      const infoToggle = panel.querySelector('.document-viewer__info-toggle');
+      infoToggle?.addEventListener('click', () => {
+        const open = infoToggle.getAttribute('aria-expanded') !== 'true';
+        infoToggle.setAttribute('aria-expanded', String(open));
+        panel.querySelector('.document-viewer')?.classList.toggle('document-viewer--info-open', open);
+      });
       // BEARBEITEN AUS DEM BETRACHTER (Re-Critique 2026-09-25, Alex). Kein
       // eigenes closeModal(): openModal() ersetzt den offenen Dialog selbst -
       // derselbe Weg wie jeder Modal-zu-Modal-Wechsel, und er haelt EINEN
@@ -3528,6 +3783,8 @@ function openDocumentViewer(doc) {
   }
 }
 
+const PDF_EMBED_FRAGMENT = '#toolbar=0&navpanes=0&view=FitH';
+
 function renderViewerContent(doc, previewUrl, downloadUrl) {
   const kind = previewKind(doc.mime_type);
   if (kind === 'pdf') {
@@ -3536,7 +3793,16 @@ function renderViewerContent(doc, previewUrl, downloadUrl) {
       // PDF-Viewers in sandboxed Frames und zeigt stattdessen "This page was blocked by Chrome".
       // Die Auslieferung erfolgt same-origin als application/pdf mit nosniff, daher keine
       // Skriptausführung im Frame.
-      return `<iframe class="document-viewer__pdf" src="${previewUrl}" title="${esc(doc.name)}"></iframe>`;
+      //
+      // OHNE DIE FREMDE WERKZEUGLEISTE (R18, 2026-10-07): der eingebaute
+      // Betrachter von Chromium und Firefox liest die PDF-Open-Parameter im
+      // Fragment. `toolbar=0` nimmt seine Leiste (zweite Kopfzeile mit Zoom,
+      // Druck, Download in fremder Optik unter der eigenen), `navpanes=0` die
+      // Seitenleiste, `view=FitH` passt die Seite in die Breite. Safari kennt
+      // sie nicht - der Rueckfall ist der Stand davor. Zoom und Druck bleiben
+      // ueber "In neuem Tab oeffnen" (dort MIT Leiste: die Adresse traegt das
+      // Fragment nicht) und den Download der eigenen Leiste.
+      return `<iframe class="document-viewer__pdf" src="${previewUrl}${PDF_EMBED_FRAGMENT}" title="${esc(doc.name)}"></iframe>`;
     }
     // Mobile Browser (iOS Safari, Android Chrome) rendern PDFs in <iframe>/<embed> nicht inline.
     // Platzhalter; das eigentliche Rendern via pdf.js läuft asynchron im onSave-Hook.
@@ -3589,6 +3855,90 @@ function renderViewerFallback(doc, { hint, icon = 'file-x', alert = false } = {}
 
 function renderViewerUnsupported(doc) {
   return renderViewerFallback(doc, { hint: t('documents.viewerDownloadHint') });
+}
+
+/**
+ * DER FOKUS BLEIBT IM DIALOG, SOLANGE NIEMAND INS PDF GEKLICKT HAT (#1511).
+ *
+ * WAS NICHT GEHT, zuerst: liegt der Fokus IM eingebauten PDF-Betrachter, kommt
+ * kein Tastendruck mehr hier an - Esc schliesst dann nicht. Der Betrachter ist
+ * ein eigener Prozess des Browsers (in Chromium eine interne Erweiterung im
+ * iframe); gemessen erreicht `keydown` weder dieses Dokument noch das Fenster
+ * des iframes, obwohl dessen Huelle same-origin ist. Das laesst sich von hier
+ * nicht abfangen, ohne den eingebauten Betrachter aufzugeben oder dem PDF den
+ * Fokus wieder wegzunehmen, den jemand ihm per Klick gegeben hat (dann gingen
+ * Markieren und Kopieren im PDF nicht mehr). Fuer diesen Fall bleibt der Weg
+ * hinaus: das X im Kopf und jeder Klick in den Dialog bringen Esc zurueck, und
+ * der Fokus kehrt beim Schliessen zum Ausloeser zurueck (beides gemessen).
+ *
+ * WAS GEHT: der Fokus muss dort gar nicht erst landen, wenn ihn niemand
+ * hingelegt hat. Gemessen nahm ihn sich der Betrachter SELBST, sobald die
+ * Vorschau scheiterte (eine Datei, die sich als PDF ausgibt und keines ist) -
+ * per Tastatur geoeffnet stand der Fokus danach im iframe, und Esc war tot,
+ * ohne dass man das PDF je beruehrt hatte. Dasselbe nach Tab von einer
+ * angeklickten leeren Stelle aus.
+ *
+ * Das Fenster meldet `blur`, wenn der Fokus in den iframe wechselt; ein Klick
+ * IM iframe ist von hier aus nicht zu sehen. Entschieden wird deshalb daran,
+ * womit der Nutzer gerade bedient - dieselbe Frage, die der Browser fuer
+ * `:focus-visible` stellt: wer zuletzt eine Taste gedrueckt hat, hat nicht ins
+ * PDF geklickt, und der Fokus geht zurueck an das Element, das ihn im Dialog
+ * zuletzt hatte (sonst an "Schliessen"). Wer zuletzt den Zeiger bewegt oder
+ * gedrueckt hat, behaelt den Fokus im PDF, ebenso wer mit dem Zeiger ueber
+ * dem iframe steht. Ein Klick wird damit nie zurueckgenommen; dafuer bleibt
+ * der Fall offen, dass sich der Betrachter den Fokus unter der Maus nimmt.
+ *
+ * `pointermove` zaehlt nur mit echter Bewegung: nach einem Layoutwechsel
+ * schickt der Browser eines fuer den ruhenden Zeiger nach, und das waere fuer
+ * jeden, dessen Maus irgendwo ueber der Seite liegt, "zuletzt der Zeiger".
+ *
+ * @param {HTMLElement} panel
+ * @param {object} [opts]
+ * @param {boolean} [opts.keyboard] - wurde der Betrachter per Tastatur geoeffnet
+ * @returns {() => void} haengt die Listener wieder ab
+ */
+function keepFocusOutOfUnclickedPdf(panel, { keyboard = false } = {}) {
+  const frame = panel?.querySelector?.('.document-viewer__pdf');
+  if (!frame || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return () => {};
+
+  let onKeyboard = keyboard;
+  let lastInside = null;
+  let lastPoint = null;
+  // Nimmt sich der Betrachter den Fokus immer wieder, ist nach drei Runden
+  // Schluss - bis zur naechsten Eingabe des Nutzers.
+  let returned = 0;
+  const onFocusIn = (e) => { if (e.target !== frame) lastInside = e.target; };
+  const onKeyDown = () => { onKeyboard = true; returned = 0; };
+  const onPointerDown = () => { onKeyboard = false; returned = 0; };
+  const onPointerMove = (e) => {
+    const moved = lastPoint && (lastPoint.x !== e.screenX || lastPoint.y !== e.screenY);
+    lastPoint = { x: e.screenX, y: e.screenY };
+    if (moved) onKeyboard = false;
+  };
+  const onWindowBlur = () => {
+    if (document.activeElement !== frame) return;
+    if (!onKeyboard || frame.matches?.(':hover')) return;
+    if (returned >= 3) return;
+    returned += 1;
+    // Nicht im blur selbst: der Fokuswechsel ist dann noch nicht abgeschlossen.
+    setTimeout(() => {
+      if (document.activeElement !== frame || !frame.isConnected) return;
+      const target = lastInside?.isConnected ? lastInside : panel.querySelector('.modal-panel__close');
+      target?.focus?.();
+    }, 0);
+  };
+  panel.addEventListener('focusin', onFocusIn);
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('pointerdown', onPointerDown, true);
+  document.addEventListener('pointermove', onPointerMove, true);
+  window.addEventListener('blur', onWindowBlur);
+  return () => {
+    panel.removeEventListener('focusin', onFocusIn);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('pointerdown', onPointerDown, true);
+    document.removeEventListener('pointermove', onPointerMove, true);
+    window.removeEventListener('blur', onWindowBlur);
+  };
 }
 
 // navigator.pdfViewerEnabled === true bedeutet, dass der Browser einen eingebauten

@@ -783,6 +783,16 @@ export const schemas = {
               description: 'Only present on GET /auth/users for administrators: the account carries no '
                 + 'password and can only be entered through SSO.',
             },
+            sort_order: {
+              type: ['integer', 'null'],
+              description: 'Position in the household member order, or null: for a member that has not been '
+                + 'placed, and for every account that is no household member (staff, guest, deactivated).',
+            },
+            is_household_member: {
+              type: 'boolean',
+              description: 'Whether the account is a household member - the accounts GET /family/members '
+                + 'lists and the only ones the member order takes.',
+            },
           },
           required: ['id', 'username', 'display_name', 'avatar_color', 'role', 'family_role'],
         },
@@ -798,8 +808,27 @@ export const schemas = {
             email: { type: ['string', 'null'] },
             birth_date: { type: ['string', 'null'], format: 'date' },
             created_at: { type: 'string', format: 'date-time' },
+            sort_order: {
+              type: ['integer', 'null'],
+              description: 'Position in the household member order (set with PATCH /family/members/reorder), '
+                + 'or null for a member that has not been placed. Placed members come first, by position; '
+                + 'unplaced ones after them, by display name.',
+            },
           },
           required: ['id', 'display_name', 'avatar_color', 'family_role'],
+        },
+        FamilyMemberReorderInput: {
+          type: 'object',
+          required: ['order'],
+          properties: {
+            order: {
+              type: 'array',
+              minItems: 1,
+              uniqueItems: true,
+              items: { type: 'integer', minimum: 1 },
+              description: 'The ids of all household members, in the wanted order.',
+            },
+          },
         },
         FamilyMembersResponse: {
           type: 'object',
@@ -1023,6 +1052,7 @@ export const schemas = {
             },
             expires_at: { type: ['string', 'null'], format: 'date-time' },
             revoked_at: { type: ['string', 'null'], format: 'date-time' },
+            active: { type: 'boolean', description: 'Whether the token still signs in: not revoked and not past `expires_at`, judged by the server clock. Only a token with `active: false` can be removed.' },
             last_used_at: { type: ['string', 'null'], format: 'date-time' },
             created_at: { type: 'string', format: 'date-time' },
           },

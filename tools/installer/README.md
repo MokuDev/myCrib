@@ -19,7 +19,7 @@ of inactivity otherwise). Download the generated `.env` before you close the tab
 
 ## Requirements
 
-- Node.js 22+, the version the repository targets and CI tests (the installer itself has zero npm dependencies - Node built-ins only)
+- Node.js 22+ (the installer itself has zero npm dependencies - Node built-ins only; running the app outside a container needs Node.js 22.14 or newer, see `engines` in `package.json`)
 - A container engine — either **Docker** with Compose v2, or **Podman** with the
   `podman compose` subcommand (4.1+) or the `podman-compose` package
 - The repository cloned locally
@@ -54,7 +54,7 @@ dedicated `podman-compose.yml` (SELinux `:Z` labels).
      - **Security keys** - `SESSION_SECRET` and `DB_ENCRYPTION_KEY` (pre-filled
        on a fresh install; existing keys are kept, see below)
      - **Weather** - Open-Meteo coordinates (no API key). They apply until a
-       household location is saved in the app (Settings → Household → Integrations), which
+       household location is saved in the app (Settings → Household → Photos and weather), which
        then takes precedence
      - **Calendar** - Google Calendar, Outlook (Microsoft Graph) and Apple iCloud
        CalDAV, the last one marked *legacy*: the `.env` holds exactly one iCloud

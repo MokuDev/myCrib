@@ -12,7 +12,7 @@ import {
   budgetVisibilityWhere, budgetScopeWhere, budgetDetailsHiddenWhere, canEditEntry,
   resolveBudgetMode, maskBudgetEntry, BUDGET_MASKED_CATEGORY,
 } from '../../services/budget-visibility.js';
-import { computeLoanSchedule, remainingPrincipalFromPayments, remainingInstallmentsForBalance } from '../../services/loan-amortization.js';
+import { computeLoanSchedule, remainingPrincipalFromPayments, remainingInstallmentsForBalance, rateForInstallment } from '../../services/loan-amortization.js';
 import { todayKey } from '../../utils/timezone.js';
 import { DEFAULT_LOCALE, supportedLocaleFor } from '../../utils/i18n.js';
 import { newNonMembers } from '../../services/household-members.js';
@@ -688,10 +688,70 @@ export function validateSubcategory(category, subcategory) {
   return row ? subcategory : null;
 }
 
+/** Ganze Monate von `from` bis `to` (beide YYYY-MM); 0, wenn eines fehlt. */
+export function monthsBetween(from, to) {
+  const re = /^(\d{4})-(0[1-9]|1[0-2])$/;
+  const a = re.exec(String(from ?? ''));
+  const b = re.exec(String(to ?? ''));
+  if (!a || !b) return 0;
+  return (Number(b[1]) - Number(a[1])) * 12 + (Number(b[2]) - Number(a[2]));
+}
+
 export function addMonths(ym, n) {
   const [y, m] = ym.split('-').map(Number);
   const d = new Date(y, m - 1 + n, 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
+/**
+ * Der Faelligkeitstag eines Darlehens in einem Monat, als Tagesschluessel (#1631).
+ *
+ * DIE EINE STELLE, AN DER GEKLEMMT WIRD: ein Tag, den der Monat nicht hat, wird
+ * zu dessen letztem - der 31. im April zum 30., im Februar zum 28. oder 29.
+ * Gerechnet wird am Schluessel, nicht an einem Zeitpunkt: `Date.UTC(y, m, 0)`
+ * fragt nur nach der Laenge des Monats, eine Zone kommt nicht vor, und "heute"
+ * auch nicht - der Faelligkeitstag einer Rate haengt nicht daran, wann jemand
+ * fragt.
+ *
+ * @param {string} ym       Monat "YYYY-MM"
+ * @param {unknown} dueDay  1 bis 31; alles andere heisst "kein Faelligkeitstag"
+ * @returns {string|null}   "YYYY-MM-DD" oder null
+ */
+export function dueDateInMonth(ym, dueDay) {
+  if (!Number.isInteger(dueDay) || dueDay < 1 || dueDay > 31) return null;
+  const match = /^(\d{4})-(\d{2})$/.exec(String(ym ?? ''));
+  if (!match) return null;
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return null;
+  const lastDay = new Date(Date.UTC(Number(match[1]), month, 0)).getUTCDate();
+  return `${match[1]}-${match[2]}-${String(Math.min(dueDay, lastDay)).padStart(2, '0')}`;
+}
+
+/**
+ * Das Datum, das ein Darlehen fuer seine naechste Rate nennt (`next_due_date`).
+ *
+ * Mit Faelligkeitstag ist es dieser Tag im Faelligkeitsmonat (#1631) - keine
+ * Frage an die Uhr. Ohne Faelligkeitstag kennt das Darlehen nur den Monat, und
+ * dann entscheidet der Monat des Haushalts (#1741):
+ *   - liegt der Faelligkeitsmonat VOR dem laufenden, ist es dessen Erster. Wer
+ *     ein Darlehen von 2022 nachtraegt, bucht die Raten sonst alle in den Monat
+ *     des Tippens. Der Erste ist die Konvention, die "bereits gezahlte Raten"
+ *     (`seedPaidInstallments`) ohne Faelligkeitstag schon benutzen - eine
+ *     Buchungskonvention, keine Faelligkeit: die Karte nennt weiter den Monat.
+ *   - sonst (laufender oder kuenftiger Monat) null, und "Als bezahlt markieren"
+ *     bleibt bei heute.
+ *
+ * @param {string} ym       Faelligkeitsmonat "YYYY-MM"
+ * @param {unknown} dueDay  1 bis 31 oder kein Faelligkeitstag
+ * @param {string} today    Tagesschluessel des Haushalts (`todayKey(db)`), nie der UTC-Tag
+ * @returns {string|null}   "YYYY-MM-DD" oder null
+ */
+export function nextInstallmentDate(ym, dueDay, today) {
+  const onDueDay = dueDateInMonth(ym, dueDay);
+  if (onDueDay) return onDueDay;
+  if (dueDay != null) return null;
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(String(ym ?? ''))) return null;
+  return ym < String(today ?? '').slice(0, 7) ? `${ym}-01` : null;
 }
 
 export function cents(value) {
@@ -758,7 +818,13 @@ export function bookingFor(direction) {
   return REPAYMENT_BOOKING[direction] || REPAYMENT_BOOKING.lent;
 }
 
-export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
+/**
+ * @param {object} loan
+ * @param {string} [baseCurrency]
+ * @param {string} [today]  Tagesschluessel des Haushalts; die Liste reicht ihn
+ *                          einmal durch, statt ihn je Darlehen neu zu lesen.
+ */
+export function loanSummaryRow(loan, baseCurrency = budgetCurrency(), today = todayKey(db.get())) {
   const payments = db.get().prepare(`
     SELECT p.*, u.display_name AS creator_name,
            b.title AS entry_title,
@@ -780,7 +846,13 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
   // nicht der Durchschnitt total_amount/installment_count (die letzte Rate ist
   // kleiner). Sonst weicht der gebuchte Ratenbetrag von der angezeigten Monatsrate
   // ab. Die letzte Rate wird im Zahlungs-Default ohnehin über remaining_amount getrued.
-  const interest = loanInterestSummary(loan, payments);
+  // Wo der VERTRAG heute steht (#1706): die Rate, die im laufenden Monat des
+  // Haushalts faellig ist, mindestens die naechste ungebuchte. Wer Raten nicht
+  // nachgetragen hat, steht im Vertrag trotzdem dort, wo der Kalender ihn
+  // hinstellt - die Zinsbindung endet nicht spaeter, weil Buchungen fehlen.
+  const currentMonth = String(today ?? '').slice(0, 7);
+  const lagMonths = Math.max(0, monthsBetween(addMonths(loan.start_month, paidInstallments), currentMonth));
+  const interest = loanInterestSummary(loan, payments, paidInstallments + 1 + lagMonths);
   const installmentAmount = interest ? interest.monthly_payment : cents(loan.total_amount / loan.installment_count);
   // Restschuld: das noch offene Kapital, seit #954 aus den gebuchten Beträgen
   // nachgerechnet statt an der Planposition abgelesen. remainingAmount oben ist
@@ -804,6 +876,20 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
   const currency = loan.currency || baseCurrency;
   const rate = currency === baseCurrency ? 1 : loanRate(loan);
 
+  const nextDueMonth = !settled ? addMonths(loan.start_month, paidInstallments) : null;
+
+  // Restlaufzeit, die dem Geld folgt (#964); ohne Zinsteil ist die Planzahl die
+  // Antwort. Ein Zins-Darlehen ohne Prognose (die Rate deckt den Zins nicht)
+  // hat kein Enddatum - die Planzahl wuerde dort eines behaupten.
+  const forecastInstallments = forecastRemainingInstallments(loan, interest, paidInstallments);
+  const installmentsToGo = interest ? forecastInstallments : remainingInstallments;
+  // Gezaehlt wird ab dem spaeteren von naechster Faelligkeit und laufendem
+  // Monat: ein laufendes Darlehen mit Buchungsrueckstand endet nicht in der
+  // Vergangenheit. Die ungebuchten Raten stehen noch aus, also ab heute.
+  const projectedEndMonth = nextDueMonth && installmentsToGo > 0
+    ? addMonths(nextDueMonth, lagMonths + installmentsToGo - 1)
+    : null;
+
   return {
     ...loan,
     currency,
@@ -819,10 +905,19 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
     // Dieselbe Zahl, aber am Kontostand statt am Vertrag gerechnet (#964).
     // Ohne Zinsteil oder bei nicht amortisierender Rate bleibt sie null, und die
     // Oberflaeche zeigt dann allein die Planzahl.
-    remaining_installments_forecast: forecastRemainingInstallments(loan, interest, paidInstallments),
+    remaining_installments_forecast: forecastInstallments,
+    // Der Monat der letzten Rate (#1706), aus DERSELBEN Restlaufzeit gerechnet:
+    // die naechste Faelligkeit plus die noch faelligen Raten. Null, wenn nichts
+    // mehr offen ist oder die Restlaufzeit selbst keine Antwort hat.
+    projected_end_month: projectedEndMonth,
     is_settled: settled,
     next_installment_number: !settled ? paidInstallments + 1 : null,
-    next_due_month: !settled ? addMonths(loan.start_month, paidInstallments) : null,
+    next_due_month: nextDueMonth,
+    // Der Tag dazu (#1631), wenn das Darlehen einen nennt. Ohne Faelligkeitstag
+    // der Erste des Monats, sobald dieser vorbei ist (#1741), sonst null, und
+    // "Als bezahlt markieren" bleibt bei heute. Die Oberflaeche reicht den Wert
+    // als paid_date durch, statt selbst zu rechnen.
+    next_due_date: nextDueMonth ? nextInstallmentDate(nextDueMonth, loan.due_day, today) : null,
     interest,
     payments,
   };
@@ -834,7 +929,7 @@ export function loanSummaryRow(loan, baseCurrency = budgetCurrency()) {
 // payments steuert nur remaining_principal: die Restschuld folgt seit #954 den
 // gebuchten Beträgen (Sondertilgung senkt sie, Minderzahlung nicht), alle
 // anderen Kennzahlen bleiben planbasiert und vom Zahlungsfortschritt unabhängig.
-export function loanInterestSummary(loan, payments = []) {
+export function loanInterestSummary(loan, payments = [], currentInstallment = payments.length + 1) {
   if (!loan.interest_mode || loan.interest_mode === 'none' || loan.principal == null) return null;
   const calc = computeLoanSchedule({
     principal: loan.principal,
@@ -861,6 +956,16 @@ export function loanInterestSummary(loan, payments = []) {
       fixedPeriodMonths: loan.fixed_period_months,
       followupRate: loan.followup_rate,
     }, payments),
+    // Der Satz, der HEUTE gilt (#1706): nach ihm sortiert die Darlehensliste.
+    // Es ist der Satz der Rate, die im laufenden Monat faellig ist (mindestens
+    // der naechsten ungebuchten) - waehrend der Zinsbindung der feste, danach
+    // der Anschlusssatz, nach derselben Phasenregel wie der Tilgungsplan.
+    current_rate: rateForInstallment({
+      fixedRate: loan.fixed_rate,
+      interestMode: loan.interest_mode,
+      fixedPeriodMonths: loan.fixed_period_months,
+      followupRate: loan.followup_rate,
+    }, currentInstallment),
     remaining_after_binding: calc.remainingAfterBinding,
     binding_end_month: loan.fixed_period_months ? addMonths(loan.start_month, loan.fixed_period_months) : null,
   };
@@ -1058,15 +1163,48 @@ export function entryWithLoanMeta(id) {
 export const ACCOUNT_TYPE_KEYS = ['checking', 'savings', 'cash', 'credit', 'investment', 'other'];
 
 /**
+ * Eine Absage mit ihrem Grund (#1656, #1668).
+ *
+ * Der Satz bleibt, wie er war - er ist die zugesagte Antwort der API. Der Grund
+ * kommt dazu, damit die Seite die Absage am Feld und in der Sprache der
+ * Oberflaeche zeigen kann, statt den Satz des Servers durchzureichen. Wer hier
+ * einen Grund ergaenzt, ordnet ihn in `LOAN_REFUSALS` bzw. `BUDGET_REFUSALS`
+ * (public/pages/budget.js) ein; test:budget-ui haelt die Listen deckungsgleich.
+ *
+ * `extra` traegt, was der Satz der Oberflaeche nennen soll und nur der Server
+ * weiss - heute `max` (die Grenze, an der die Absage haengt).
+ */
+export const refusal = (reason, error, extra = {}) => ({ ...extra, reason, error });
+
+/** Die Fehler allgemeiner Validatoren (str/num/date/oneOf) unter einem Grund. */
+export const refusals = (reason, results) => results
+  .filter((result) => result.error)
+  .map((result) => refusal(reason, result.error));
+
+/**
+ * Absage aus einer Liste: alle Saetze wie bisher in `error`, Grund (und `max`)
+ * der ERSTEN in `reason` - ein Dialog zeigt ohnehin ein Feld nach dem anderen.
+ */
+export function refuse(res, errors, status = 400) {
+  const [first] = errors;
+  return res.status(status).json({
+    error: errors.map((e) => e.error).join(' '),
+    code: status,
+    reason: first.reason,
+    ...(first.max !== undefined ? { max: first.max } : {}),
+  });
+}
+
+/**
  * Prüft eine optionale Konto-Zuordnung aus dem Request.
  * @returns {{ value: number|null }|{ error: string }} value=null ⇒ keinem Konto zugeordnet.
  */
 export function validateAccountRef(raw) {
   if (raw === undefined || raw === null || raw === '') return { value: null };
   const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) return { error: 'account_id muss eine gültige Konto-ID sein.' };
+  if (!Number.isInteger(id) || id <= 0) return { error: 'account_id must be a valid account id.' };
   const row = db.get().prepare('SELECT id FROM budget_accounts WHERE id = ?').get(id);
-  if (!row) return { error: 'Konto nicht gefunden.' };
+  if (!row) return { error: 'Account not found.' };
   return { value: id };
 }
 

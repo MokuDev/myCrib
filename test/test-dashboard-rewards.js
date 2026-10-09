@@ -169,6 +169,38 @@ test('Eltern: alle Kinder ohne Platzierungsnummer, nach Namen, dazu die offenen 
   assert.equal(bars.length, 2, 'je Kind ein Fortschritt zum Ziel');
 });
 
+test('offene Geld-Anfragen (#1734) zaehlen im Hinweis mit, obwohl der Server sie getrennt fuehrt', () => {
+  // `pending` bleibt in der Antwort die Zahl der Praemien-Anfragen (zugesagte
+  // API), `moneyPending` steht daneben. Die Kachel sagt, wie viele warten.
+  const eltern = renderRewardsWidget({
+    view: 'approver', me: 1, standings: [leo(60), emma(30)], catalog: [KINO], pending: 2, moneyPending: 3,
+  }, '1x2');
+  assert.match(eltern, /dashboard\.rewardsPending\{"count":5\}/);
+  const nurGeld = renderRewardsWidget({
+    view: 'approver', me: 1, standings: [leo(60), emma(30)], catalog: [KINO], pending: 0, moneyPending: 1,
+  }, '1x2');
+  assert.match(nurGeld, /dashboard\.rewardsPending\{"count":1\}/, 'eine Abhebung allein ist ein Grund, hinzusehen');
+  const kind = renderRewardsWidget({
+    view: 'self', me: 7, standings: [emma(30)], catalog: [KINO], pending: 0, moneyPending: 1, recent: [],
+  }, '1x2');
+  assert.match(kind, /dashboard\.rewardsOwnPending\{"count":1\}/);
+  const wand = renderRewardsWidget({
+    view: 'family', me: 99, standings: [emma(30), leo(60)], catalog: [KINO], pending: 0, moneyPending: 4,
+  }, '1x2');
+  assert.doesNotMatch(wand, /rewardsPending/, 'und wer nicht freigibt, bekommt auch dafuer keinen Zaehler');
+});
+
+test('das Heute-Blatt nennt offene Geld-Anfragen mit, und weiter nur fuer den, der freigibt', async () => {
+  const { TODAY_SHEET_SOURCES } = await import('../public/utils/today-sheet.js');
+  const approvals = TODAY_SHEET_SOURCES.find((source) => source.id === 'approvals');
+  assert.ok(approvals, 'die Quelle der Freigaben');
+  const title = (rewards) => approvals.collect({ rewards })[0]?.title.replace(/&quot;/g, '"');
+  assert.match(title({ view: 'approver', pending: 1, moneyPending: 2 }), /"count":3/);
+  assert.match(title({ view: 'approver', pending: 0, moneyPending: 1 }), /"count":1/);
+  assert.equal(title({ view: 'approver', pending: 0, moneyPending: 0 }), undefined);
+  assert.equal(title({ view: 'self', pending: 0, moneyPending: 2 }), undefined, 'die eigene Bitte eines Kindes ist keine Freigabe');
+});
+
 test('Familie (Wand, Grosseltern): alle Kinder, aber kein Freigabe-Hinweis', () => {
   const html = renderRewardsWidget({
     view: 'family', me: 99, standings: [emma(30), leo(60)], catalog: [KINO], pending: 3,
@@ -263,6 +295,23 @@ test('Kennzahlkachel: das Kind sieht den eigenen Stand, niemand einen Spitzenrei
     'die Kachel kuert keinen Spitzenreiter');
 });
 
+test('Kennzahlkachel: offene Geld-Anfragen zaehlen mit - aber nur fuer den, der freigibt', () => {
+  global.window = { yuvomi: null };
+  const base = { budget: { entryCount: 3, balance: 100, income: 200 }, birthdays: [], pinnedNotes: [], health: {}, housekeeping: {} };
+  const tile = (rewards) => selectMetricTiles({ ...base, rewards }, 'EUR', new Set()).find((t) => t.id === 'rewards');
+  // Eltern: Praemien- und Geld-Anfragen zusammen, auch wenn nur Geld offen ist.
+  const both = tile({ view: 'approver', me: 1, standings: [leo(60), emma(30)], catalog: [KINO], pending: 1, moneyPending: 2 });
+  assert.match(both.value.replace(/&quot;/g, '"'), /dashboard\.rewardsPending\{"count":3\}/);
+  const onlyMoney = tile({ view: 'approver', me: 1, standings: [leo(60), emma(30)], catalog: [KINO], pending: 0, moneyPending: 1 });
+  assert.match(onlyMoney.value.replace(/&quot;/g, '"'), /dashboard\.rewardsPending\{"count":1\}/);
+  // Wer nicht freigibt, bekommt aus dem eigenen Geld-Zaehler keine Freigabe-Kachel:
+  // das Kind seine Punkte, die Sicht `family` (seit sie den eigenen Zaehler traegt) nichts.
+  const kid = tile({ view: 'self', me: 7, standings: [emma(45)], catalog: [KINO], pending: 0, moneyPending: 2 });
+  assert.doesNotMatch(`${kid?.value} ${kid?.note}`, /rewardsPending/);
+  const family = tile({ view: 'family', me: 99, standings: [emma(30), leo(60)], catalog: [KINO], pending: 0, moneyPending: 2 });
+  assert.ok(!family || !/rewardsPending/.test(`${family.value} ${family.note}`), 'die eigene Bitte ist keine Freigabe');
+});
+
 test('Verdrahtung: das Widget bekommt seine Groesse, und das Ziel kommt aus EINER Regel', () => {
   const dash = readFileSync(new URL('../public/pages/dashboard.js', import.meta.url), 'utf8');
   assert.ok(/rewards:\s*\(size\)\s*=>\s*renderRewardsWidget\(data\.rewards \?\? \{\}, size\)/.test(dash),
@@ -320,36 +369,66 @@ test('Belohnungen: nur der Katalog ist ein breiter Abschnitt, Uebersicht und Ver
   }
 });
 
-test('Belohnungen: der Kopf gibt im Katalog der Pille die volle Kante zurueck, sonst nicht', () => {
-  assert.equal(typeof rewardsPage.syncToolbarMeasure, 'function', 'syncToolbarMeasure fehlt im __test-Export');
-  const classes = new Set(['page-toolbar', 'page-toolbar--narrow', 'rewards-toolbar']);
-  const toolbar = { classList: { toggle: (c, on) => (on ? classes.add(c) : classes.delete(c)) } };
-  const container = { querySelector: (sel) => (sel === '.rewards-toolbar' ? toolbar : null) };
-  const s = rewardsPage.state;
-  const tabVorher = s.tab;
-  try {
-    for (const [tab, breit] of [['catalog', true], ['ledger', false], ['overview', false], ['catalog', true]]) {
-      s.tab = tab;
-      rewardsPage.syncToolbarMeasure(container);
-      assert.equal(classes.has('rewards-toolbar--wide'), breit, `${tab}: --wide ${breit ? 'gesetzt' : 'weg'}`);
-      assert.ok(classes.has('page-toolbar--narrow'),
-        `${tab}: --narrow bleibt - ohne passte die gekappte Reiterleiste in die Titelzeile (52px Sprung, gemessen)`);
-    }
-  } finally {
-    s.tab = tabVorher;
-  }
+// Critique R16 (2026-10-05): der Kopf folgte dem Reiter (`--wide` nur im
+// Katalog), die angedockte Pille sprang zwischen Katalog (1408) und Verlauf
+// (972) um 431px. Jetzt fuehrt die SEITE das breite Mass, und Uebersicht und
+// Verlauf fuellen es mit einer Seitenspalte.
+test('Belohnungen: eine Kante fuer alle Reiter - die Seite fuehrt das breite Mass, der Kopf schaltet nicht um', () => {
+  const page = readFileSync(new URL('../public/pages/rewards.js', import.meta.url), 'utf8');
   const css = readFileSync(new URL('../public/styles/rewards.css', import.meta.url), 'utf8')
     .replace(/\/\*[\s\S]*?\*\//g, '');
-  assert.match(css, /\.rewards-page \.rw-section:not\(\.rw-section--wide\)\s*\{[^}]*max-width:\s*var\(--page-measure/,
-    'jeder Abschnitt ausser dem Raster endet am Lesemass - samt Kopf');
-  assert.match(css, /\.rewards-toolbar--wide\s*\{[^}]*padding-inline-end:\s*var\(--page-inline-pad\)/);
-  assert.match(css, /\.rewards-toolbar--wide\s*\{[^}]*--page-measure:\s*100%/,
-    'der breite Kopf erklaert sein Mass als Spalte - sonst behauptet er das Lesemass der Seite, an dem er nicht endet (Sonde 19)');
-  assert.match(css, /\.rewards-toolbar--wide::after\s*\{[^}]*content:\s*none/, 'kein Rest-Slot, der die Pille zurueckschoebe');
-  assert.match(css, /\.rewards-toolbar--wide > \.rewards-tabs\s*\{[^}]*max-width:\s*none/, 'die Reiterleiste bricht weiter um');
-  const page = readFileSync(new URL('../public/pages/rewards.js', import.meta.url), 'utf8');
-  assert.match(page, /async function renderCurrentTab\(container\) \{[\s\S]{0,120}syncToolbarMeasure\(container\);/,
-    'jeder Reiterwechsel fuehrt den Kopf mit');
+  assert.match(page, /class="rewards-page app-page app-page--dashboard app-page--columns" data-composition="dashboard"/,
+    'die Seitenwurzel fuehrt das breite Mass und ist der Container der Spalten');
+  assert.match(page, /<header class="page-toolbar page-toolbar--narrow rewards-toolbar">/,
+    '--narrow bleibt: der Kopf endet am Mass der Seite, in jedem Reiter am selben');
+  assert.equal(rewardsPage.syncToolbarMeasure, undefined, 'kein Umschalter am Kopf mehr');
+  assert.doesNotMatch(page, /rewards-toolbar--wide/, 'der Kopf-Modifier je Reiter ist weg');
+  assert.doesNotMatch(css, /rewards-toolbar--wide/, 'und seine Regeln auch');
+  assert.match(css, /\.rewards-page \.rw-section\s*\{[^}]*max-width:\s*var\(--page-measure/,
+    'jeder Abschnitt endet am Mass der Seite - auch das Katalograster');
+});
+
+test('Belohnungen: Uebersicht und Verlauf stehen im Spaltenraster, die Seitenspalte nimmt nur vorhandene Daten', () => {
+  const s = rewardsPage.state;
+  const vorher = { user: s.user, overview: s.overview, catalog: s.catalog, ledger: s.ledger, redemptions: s.redemptions, recentLedger: s.recentLedger };
+  const buchung = { id: 1, type: 'earn', delta: 5, reason: 'Zimmer', user_name: 'Emma', created_at: '2026-09-20' };
+  try {
+    s.user = { id: 1, role: 'admin' };
+    s.overview = { me: 1, balances: [{ id: 2, display_name: 'Emma', balance: 30 }] };
+    s.catalog = [{ id: 7, name: 'Kinoabend', cost: 100, is_active: 1 }];
+    s.ledger = [buchung];
+    s.redemptions = [];
+
+    // Uebersicht mit Buchungen: Punktestaende links, die letzten Buchungen rechts.
+    s.recentLedger = [buchung];
+    let el = markupEl();
+    rewardsPage.renderOverview(el);
+    const [main, rail] = el.html.split('<div class="page-columns__rail">');
+    assert.match(main, /<div class="page-columns__main">[\s\S]*rw-standings/, 'die Punktestaende stehen in der Listenspalte');
+    assert.ok(rail, 'mit Buchungen gibt es eine Seitenspalte');
+    assert.match(rail, /class="section-title-link rw-section__more"[^>]*>rewards\.tabLedger/, 'der Abschnittstitel ist der Weg in den Verlauf');
+    assert.match(rail, /<ul class="rw-ledger row-carrier">[\s\S]*list-row rw-ledger-row/, 'derselbe Zeilenbaustein wie im Verlauf');
+
+    // Ohne Antwort (null) und ohne Buchung ([]) entfaellt die Spalte - kein
+    // Leerzustand, der "keine Buchungen" behauptet, wenn die Abfrage scheiterte.
+    for (const leer of [null, []]) {
+      s.recentLedger = leer;
+      el = markupEl();
+      rewardsPage.renderOverview(el);
+      assert.match(el.html, /page-columns__main/);
+      assert.doesNotMatch(el.html, /page-columns__rail/, `recentLedger=${JSON.stringify(leer)}: keine Seitenspalte`);
+    }
+
+    // Verlauf: Buchungen links, Punktestaende in Kurzform rechts.
+    el = markupEl();
+    rewardsPage.renderLedger(el);
+    const [lMain, lRail] = el.html.split('<div class="page-columns__rail">');
+    assert.match(lMain, /<ul class="rw-ledger row-carrier">/, 'die Buchungen stehen in der Listenspalte');
+    assert.match(lRail ?? '', /rw-standing--compact[\s\S]*Emma/, 'die Punktestaende stehen in der Seitenspalte');
+    assert.doesNotMatch(lRail ?? '', /rw-redeem-open|rw-progress__track/, 'Kurzform: kein Fortschritt, kein Einloesen');
+  } finally {
+    Object.assign(s, vorher);
+  }
 });
 
 test('Belohnungen: der Einrichtungsschritt „Praemien" wechselt wirklich in den Katalog', () => {
@@ -383,7 +462,7 @@ test('Belohnungen: eine Buchung ohne Grund zeigt den Namen ihres Typs, keine lee
       s.ledger = [{ id: 1, delta: 5, user_name: 'Emma', created_at: '2026-09-20', ...row }];
       const el = markupEl();
       rewardsPage.renderLedger(el);
-      return el.html.match(/<p class="rw-ledger-row__reason">([^<]*)<\/p>/)?.[1];
+      return el.html.match(/<p class="list-row__name rw-ledger-row__reason">([^<]*)<\/p>/)?.[1];
     };
     const named = reasonOf({ type: 'earn', reason: 'Zimmer', task_id: 7 });
     assert.equal(named, 'Zimmer');

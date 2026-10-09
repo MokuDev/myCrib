@@ -18,7 +18,11 @@ import { SESSION_MAX_AGE_MS, sessionCookieRefreshDue } from './utils/session-lif
 import { collectErrors, date as validateDate, str, MAX_SHORT, MAX_TITLE } from './middleware/validate.js';
 import { createLogger } from './logger.js';
 import { memberEmail } from './services/member-email.js';
-import { accessScopeSql, householdMemberSql } from './services/household-members.js';
+import {
+  accessScopeSql, activeAccountSql, deactivatedAtColumnSql, householdMemberSql, isActiveAccount,
+  memberOrderSql, memberPositionSql,
+} from './services/household-members.js';
+import { RemovalRefused, removeUser } from './services/user-removal.js';
 import {
   DISPLAY_COOKIE, DISPLAY_SCOPES, authenticateDisplayDevice, displayCookieIdentity, displayCookieOptions,
   displayMayRead, displayTokenFromRequest, isDisplayAccount, markDisplayCookieRefreshed,
@@ -33,6 +37,8 @@ import {
   isSsoOnlyAccount,
   OIDC_PASSWORD_SENTINEL,
   getConfig as getOidcConfig,
+  exchangeAuthorizationCode,
+  describeOidcError,
 } from './services/oidc.js';
 import { emailService as defaultEmailService } from './services/email.js';
 import { passwordResetService as defaultResetService } from './services/password-reset.js';
@@ -100,6 +106,35 @@ function householdSize(database) {
 }
 
 /**
+ * Die Namen, aus denen der Client gleiche Initialen aufloest (#1464,
+ * public/utils/initials.js): Linda Johnson und Leo Johnson tragen sonst beide
+ * "LJ". Die Liste reist an jeder Auth-Antwort mit, wie `householdSize`, damit
+ * JEDE Avatar-Scheibe dieselbe Antwort gibt - auch die eines Aufrufers, der nur
+ * einen Namen in der Hand hat.
+ *
+ * WER DARIN STEHT: jedes Konto, das `/auth/users` zeigt, also auch Hauspersonal
+ * und Gaeste (sie stehen als Scheibe neben Mitgliedern), aber kein Wandtablett.
+ * EHEMALIGE BLEIBEN DARIN: fiele ein deaktiviertes Konto heraus, aenderten sich
+ * die Zeichen eines aktiven Mitglieds in dem Moment, in dem ein anderes geht -
+ * und der Ehemalige steht weiter an alten Eintraegen.
+ *
+ * WER SIE NICHT BEKOMMT: ein Gast geteilter Ausgaben. Er erreicht ausserhalb
+ * jenes Moduls keine Seite (Gast-Sperre in server/index.js), und dort steht
+ * keine Avatar-Scheibe - die Namen des Haushalts gehen ihn nichts an.
+ */
+const INITIALS_ROSTER_SQL = `
+  SELECT display_name FROM users
+  WHERE NOT EXISTS (SELECT 1 FROM display_accounts da WHERE da.user_id = users.id)
+  ORDER BY id
+`;
+
+function initialsRoster(database, userId) {
+  const guest = database.prepare('SELECT 1 FROM split_expense_guest_users WHERE user_id = ?').get(userId);
+  if (guest) return [];
+  return database.prepare(INITIALS_ROSTER_SQL).all().map((row) => row.display_name);
+}
+
+/**
  * Welche Module ausser diesem Konto noch jemand lesen kann - fuer die
  * Schutzsteuerungen (Sichtbarkeit, Sperre, Freigabe), nicht fuer die Anzeige.
  *
@@ -128,6 +163,8 @@ function othersCanRead(database, userId) {
   const others = database.prepare(`
     SELECT u.id, u.role, u.family_role, ${accessScopeSql('u')} AS access_scope FROM users u
     WHERE u.id != ? AND ${accessScopeSql('u')} IN ('family', 'display')
+      -- Ein Ehemaliger liest nichts mehr (#1381) und haelt keine Schutzfelder offen.
+      AND ${activeAccountSql('u')}
   `).all(userId);
   const resolved = others.map((other) => resolvePermissions(database, other, {
     isDisplay: other.access_scope === 'display',
@@ -159,6 +196,9 @@ const USER_PUBLIC_COLUMNS = `
   changelog_seen_version,
   changelog_seen_latest,
   ${accessScopeSql('users')} AS access_scope,
+  ${deactivatedAtColumnSql('users')},
+  ${memberPositionSql('users')} AS sort_order,
+  ${householdMemberSql('users')} AS is_household_member,
   created_at,
   (SELECT phone FROM contacts WHERE contacts.family_user_id = users.id LIMIT 1) AS phone,
   (SELECT email FROM contacts WHERE contacts.family_user_id = users.id LIMIT 1) AS email,
@@ -461,6 +501,13 @@ function publicApiToken(row) {
     scopes: parseScopes(row.scopes),
     expires_at: row.expires_at,
     revoked_at: row.revoked_at,
+    // Das Urteil des SERVERS, ob das Token noch gilt (D#1672, Codex zu #1681).
+    // Die Oberflaeche teilt ihre Liste danach - entschiede sie mit der Uhr des
+    // Browsers, hielte ein vorgehendes Geraet ein Token fuer abgelaufen, boete
+    // nur "Entfernen" an, bekaeme 409 und koennte es auch nicht widerrufen.
+    // `usable` kommt aus `apiTokenUsableSql()`; wo eine Abfrage es nicht
+    // mitliefert, fehlt das Feld, statt etwas zu behaupten.
+    ...(row.usable === undefined ? {} : { active: row.usable === 1 }),
     last_used_at: row.last_used_at,
     created_at: row.created_at,
   };
@@ -554,6 +601,21 @@ function publicUser(row) {
     email: row.email ?? null,
     birth_date: row.birth_date ?? null,
     created_at: row.created_at,
+    // Seit wann dieses Konto ein ehemaliges ist (#1381), sonst `null`. Die
+    // Zeile bleibt, damit Urheberschaft und Salden bleiben; die Oberflaeche
+    // markiert sie, statt sie zu verbergen.
+    deactivated_at: row.deactivated_at ?? null,
+    // Position in der Haushaltsreihenfolge (#1644), `null` fuer ein nicht
+    // platziertes Mitglied und fuer jedes Konto, das kein Mitglied ist. Kommt
+    // aus `memberPositionSql()` und nie als rohe Spalte: der Vergleich im
+    // Browser (public/utils/member-order.js) liest dieses Feld.
+    sort_order: row.sort_order ?? null,
+    // Ob dieses Konto ein Haushaltsmitglied ist - die Menge, die
+    // `/family/members` zeigt und die allein eine Position haben kann. Die
+    // Familien-Einstellungen ordnen genau diese Zeilen; `sort_order: null`
+    // sagt es nicht, das traegt auch ein unplatziertes Mitglied. Unbedingt,
+    // weil auch die Antworten auf Anlegen und Aendern in dieser Liste landen.
+    is_household_member: Boolean(row.is_household_member),
     // Ob DIESES Konto den Onboarding-Rundgang noch braucht - jede Abfrage
     // ueber USER_PUBLIC_COLUMNS traegt die Spalte, daher hier unbedingt statt
     // ueber die `!== undefined`-Bedingung der beiden Felder darunter.
@@ -748,6 +810,7 @@ function assertSsoAdminWouldRemain(targetUserId, nextRole) {
   const other = db.get().prepare(`
     SELECT 1 FROM users
     WHERE oidc_sub IS NOT NULL AND role = 'admin' AND id != ?
+      AND ${activeAccountSql('users')}
     LIMIT 1
   `).get(targetUserId);
   if (other) return null;
@@ -797,6 +860,21 @@ function invalidateUserSessions(userId, exceptSid, database = db.get()) {
   return ended;
 }
 
+/**
+ * Wann ein API-Token noch gilt: nicht widerrufen und nicht abgelaufen.
+ *
+ * EINE Schreibweise fuer zwei Stellen (D#1672): die Anmeldung laesst genau
+ * diese Tokens durch, und `POST /api-tokens/:id/remove` loescht genau die
+ * anderen. Stuenden dort zwei Fassungen, koennte eine davon ein Token fuer
+ * tot halten, mit dem sich noch jemand anmeldet - und die Zeile samt
+ * Widerrufszeitpunkt waere weg, waehrend das Credential noch gilt.
+ * @param {string} alias - Tabellenalias von `api_tokens` in der Abfrage
+ */
+function apiTokenUsableSql(alias) {
+  return `(${alias}.revoked_at IS NULL
+      AND (${alias}.expires_at IS NULL OR ${alias}.expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now')))`;
+}
+
 function authenticateApiToken(req) {
   const token = extractApiToken(req);
   if (!token) return null;
@@ -811,10 +889,19 @@ function authenticateApiToken(req) {
       subject.display_name AS subject_name
     FROM api_tokens t
     JOIN users subject ON subject.id = COALESCE(t.subject_user_id, t.created_by)
+      -- EIN TOKEN HANDELT ALS SEIN SUBJEKT, UND EIN EHEMALIGER HANDELT NICHT
+      -- MEHR (#1381). Das Deaktivieren widerruft die Tokens des Kontos in
+      -- derselben Transaktion; diese Zeile haelt, was der Widerruf verspricht,
+      -- auch fuer eine Token-Zeile, die danach entsteht oder aus einer
+      -- Sicherung zurueckkommt.
+      AND ${activeAccountSql('subject')}
     JOIN users creator ON creator.id = t.created_by
+      -- Dasselbe fuer den AUSSTELLER: den Klartext eines Tokens sieht nur er,
+      -- also ist ein Token eines Ehemaligen ein Geheimnis in seiner Hand, auch
+      -- wenn es als ein anderes Konto handelt.
+      AND ${activeAccountSql('creator')}
     WHERE t.token_hash = ?
-      AND t.revoked_at IS NULL
-      AND (t.expires_at IS NULL OR t.expires_at > strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      AND ${apiTokenUsableSql('t')}
   `).get(tokenHash);
   if (!row) return null;
 
@@ -931,6 +1018,25 @@ function requireAuth(req, res, next) {
     // holen. Der Request selbst bleibt abgewiesen; erst der naechste kommt ohne
     // das tote Cookie und wird normal behandelt.
     res.clearCookie(DISPLAY_COOKIE, displayCookieIdentity());
+    return res.status(401).json({ error: 'Not authenticated.', code: 401 });
+  }
+
+  // EINE SITZUNG EINES EHEMALIGEN GILT NICHT, AUCH WENN SIE NOCH DASTEHT (#1381).
+  // Das Deaktivieren loescht die Sitzungen des Kontos in seiner Transaktion.
+  // Ein Request, der in diesem Moment noch lief und seine Sitzung veraendert
+  // hat, schreibt sie am Ende aber per `INSERT OR REPLACE` zurueck (siehe
+  // `refreshSessionCookieIfDue`). Bei einem geloeschten Konto zeigt so eine
+  // Zeile ins Leere; bei einem deaktivierten zeigte sie auf ein Konto, das es
+  // noch gibt - und waere bis zu ihrem Ablauf ein Zugang. Deshalb die eine
+  // Abfrage je Request, auf dem Primaerschluessel.
+  //
+  // UND DIE SITZUNG EINES GELOESCHTEN KONTOS GILT EBENSO WENIG. "Zeigt ins
+  // Leere" stimmt nur fuer Routen, die die Zeile nachschlagen: die Sitzung
+  // traegt Konto-Id UND Rolle, und `requireAdmin` liest die Rolle aus ihr. Die
+  // zurueckgeschriebene Sitzung eines geloeschten Administrators kaeme sonst
+  // weiter an jede Admin-Route. Gefragt wird deshalb "ist dieses Konto aktiv",
+  // nicht "ist es deaktiviert" - ein Konto, das es nicht gibt, ist es nicht.
+  if (req.session && req.session.userId && !isActiveAccount(req.session.userId, { db: db.get() })) {
     return res.status(401).json({ error: 'Not authenticated.', code: 401 });
   }
 
@@ -1081,6 +1187,11 @@ function canSignIn(database, userId) {
   // gesperrt und beim OIDC-Rueckweg nicht. Diese eine Zeile schliesst beide
   // Wege und die Konten-Verknuepfung per E-Mail zugleich.
   if (isDisplayAccount(userId, { db: database })) return false;
+  // Ein Ehemaliger (#1381). Dieselbe Stelle aus demselben Grund: Passwort,
+  // SSO-Rueckweg, E-Mail-Verknuepfung und zweiter Faktor fragen alle hier. Die
+  // Zeile samt `oidc_sub` bleibt, damit der SSO-Rueckweg dieses Konto FINDET
+  // und abweist, statt derselben Person ein Ersatzkonto anzulegen.
+  if (!isActiveAccount(userId, { db: database })) return false;
   return true;
 }
 
@@ -1123,6 +1234,7 @@ function loginPayload(req, user) {
     // stuende ein Solo-Haushalt bis zum naechsten Kaltstart wieder voller
     // Familienfelder.
     householdSize: householdSize(db.get()),
+    initialsRoster: initialsRoster(db.get(), user.id),
     othersCanRead: othersCanRead(db.get(), user.id),
     csrfToken: req.session.csrfToken,
   };
@@ -1200,10 +1312,13 @@ function ssoLinkCandidates(database, address, { excludeUserId = null } = {}) {
  *   haben.
  * Rückgabe dann `{ refused, accountIds }` statt einer users-Zeile.
  *
- * Ausnahme: `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM=true` — Opt-in für IdPs, die
- * den Claim zwar weglassen, aber nur verifizierte Adressen ausgeben (z. B. ältere
- * Authentik-Deployments). Nur setzen, wenn der IdP vollständig unter eigener
- * Kontrolle steht und keine unverifizierten E-Mails zulässt.
+ * Ausnahme: `OIDC_TRUST_EMAIL_WITHOUT_VERIFIED_CLAIM=true` - Opt-in für IdPs, die
+ * den Claim zwar weglassen, aber nur verifizierte Adressen ausgeben. Nur setzen,
+ * wenn der IdP vollständig unter eigener Kontrolle steht und keine
+ * unverifizierten E-Mails zulässt. Das Opt-in deckt NUR den fehlenden Claim: ein
+ * ausdrückliches `email_verified: false` verknüpft nie. Authentik ist dafür kein
+ * Beispiel - sein Standard-Mapping sendete bis 2025.10 `true` und sendet seither
+ * `false`, weggelassen hat es den Claim nicht (#1780).
  *
  * Mit `OIDC_ALLOW_SIGNUP=false` entfällt ausschließlich der letzte Schritt, das
  * Anlegen (#654); die Rückgabe ist dann `null`. Erkennen und Verknüpfen laufen
@@ -1555,7 +1670,7 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
 
     if (!canSignIn(db.get(), user.id)) {
-      log.warn('Login blocked for housekeeping staff account', { ip: req.ip, username });
+      log.warn('Login blocked: this account cannot sign in', { ip: req.ip, username });
       return res.status(403).json({ error: 'This account cannot sign in.', code: 403, reason: 'account_cannot_sign_in' });
     }
 
@@ -1707,8 +1822,12 @@ export function buildResetRoutes(targetRouter, {
     // verraten, welche Konten per SSO gefuehrt werden. Geprueft wird erst
     // hier, nach dem Warten auf einen vorigen Versand: der Zustand kann sich
     // in der Zwischenzeit geaendert haben.
+    //
+    // Und ein Ehemaliger bekommt keinen Link (#1381): ebenso still, aus
+    // demselben Grund.
     if (!(isPasswordLoginEnabled(getDb()) || isSplitExpenseGuest(userId, getDb()))
         || !hasResettablePassword(userId)
+        || !isActiveAccount(userId, { db: getDb() })
         || !emailService.isConfigured()) {
       return;
     }
@@ -1771,8 +1890,12 @@ export function buildResetRoutes(targetRouter, {
       // haben (#847). Ein noch gueltiger Token darf diese Entscheidung nicht
       // ueberholen. Bewusst dieselbe Meldung wie ein ungueltiger Token: der
       // Unterschied ginge sonst an jemanden, der das Konto nicht besitzt.
+      // Dasselbe fuer ein Konto, das zwischen Ausstellen und Einloesen
+      // deaktiviert wurde (#1381). Das Deaktivieren loescht seine Reset-Tokens;
+      // diese Zeile haelt es auch fuer eines, das danach noch auftaucht.
       if ((!isPasswordLoginEnabled(getDb()) && !isSplitExpenseGuest(userId, getDb()))
-          || !hasResettablePassword(userId)) {
+          || !hasResettablePassword(userId)
+          || !isActiveAccount(userId, { db: getDb() })) {
         resetService.consumeToken(token);
         return res.status(400).json({ error: 'Invalid or expired token.', code: 400 });
       }
@@ -2165,14 +2288,19 @@ async function beginOidcFlow(req, config, extra = {}) {
   const codeVerifier  = oidcClient.randomPKCECodeVerifier();
   const codeChallenge = await oidcClient.calculatePKCECodeChallenge(codeVerifier);
 
-  req.session.oidc = { state, nonce, codeVerifier, ...extra };
+  // Der Wert, den die Authorize-Anfrage traegt, wird EINMAL gelesen und mit dem
+  // Lauf festgehalten: der Code-Tausch muss ihn Zeichen fuer Zeichen
+  // wiederholen (RFC 6749, 4.1.3) und leitet ihn deshalb nicht neu her (#1768).
+  const redirectUri = process.env.OIDC_REDIRECT_URI;
+
+  req.session.oidc = { state, nonce, codeVerifier, redirectUri, ...extra };
 
   await new Promise((resolve, reject) =>
     req.session.save(err => (err ? reject(err) : resolve()))
   );
 
   return oidcClient.buildAuthorizationUrl(config, {
-    redirect_uri:          process.env.OIDC_REDIRECT_URI,
+    redirect_uri:          redirectUri,
     scope:                 'openid email profile',
     state,
     nonce,
@@ -2189,7 +2317,7 @@ router.get('/oidc/start', refuseWhileRestoring, async (req, res) => {
     }
     res.redirect(await beginOidcFlow(req, config));
   } catch (err) {
-    log.error('OIDC start error:', err);
+    log.error('OIDC start error:', describeOidcError(err));
     res.status(500).json({ error: 'OIDC initialization failed.', code: 500 });
   }
 });
@@ -2238,7 +2366,7 @@ router.post('/oidc/link/start', requireAuth, csrfMiddleware, async (req, res) =>
 
     res.json({ url: await beginOidcFlow(req, config, { linkUserId: req.authUserId }) });
   } catch (err) {
-    log.error('OIDC link start error:', err);
+    log.error('OIDC link start error:', describeOidcError(err));
     res.status(500).json({ error: 'OIDC initialization failed.', code: 500 });
   }
 });
@@ -2286,16 +2414,28 @@ router.get('/oidc/callback', refuseWhileRestoring, async (req, res) => {
       return res.redirect('/login?error=oidc_state_mismatch');
     }
 
-    // Aktuelle Callback-URL: Host/Schema aus der registrierten redirect_uri (zuverlässig
-    // hinter Reverse-Proxy), Query (code, state, …) aus der eingehenden Anfrage.
-    const currentUrl = new URL(req.originalUrl, process.env.OIDC_REDIRECT_URI);
+    // Ein Lauf ohne festgehaltene Redirect-URI (vor dem Update begonnen) wird
+    // abgewiesen statt mit einem neu hergeleiteten Wert getauscht: der Anbieter
+    // vergleicht mit dem Wert der Authorize-Anfrage, und raten hiesse, genau
+    // den Fehler aus #1768 zu wiederholen. Ein zweiter Klick startet neu.
+    if (typeof stored.redirectUri !== 'string' || !stored.redirectUri) {
+      log.warn('OIDC callback: Session-State ohne redirect_uri (vor dem Update begonnen)');
+      return res.redirect('/login?error=oidc_state_mismatch');
+    }
 
-    // authorizationCodeGrant validiert state, tauscht den Code gegen Tokens und prüft
-    // Signatur, iss, aud, exp sowie nonce (über expectedNonce) am ID-Token.
-    const tokens = await oidcClient.authorizationCodeGrant(config, currentUrl, {
-      expectedState:    stored.state,
-      expectedNonce:    stored.nonce,
-      pkceCodeVerifier: stored.codeVerifier,
+    // Der Tausch sendet die redirect_uri der Authorize-Anfrage woertlich; von
+    // der eingehenden Anfrage kommt nur die Query (code, state, ...), weder
+    // Pfad noch Host oder Schema (#1768). Er validiert state, tauscht den Code
+    // gegen Tokens und prüft Signatur, iss, aud, exp sowie nonce am ID-Token.
+    const queryStart = req.originalUrl.indexOf('?');
+    const tokens = await exchangeAuthorizationCode(config, {
+      redirectUri: stored.redirectUri,
+      query:       queryStart === -1 ? '' : req.originalUrl.slice(queryStart),
+      checks: {
+        expectedState:    stored.state,
+        expectedNonce:    stored.nonce,
+        pkceCodeVerifier: stored.codeVerifier,
+      },
     });
 
     // Identität aus dem validierten ID-Token; fetchUserInfo erzwingt sub-Abgleich
@@ -2308,10 +2448,13 @@ router.get('/oidc/callback', refuseWhileRestoring, async (req, res) => {
     // begann, und der linkUserId stammt aus derselben signierten Session wie
     // der state.
     if (stored.linkUserId) {
-      const result = linkOidcAccount(db.get(), stored.linkUserId, {
-        sub: claims.sub,
-        iss: claims.iss,
-      });
+      // Der Lauf begann angemeldet; bis zum Rueckweg kann das Konto deaktiviert
+      // worden sein (#1381). Ein Konto, das sich nicht anmelden darf, bekommt
+      // keine neue Bindung - `user_gone` ist dieselbe Antwort wie fuer ein
+      // Konto, das es nicht mehr gibt.
+      const result = canSignIn(db.get(), stored.linkUserId)
+        ? linkOidcAccount(db.get(), stored.linkUserId, { sub: claims.sub, iss: claims.iss })
+        : { ok: false, reason: 'user_gone' };
       if (!result.ok) {
         log.warn(`OIDC link rejected for user ${stored.linkUserId}: ${result.reason}`);
       }
@@ -2389,7 +2532,7 @@ router.get('/oidc/callback', refuseWhileRestoring, async (req, res) => {
 
     res.redirect('/');
   } catch (err) {
-    log.error('OIDC callback error:', err);
+    log.error('OIDC callback error:', describeOidcError(err));
     res.redirect('/login?error=oidc_failed');
   }
 });
@@ -2530,6 +2673,7 @@ router.get('/me', requireAuth, (req, res) => {
         user: publicUser(user),
         permissions: clientPermissions(db.get(), user),
         householdSize: householdSize(db.get()),
+        initialsRoster: initialsRoster(db.get(), user.id),
         othersCanRead: othersCanRead(db.get(), user.id),
       });
     }
@@ -2571,6 +2715,7 @@ router.get('/me', requireAuth, (req, res) => {
       // (`canSignIn()` weist es ab). Sie bleiben deshalb beim Standard `false`.
       permissions: clientPermissions(db.get(), user, { isDisplay: req.authMethod === 'display' }),
       householdSize: householdSize(db.get()),
+      initialsRoster: initialsRoster(db.get(), user.id),
       othersCanRead: othersCanRead(db.get(), user.id),
       csrfToken: req.session.csrfToken,
     });
@@ -2660,6 +2805,15 @@ router.post('/2fa/verify', twoFactorLimiter, async (req, res) => {
     const pending = consumePendingTwoFactor(req);
     if (!pending) {
       return res.status(401).json({ error: 'No pending sign-in.', code: 401 });
+    }
+
+    // Zwischen Passwort und Code kann das Konto deaktiviert worden sein
+    // (#1381). `setupAuthSession` wiese es ohnehin ab - aber erst NACH der
+    // Pruefung, die einen Wiederherstellungscode verbraucht, und als 500.
+    // Hier ist es dieselbe Absage wie beim Passwort, vor jedem Verbrauch.
+    if (!canSignIn(db.get(), pending.userId)) {
+      delete req.session.pendingTwoFactor;
+      return res.status(403).json({ error: 'This account cannot sign in.', code: 403, reason: 'account_cannot_sign_in' });
     }
 
     const code = String(req.body?.code || '');
@@ -2833,7 +2987,7 @@ router.post('/2fa/recovery-codes', requireAuth, csrfMiddleware, twoFactorLimiter
  */
 router.get('/2fa/overview', requireAuth, requireAdmin, (_req, res) => {
   try {
-    res.json({ data: twoFactor.householdOverview(db.get()), required: twoFactor.isRequiredForHousehold(db.get()) });
+    res.json({ data: twoFactor.householdOverview(db.get(), memberOrderSql('u')), required: twoFactor.isRequiredForHousehold(db.get()) });
   } catch (err) {
     log.error('2FA overview error:', err);
     res.status(500).json({ error: 'Internal server error.', code: 500 });
@@ -2899,6 +3053,17 @@ router.get('/users', requireAuth, (req, res) => {
     // und einen Geburtstag anlegen wuerde. Ein Display ist kein Konto, das man
     // hier verwaltet: es hat seine eigene Seite, auf der es angelegt, gekoppelt
     // und widerrufen wird.
+    // EHEMALIGE STEHEN WEITER HIER, ANS ENDE SORTIERT UND MIT `deactivated_at`
+    // (#1381). Diese Liste benennt Personen, die ein Datensatz schon speichert
+    // - den Zustaendigen einer alten Aufgabe, den Ersteller eines Termins -,
+    // und die Verwaltung muss sehen, wen sie deaktiviert hat. Auswaehlen laesst
+    // sich ein Ehemaliger nirgends: jede Auswahl liest `/family/members`.
+    //
+    // INNERHALB DER AKTIVEN GILT DIE HAUSHALTSREIHENFOLGE (#1644). Stundenplan,
+    // Uebersicht und Kalender lesen ihre Personen aus dieser Liste; sortierte
+    // sie nach dem Namen, stuenden dieselben fuenf Menschen dort anders als in
+    // jeder Auswahl. Personal und Gaeste haben keine Position und stehen mit
+    // den unplatzierten Mitgliedern im Alphabet.
     const users = isAdmin
       ? db.get().prepare(`
           SELECT ${USER_PUBLIC_COLUMNS},
@@ -2906,14 +3071,14 @@ router.get('/users', requireAuth, (req, res) => {
                  (password_hash = ?) AS sso_only
           FROM users
           WHERE NOT EXISTS (SELECT 1 FROM display_accounts da WHERE da.user_id = users.id)
-          ORDER BY display_name
+          ORDER BY ${activeAccountSql('users')} DESC, ${memberOrderSql('users')}
         `).all(OIDC_PASSWORD_SENTINEL)
       : db.get().prepare(`
           SELECT ${USER_PUBLIC_COLUMNS},
                  EXISTS(SELECT 1 FROM housekeeping_workers hw WHERE hw.user_id = users.id) AS is_worker
           FROM users
           WHERE NOT EXISTS (SELECT 1 FROM display_accounts da WHERE da.user_id = users.id)
-          ORDER BY display_name
+          ORDER BY ${activeAccountSql('users')} DESC, ${memberOrderSql('users')}
         `).all();
     res.json({ data: users.map(publicUser) });
   } catch (err) {
@@ -2925,7 +3090,8 @@ router.get('/users', requireAuth, (req, res) => {
 router.get('/api-tokens', requireAuth, requireAdmin, (req, res) => {
   try {
     const rows = db.get().prepare(`
-      SELECT t.*, creator.display_name AS creator_name,
+      SELECT t.*, ${apiTokenUsableSql('t')} AS usable,
+        creator.display_name AS creator_name,
         subject.id AS effective_subject_user_id,
         subject.display_name AS subject_name
       FROM api_tokens t
@@ -2941,7 +3107,9 @@ router.get('/api-tokens', requireAuth, requireAdmin, (req, res) => {
       SELECT u.id, u.username, u.display_name
       FROM users u
       WHERE ${accessScopeSql('u')} = 'family'
-      ORDER BY u.display_name
+        -- Kein Token fuer einen Ehemaligen (#1381): POST weist ihn ebenfalls ab.
+        AND ${activeAccountSql('u')}
+      ORDER BY ${memberOrderSql('u')}
     `).all();
     res.json({ data: rows.map(publicApiToken), subjects });
   } catch (err) {
@@ -3015,6 +3183,13 @@ router.post('/api-tokens', requireAuth, requireAdmin, csrfMiddleware, (req, res)
     if (isDisplayAccount(subjectUserId, { db: db.get() })) {
       return res.status(400).json({ error: 'A display cannot be an API token subject.', code: 400 });
     }
+    // Und ein Ehemaliger handelt nicht mehr (#1381): die Anmeldung wiese das
+    // Token ohnehin ab, also entsteht es gar nicht erst.
+    if (!isActiveAccount(subjectUserId, { db: db.get() })) {
+      return res.status(400).json({
+        error: 'A deactivated account cannot be an API token subject.', code: 400, reason: 'account_deactivated',
+      });
+    }
 
     const result = db.get().prepare(`
       INSERT INTO api_tokens (name, token_hash, token_prefix, created_by, subject_user_id, expires_at, scopes)
@@ -3022,7 +3197,8 @@ router.post('/api-tokens', requireAuth, requireAdmin, csrfMiddleware, (req, res)
     `).run(name, tokenHash, tokenPrefix, req.authUserId, subjectUserId, normalizedExpiresAt, serializedScopes);
 
     const row = db.get().prepare(`
-      SELECT t.*, creator.display_name AS creator_name,
+      SELECT t.*, ${apiTokenUsableSql('t')} AS usable,
+        creator.display_name AS creator_name,
         subject.id AS effective_subject_user_id,
         subject.display_name AS subject_name
       FROM api_tokens t
@@ -3053,6 +3229,47 @@ router.delete('/api-tokens/:id', requireAuth, requireAdmin, csrfMiddleware, (req
     res.json({ ok: true });
   } catch (err) {
     log.error('API token revocation error:', err);
+    res.status(500).json({ error: 'Internal server error.', code: 500 });
+  }
+});
+
+/**
+ * POST /api/v1/auth/api-tokens/:id/remove
+ * Entfernt die Zeile eines Tokens, das nicht mehr gilt (D#1672).
+ *
+ * EIGENE ROUTE, WEIL `DELETE /api-tokens/:id` SCHON "WIDERRUFEN" HEISST und in
+ * der zugesagten /api/v1-Oberflaeche so bleibt: ein Client, der dort loescht,
+ * erwartet eine Zeile mit `revoked_at`, keine Luecke. Die Form folgt
+ * `POST /displays/:id/devices/:deviceId/revoke` - das Verb als letztes Segment.
+ *
+ * NUR WAS NICHT MEHR GILT. Ein aktives Token zu entfernen hiesse, einen
+ * Zugang zu beenden, ohne dass davon etwas stehen bleibt: der Widerruf ist der
+ * Weg, und er hinterlaesst den Zeitpunkt. Erst die tote Zeile darf gehen - sie
+ * blieb bis hierhin fuer immer in der Liste. Loeschen und Pruefen sind EINE
+ * Anweisung, damit zwischen beiden nichts liegt.
+ * Response: { ok: true }
+ */
+router.post('/api-tokens/:id/remove', requireAuth, requireAdmin, csrfMiddleware, (req, res) => {
+  try {
+    // Strenger als `parseInt` beim Widerruf darueber: `12abc` ist keine Id.
+    // Eine Route, die endgueltig loescht, raet nicht, welche Zeile gemeint war.
+    const id = /^\d+$/.test(req.params.id) ? Number(req.params.id) : NaN;
+    if (!Number.isSafeInteger(id)) return res.status(400).json({ error: 'Invalid token ID.', code: 400 });
+
+    const result = db.get().prepare(`
+      DELETE FROM api_tokens WHERE id = ? AND NOT ${apiTokenUsableSql('api_tokens')}
+    `).run(id);
+    if (result.changes > 0) return res.json({ ok: true });
+
+    const exists = db.get().prepare('SELECT 1 FROM api_tokens WHERE id = ?').get(id);
+    if (!exists) return res.status(404).json({ error: 'API token not found.', code: 404 });
+    return res.status(409).json({
+      error: 'An active API token cannot be removed. Revoke it first.',
+      code: 409,
+      reason: 'api_token_active',
+    });
+  } catch (err) {
+    log.error('API token removal error:', err);
     res.status(500).json({ error: 'Internal server error.', code: 500 });
   }
 });
@@ -3320,6 +3537,14 @@ router.patch('/users/:id', requireAuth, requireAdmin, csrfMiddleware, async (req
       return res.status(400).json({ error: 'Turning off SSO-only requires setting a password.', code: 400 });
     }
 
+    // Ein Ehemaliger wird nicht Administrator (#1381): er kaeme nie an
+    // `requireAdmin` vorbei, stuende aber als Administrator in der Verwaltung.
+    if (nextRole === 'admin' && existing.role !== 'admin' && !isActiveAccount(userId, { db: db.get() })) {
+      return res.status(400).json({
+        error: 'A deactivated account cannot become an administrator.', code: 400, reason: 'account_deactivated',
+      });
+    }
+
     const adminError = assertAdminWouldRemain(userId, nextRole);
     if (adminError) return res.status(400).json({ error: adminError, code: 400 });
 
@@ -3487,15 +3712,22 @@ router.patch('/me/password', requireAuth, csrfMiddleware, async (req, res) => {
 
 /**
  * DELETE /api/v1/auth/users/:id
- * Admin only. Löscht ein Familienmitglied.
- * Response: { ok: true }
+ * Admin only. Entfernt ein Konto - und was das heisst, haengt davon ab, was es
+ * hinterlaesst (#1381, server/services/user-removal.js):
+ *
+ *   - Hat es Spuren in geteilten Daten, wird es DEAKTIVIERT: die Zeile bleibt,
+ *     damit Urheberschaft und Salden bleiben, jeder Zugang endet sofort.
+ *   - Sonst wird es geloescht wie bisher.
+ *
+ * Die Antwort bleibt 200 `{ ok: true }` und sagt zusaetzlich, was geschah.
+ * Response: { ok: true, outcome: 'deactivated'|'deleted', traces: [{ table, column, rows }] }
  */
 router.delete('/users/:id', requireAuth, requireAdmin, csrfMiddleware, (req, res) => {
   try {
     const userId = parseInt(req.params.id, 10);
 
     if (userId === req.authUserId) {
-      return res.status(400).json({ error: 'You cannot delete your own account.', code: 400 });
+      return res.status(400).json({ error: 'You cannot delete your own account.', code: 400, reason: 'own_account' });
     }
     // Wie beim Aendern: ein Display wird unter /displays verwaltet, nicht hier.
     // Zwei Tueren zu demselben Konto waeren zwei Stellen, an denen die Regeln
@@ -3504,41 +3736,40 @@ router.delete('/users/:id', requireAuth, requireAdmin, csrfMiddleware, (req, res
       return res.status(404).json({ error: 'User not found.', code: 404 });
     }
 
-    // Der dritte Weg, auf dem der letzte SSO-Administrator verschwinden kann
-    // (#847). `null` = das Konto bleibt gar keine Rolle uebrig.
-    const ssoAdminError = assertSsoAdminWouldRemain(userId, null);
-    if (ssoAdminError) return res.status(400).json({ error: ssoAdminError, code: 400 });
-
-    const result = db.transaction(() => {
-      const birthday = db.get().prepare('SELECT * FROM birthdays WHERE family_user_id = ?').get(userId);
-      if (birthday) deleteBirthdayArtifacts(db.get(), birthday);
-      // Standard-Zuweisungen von Sync-Zielen lösen (kein FK auf diesen Spalten, #459).
-      db.get().prepare('UPDATE ics_subscriptions SET default_assignee_user_id = NULL WHERE default_assignee_user_id = ?').run(userId);
-      db.get().prepare('UPDATE external_calendars SET default_assignee_user_id = NULL WHERE default_assignee_user_id = ?').run(userId);
-      // Schichtplan (Migration 189): schedule_patterns→pattern_days, schedule_overrides
-      // und schedule_extra_shifts kaskadieren gleich mit weg (FK CASCADE auf user_id),
-      // ihre schedule_custom_field_values-Zeilen nicht - polymorph, kein echter
-      // Fremdschluessel. Deshalb hier vorab entfernt, solange die Ids noch auffindbar
-      // sind, sonst blieben sie als verwaiste Zeilen unter fremder Bedeutung liegen.
-      const patternIds = db.get().prepare('SELECT id FROM schedule_patterns WHERE user_id = ?').all(userId).map((row) => row.id);
-      if (patternIds.length) {
-        const dayIds = db.get().prepare(`SELECT id FROM schedule_pattern_days WHERE pattern_id IN (${patternIds.map(() => '?').join(',')})`).all(...patternIds).map((row) => row.id);
-        if (dayIds.length) db.get().prepare(`DELETE FROM schedule_custom_field_values WHERE entry_type='pattern_day' AND entry_id IN (${dayIds.map(() => '?').join(',')})`).run(...dayIds);
-      }
-      db.get().prepare(`DELETE FROM schedule_custom_field_values WHERE entry_type='override' AND entry_id IN (SELECT id FROM schedule_overrides WHERE user_id=?)`).run(userId);
-      db.get().prepare(`DELETE FROM schedule_custom_field_values WHERE entry_type='extra_shift' AND entry_id IN (SELECT id FROM schedule_extra_shifts WHERE user_id=?)`).run(userId);
-      return db.get().prepare('DELETE FROM users WHERE id = ?').run(userId);
+    // Synchron bis zum Ende: Entscheidung, die beiden Administrator-Riegel und
+    // jedes Schreiben laufen in EINER Transaktion, ohne `await` dazwischen.
+    const result = removeUser(db.get(), userId, {
+      // Beide Riegel gelten fuer beide Ausgaenge: auch ein deaktiviertes Konto
+      // ist kein Administrator mehr (`member` bzw. `null` = keine Rolle uebrig).
+      // Der zweite ist der dritte Weg, auf dem der letzte SSO-Administrator
+      // verschwinden kann (#847).
+      refuse: () => {
+        const adminError = assertAdminWouldRemain(userId, 'member');
+        if (adminError) return new RemovalRefused(adminError, 'last_admin');
+        const ssoAdminError = assertSsoAdminWouldRemain(userId, null);
+        if (ssoAdminError) return new RemovalRefused(ssoAdminError, 'last_sso_admin');
+        return null;
+      },
     });
 
-    if (result.changes === 0) {
+    if (result.outcome === 'not_found') {
       return res.status(404).json({ error: 'User not found.', code: 404 });
     }
+    if (result.outcome === 'deactivated') {
+      log.info('User deactivated instead of deleted', {
+        userId, traces: result.traces.map((trace) => `${trace.table}.${trace.column}:${trace.rows}`),
+      });
+    }
 
-    // Alle Sessions des geloeschten Users invalidieren
-    invalidateUserSessions(userId);
-
-    res.json({ ok: true });
+    res.json({ ok: true, outcome: result.outcome, traces: result.traces });
   } catch (err) {
+    if (err instanceof RemovalRefused) {
+      // Die beiden Gruende als Literale: `test:api` fuehrt jede Stelle, an der
+      // ein `reason` durch eine Variable gereicht wird.
+      return err.reason === 'last_sso_admin'
+        ? res.status(400).json({ error: err.message, code: 400, reason: 'last_sso_admin' })
+        : res.status(400).json({ error: err.message, code: 400, reason: 'last_admin' });
+    }
     log.error('User deletion error:', err);
     res.status(500).json({ error: 'Internal server error.', code: 500 });
   }

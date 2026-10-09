@@ -18,7 +18,7 @@ import { resolveBudgetMode } from '../services/budget-visibility.js';
 import { hiddenModulesFor } from '../permissions.js';
 import { birthdaysSwitchedOff, modulesLeftOut } from '../services/household-modules.js';
 import { documentViewer } from '../services/document-links.js';
-import { householdMemberSql } from '../services/household-members.js';
+import { householdMemberSql, memberOrderSql, memberPositionSql } from '../services/household-members.js';
 import { FastingError, getFastingDashboardState } from '../services/fasting.js';
 import { openBalancesForUser } from '../services/split-expenses.js';
 import { NUTRIENT_KEYS, nutritionSummaryFor } from '../services/health-nutrition.js';
@@ -29,7 +29,10 @@ import { isAdminUser, serializeEvents } from './calendar/helpers.js';
 import { getOccurrences as getWasteOccurrences } from '../services/waste-store.js';
 import { scheduleData } from '../services/schedule.js';
 import { isAdminRequest } from '../middleware/require-admin.js';
-import { activeCatalog } from '../services/rewards.js';
+import { activeCatalog, ledgerBalanceSql } from '../services/rewards.js';
+import { moneyParams, moneyReader, moneyVisibleSql } from '../services/reward-money.js';
+import { MEAL_COOK_COLUMNS_SQL, MEAL_COOK_JOIN_SQL } from '../services/meal-cook.js';
+import { clampEventLimit } from '../../public/utils/dashboard-event-limit.js';
 
 const log = createLogger('Dashboard');
 
@@ -199,6 +202,21 @@ function weekEventFields(event) {
   };
 }
 
+/**
+ * `?shopping_list=` als Liste von Listen-Ids (#1818): einzeln oder mehrfach
+ * angegeben, nur positive ganze Zahlen, ohne Doppelte, hoechstens 50 - dieselbe
+ * Form und Grenze wie `notes_category` und wie die gespeicherten Optionen
+ * (preferences.js). Alles andere faellt weg, nie ein Fehler.
+ */
+export function normalizeShoppingListFilter(raw) {
+  if (raw === undefined || raw === null) return [];
+  return [...new Set(
+    (Array.isArray(raw) ? raw : [raw])
+      .filter((value) => typeof value === 'string' && /^[1-9]\d{0,14}$/.test(value))
+      .map(Number),
+  )].slice(0, 50);
+}
+
 const router = express.Router();
 
 /**
@@ -208,7 +226,7 @@ const router = express.Router();
  * so bricht ein fehlerhaftes Widget nicht das gesamte Dashboard.
  *
  * Response: {
- *   upcomingEvents: CalendarEvent[],   // Nächste 5 Termine
+ *   upcomingEvents: CalendarEvent[],   // Nächste 5 Termine (`events_limit`: 8 oder 12)
  *   familyEvents:   CalendarEvent[],   // Termine je Mitglied fuer die Familienkarte (#1449)
  *   weekEvents:     WeekEvent[],       // Termine, die die Woche ab heute berühren (schlank)
  *   urgentTasks:    Task[],            // High/Urgent mit Fälligkeit ≤ 48h
@@ -271,7 +289,12 @@ router.get('/', (req, res) => {
     )
   `).join('');
   // `mine` ist die Auslegung des Kalendermoduls: zugewiesen an mich.
-  const eventsAssignedTo = req.query.events_scope === 'mine' ? userId : null;
+  // EIN DISPLAY HAT KEIN "MIR" (#1808): es folgt der Vorgabe des Haushalts, sein
+  // Browser schickt deren Option mit, und dem Display-Konto weist nie jemand
+  // einen Termin zu (#1207) - das Tablett stuende leer da. Gelesen wird die
+  // Option deshalb HIER als "alle", statt sie beim Speichern der Vorgabe zu
+  // streichen: dieselbe Vorgabe gilt auch fuer Mitglieder, und dort stimmt sie.
+  const eventsAssignedTo = req.query.events_scope === 'mine' && req.authMethod !== 'display' ? userId : null;
   /* GEBURTSTAGE IM TERMIN-WIDGET (#927). Wer sie auf der Uebersicht schon als
    * eigene Kachel stehen hat, las sie zweimal - einmal bei den Geburtstagen,
    * einmal zwischen den naechsten Terminen. Abwaehlbar ist deshalb der EINE
@@ -289,6 +312,10 @@ router.get('/', (req, res) => {
   // Den Haushaltsschalter (#1660) kennt der geteilte Leser selbst: sind die
   // Geburtstage abgeschaltet, laufen sie nicht mit, was immer hier steht.
   const includeBirthdays = req.query.events_birthdays !== 'hide';
+  // Wie viele Kommende die Kachel listet (#1680): 5, 8 oder 12 aus einer
+  // Allowlist, die der Browser mit dieser Route teilt. Alles andere - fehlend,
+  // leer, `7`, `500`, `abc`, doppelt angegeben - ist die Vorgabe fuenf.
+  const eventsLimit = clampEventLimit(req.query.events_limit);
 
   const now = new Date();
 
@@ -350,16 +377,16 @@ router.get('/', (req, res) => {
   const birthdaysLeftOut = denied.has('calendar') || birthdaysSwitchedOff(d);
   if (birthdaysLeftOut) Object.assign(result, emptyBirthdays());
 
-  // Anstehende Termine (nächste 5, ab jetzt).
+  // Anstehende Termine (nächste 5, 8 oder 12, ab jetzt).
   // Geteilte Logik mit /calendar/upcoming: expandiert wiederkehrende Serien,
   // sodass auch Termine erscheinen, deren Master-Start in der Vergangenheit liegt.
   if (allows('calendar')) try {
-    // Der Deckel von fuenf zaehlt nur, was noch kommt (#1449); beendete Termine
+    // Der Deckel (fuenf, auf Wunsch 8 oder 12, #1680) zaehlt nur, was noch kommt (#1449); beendete Termine
     // von heute kommen ausserhalb mit - die Kachel zeigt sie zurueckgetreten,
     // das Heute-Blatt laesst sie weg. Welche beendet sind, entscheidet der
     // Browser an der Uhr: ein Termin endet auch zwischen zwei Abrufen.
     result.upcomingEvents = serializeEvents(getUpcomingEvents(d, {
-      userId, limit: 5, fromToday: true, assignedTo: eventsAssignedTo, includeBirthdays,
+      userId, limit: eventsLimit, fromToday: true, assignedTo: eventsAssignedTo, includeBirthdays,
       keepEndedToday: ENDED_TODAY_POOL,
     }), { database: d, viewer: documentViewer(req), actorId: userId, isAdmin: isAdminUser(req) });
   } catch (err) {
@@ -470,6 +497,52 @@ router.get('/', (req, res) => {
     result.overdueTaskCount = null;
   }
 
+  /* WELCHE EINKAUFSLISTEN DIE KACHEL ZEIGT (#1818, aus D#1624). `shopping_list`
+   * nennt eine Auswahl von Listen-Ids; ohne den Parameter bleibt alles, wie es
+   * war.
+   *
+   * DIE AUSWAHL GILT NUR DER KACHEL, und zwar an der Quelle: sie fuellt ein
+   * EIGENES Feld der Antwort (`shoppingTile`) und laesst `shoppingLists`,
+   * `shoppingOpenCount` und `shoppingOpenLists` unberuehrt. Anders als bei
+   * Aufgaben und Notizen, wo eine Auswahl die ganze Uebersicht meint: der
+   * Einkauf spricht ausserhalb der Kachel als ZAHL ("n offen" im Heute-Blatt,
+   * an der Wand, in der Navigation), und die liest dieselben Daten. Die erste
+   * Fassung filterte die geteilten Felder - das Wandtablet eines Haushalts,
+   * dessen Vorgabe eine Liste waehlt, zeigte "1 offen" bei vierzehn. Kein
+   * Leser der ungefilterten Felder haengt jetzt von einer Kachel-Option ab,
+   * und der Parameter aendert keine Zahl der Navigation.
+   *
+   * In der Kachel wirkt die Auswahl VOR der Deckelung und auf Liste UND Zahl:
+   * eine Kachel, die eine Liste zeigt und ueber allen "23" zaehlt,
+   * widerspraeche sich.
+   *
+   * GEPRUEFT WIRD GEGEN DIE TABELLE, nicht nur die Form. Eine Liste, die es
+   * nicht (mehr) gibt, faellt aus der Auswahl; bleibt KEINE uebrig, gilt die
+   * Anfrage als ungefiltert - derselbe Satz wie bei den anderen Kacheln: keine
+   * Auswahl heisst "alle". So macht eine geloeschte Liste in einer gespeicherten
+   * Anordnung die Kachel weder leer noch kaputt, und Unsinn (`abc`, `-1`, eine
+   * erfundene Id) antwortet wie gar kein Parameter. Listen-Ids sind
+   * AUTOINCREMENT, eine geloeschte Id kehrt nie als andere Liste zurueck.
+   *
+   * RECHTE: Einkaufslisten haben keine Zeilen-Sichtbarkeit, das Modul ist ganz
+   * sichtbar oder gar nicht. Die Auswahl wird deshalb NUR gelesen, wenn das
+   * Modul fuer diese Person offen ist - sonst bleibt es bei der leeren Fassung
+   * von oben, was immer der Parameter nennt. */
+  let shoppingSelection = null;
+  if (allows('shopping')) try {
+    const wanted = normalizeShoppingListFilter(req.query.shopping_list);
+    if (wanted.length) {
+      const existing = d.prepare(
+        `SELECT id FROM shopping_lists WHERE id IN (${wanted.map(() => '?').join(', ')})`,
+      ).all(...wanted).map((row) => row.id);
+      if (existing.length) shoppingSelection = existing;
+    }
+  } catch (err) {
+    log.error('shopping selection error:', err.message);
+  }
+  const shoppingMarks = shoppingSelection ? shoppingSelection.map(() => '?').join(', ') : '';
+  const shoppingBinds = shoppingSelection ?? [];
+
   if (allows('shopping')) try {
     const row = d.prepare(`
       SELECT COUNT(*) AS items, COUNT(DISTINCT si.list_id) AS lists
@@ -497,9 +570,12 @@ router.get('/', (req, res) => {
              -- entscheidet die Kachel ohne Nachfrage - eigenes zuerst, sonst das
              -- des Providers.
              r.provider_has_image AS recipe_has_image,
-             (r.image_data IS NOT NULL) AS recipe_has_own_image
+             (r.image_data IS NOT NULL) AS recipe_has_own_image,
+             -- Wer kocht (#1679): Name, Farbe und Bild neben der Mahlzeit, aus
+             -- derselben Quelle wie im Planer.${MEAL_COOK_COLUMNS_SQL}
       FROM meals m
       LEFT JOIN recipes r ON r.id = m.recipe_id
+      ${MEAL_COOK_JOIN_SQL}
       WHERE m.date = ?
         AND m.meal_type IN (${placeholders})
       ORDER BY
@@ -561,7 +637,16 @@ router.get('/', (req, res) => {
     result.notesTotal = 0;
   }
 
-  // Einkaufslisten mit offenen Artikeln (max. 3 Listen, je bis zu 6 offene Items)
+  // Einkaufslisten mit offenen Artikeln (max. 3 Listen, je bis zu 6 offene Items).
+  // Immer ueber ALLE Listen - was ausserhalb der Kachel vom Einkauf spricht,
+  // liest dieses Feld und die beiden Zaehler oben.
+  const shoppingItemsOf = (listId) => d.prepare(`
+    SELECT id, name, quantity, is_checked
+    FROM shopping_items
+    WHERE list_id = ? AND is_checked = 0
+    ORDER BY id ASC
+    LIMIT 6
+  `).all(listId);
   if (allows('shopping')) try {
     const lists = d.prepare(`
       SELECT sl.id, sl.name,
@@ -572,28 +657,51 @@ router.get('/', (req, res) => {
       ORDER BY sl.updated_at DESC
       LIMIT 3
     `).all();
-
-    for (const list of lists) {
-      list.items = d.prepare(`
-        SELECT id, name, quantity, is_checked
-        FROM shopping_items
-        WHERE list_id = ? AND is_checked = 0
-        ORDER BY id ASC
-        LIMIT 6
-      `).all(list.id);
-    }
+    for (const list of lists) list.items = shoppingItemsOf(list.id);
     result.shoppingLists = lists;
   } catch (err) {
     log.error('shoppingLists error:', err.message);
     result.shoppingLists = [];
   }
 
+  // DIE FASSUNG DER KACHEL (#1818), nur bei einer Auswahl. Die gewaehlten
+  // Listen stehen da, AUCH OHNE OFFENES: wer eine Liste auf die Uebersicht
+  // holt, will sie antippen, um den ersten Artikel einzutragen - genau dann
+  // waere sie sonst verschwunden. Listen mit Offenem zuerst, damit der Deckel
+  // von drei keine volle Liste hinter einer leeren versteckt; darin wie bisher
+  // die zuletzt geaenderte.
+  //
+  // `listCount` zaehlt JEDE gewaehlte Liste, die es gibt - auch die ohne
+  // Offenes. Daraus rechnet die Kachel "+n weitere Listen": eine gewaehlte
+  // Liste, die der Deckel abschneidet, ist so als "+1" da und fehlt nie stumm.
+  //
+  // Scheitert die Abfrage, fehlt das Feld, und die Kachel zeigt alle Listen.
+  if (shoppingSelection) try {
+    const lists = d.prepare(`
+      SELECT sl.id, sl.name,
+        (SELECT COUNT(*) FROM shopping_items si WHERE si.list_id = sl.id AND si.is_checked = 0) AS open_count,
+        (SELECT COUNT(*) FROM shopping_items si WHERE si.list_id = sl.id) AS total_count
+      FROM shopping_lists sl
+      WHERE sl.id IN (${shoppingMarks})
+      ORDER BY (open_count > 0) DESC, sl.updated_at DESC
+      LIMIT 3
+    `).all(...shoppingBinds);
+    for (const list of lists) list.items = shoppingItemsOf(list.id);
+    const openCount = d.prepare(`
+      SELECT COUNT(*) AS items FROM shopping_items si
+      WHERE si.is_checked = 0 AND si.list_id IN (${shoppingMarks})
+    `).get(...shoppingBinds).items;
+    result.shoppingTile = { lists, openCount, listCount: shoppingSelection.length };
+  } catch (err) {
+    log.error('shoppingTile error:', err.message);
+  }
+
   // Alle User (für Avatar-Farben in Widgets)
   try {
     result.users = d.prepare(
-      `SELECT id, display_name, avatar_color, avatar_data FROM users u
+      `SELECT u.id, u.display_name, u.avatar_color, u.avatar_data, ${memberPositionSql('u')} AS sort_order FROM users u
        WHERE ${householdMemberSql('u')}
-       ORDER BY display_name`
+       ORDER BY ${memberOrderSql('u')}`
     ).all();
   } catch (err) {
     result.users = [];
@@ -832,11 +940,12 @@ router.get('/', (req, res) => {
     const MEMBER_FILTER = householdMemberSql('u');
     const members = d.prepare(`
       SELECT u.id, u.display_name, u.avatar_color, u.avatar_data, u.family_role,
-             COALESCE((SELECT SUM(delta) FROM reward_ledger l WHERE l.user_id = u.id), 0) AS balance
+             ${memberPositionSql('u')} AS sort_order,
+             ${ledgerBalanceSql('points', 'u.id')} AS balance
       FROM users u
       JOIN reward_participants rp ON rp.user_id = u.id AND rp.enabled = 1
       WHERE ${MEMBER_FILTER}
-      ORDER BY u.display_name COLLATE NOCASE ASC, u.id ASC
+      ORDER BY ${memberOrderSql('u')}
     `).all();
     const approver = isAdminRequest(req);
     const own = members.find((m) => m.id === Number(userId));
@@ -845,11 +954,28 @@ router.get('/', (req, res) => {
     // Dieselben Personen wie die Liste darueber (#1207): eine alte
     // Einschreibung von Personal oder Gast bleibt stehen, zaehlt aber nicht.
     const participantCount = members.length;
-    const pending = view === 'approver'
-      ? d.prepare("SELECT COUNT(*) AS n FROM reward_redemptions WHERE status = 'pending'").get().n
+    // `pending` BLEIBT DIE ZAHL DER PRAEMIEN-ANFRAGEN. Geld-Anfragen (#1734)
+    // stehen daneben in `moneyPending`, damit ein Client, der das alte Feld
+    // liest, nichts anderes darin findet. Wer was zaehlt, sagen die Zweige: wer
+    // freigibt, ist Admin und darf jede lesen; wer selbst sammelt, zaehlt nur
+    // die eigenen; die Sicht `family` (Wandtablett, Grosseltern) bekommt bei den
+    // Praemien 0. Geld selbst zeigt die Kachel nicht - weder Saldo noch Buchung.
+    const countPending = (kindSql) => (view === 'approver'
+      ? d.prepare(`SELECT COUNT(*) AS n FROM reward_redemptions WHERE status = 'pending' AND ${kindSql}`).get().n
       : view === 'self'
-        ? d.prepare("SELECT COUNT(*) AS n FROM reward_redemptions WHERE status = 'pending' AND user_id = ?").get(userId).n
-        : 0;
+        ? d.prepare(`SELECT COUNT(*) AS n FROM reward_redemptions WHERE status = 'pending' AND user_id = ? AND ${kindSql}`).get(userId).n
+        : 0);
+    const pending = countPending("kind = 'reward'");
+    // DER EIGENE GELD-ZAEHLER HAENGT NICHT AN DER PUNKTE-TEILNAHME. Ein Kind mit
+    // Taschengeldkonto, das keine Punkte sammelt, faellt in die Sicht `family`
+    // und bekam hier 0, obwohl seine Einzahlung offen war (Review zu #1745).
+    // Gezaehlt wird ueber dasselbe Praedikat wie an den Geld-Routen: Admins
+    // alle, ein Mitglied die eigenen, ein Display keine.
+    const reader = moneyReader(req);
+    const moneyPending = d.prepare(`
+      SELECT COUNT(*) AS n FROM reward_redemptions r
+      WHERE r.status = 'pending' AND r.kind != 'reward' AND ${moneyVisibleSql(reader, 'r.user_id')}
+    `).get(moneyParams(reader)).n;
     // Wer selbst sammelt, sieht seine letzten Gutschriften - verdient oder
     // geschenkt. Einloesungen und Rueckbuchungen sind kein "verdient".
     //
@@ -864,17 +990,17 @@ router.get('/', (req, res) => {
     const ownRecent = own && (view === 'self' || members.length === 1)
       ? d.prepare(`
           SELECT delta, type, reason, created_at FROM reward_ledger l
-          WHERE user_id = ? AND delta > 0 AND type IN ('earn', 'bonus')
+          WHERE user_id = ? AND delta > 0 AND type IN ('earn', 'bonus') AND l.unit = 'points'
             AND NOT EXISTS (SELECT 1 FROM reward_ledger r WHERE r.reverses_id = l.id)
           ORDER BY created_at DESC, id DESC
           LIMIT 3
         `).all(userId)
       : [];
     const catalog = activeCatalog(d).map((c) => ({ id: c.id, name: c.name, cost: c.cost, remaining: c.remaining }));
-    result.rewards = { view, me: userId, standings, participantCount, pending, catalog, recent: ownRecent };
+    result.rewards = { view, me: userId, standings, participantCount, pending, moneyPending, catalog, recent: ownRecent };
   } catch (err) {
     log.error('rewards error:', err.message);
-    result.rewards = { view: null, standings: [], participantCount: 0, pending: 0, catalog: [], recent: [] };
+    result.rewards = { view: null, standings: [], participantCount: 0, pending: 0, moneyPending: 0, catalog: [], recent: [] };
   }
 
   // Gesundheit: heute fällige Dosen der EIGENEN Medikamente (private wie familiensichtbare)

@@ -216,6 +216,10 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ### Changed
 
+- **The sidebar group for extension modules is called "Weitere" in German** instead of "Benutzerdefinierte
+  Module". The short name matches "Planen", "Haushalt", "Menschen" and "Finanzen", and it does
+  not repeat "Mehr", the mobile button whose sheet lists the same groups.
+
 - **Rows show fewer buttons.** Lists no longer carry a pencil and a bin on every line. Editing,
   deleting and anything further sit behind one "more" button per row that is always visible and
   names what it does in words. This applies to shopping items, birthdays, tasks, loan payments

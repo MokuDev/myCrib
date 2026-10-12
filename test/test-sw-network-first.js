@@ -24,8 +24,10 @@ const SRC = renderServiceWorkerSource(
   'sw-network-first-test',
 );
 const ORIGIN = 'https://app.test';
-// FORK: die Release-Nummer steht in sw.js (Upstream 2.x, myCrib 1.x) - nicht fest verdrahten.
-const APP_RELEASE = /const APP_RELEASE\s*=\s*'([^']+)'/.exec(readFileSync(new URL('../public/sw.js', import.meta.url), 'utf8'))[1];
+// Die Version kommt aus dem Worker selbst: ein festes Literal hier brach die
+// Suite bei jedem Versionssprung, weil die Saat dann im Cache der alten
+// Version lag und der Worker im neuen suchte.
+const RELEASE = SRC.match(/const APP_RELEASE\s*=\s*'([^']+)'/)[1];
 
 class MockResponse {
   constructor(body, { status = 200, type = 'basic' } = {}) {
@@ -156,7 +158,7 @@ function within(promise, ms = 300) {
 }
 
 async function seed(env, cacheName, path, body) {
-  const name = (await env.caches.keys()).find((n) => n.startsWith(cacheName)) ?? `${cacheName}${APP_RELEASE}-sw-network-first-test`;
+  const name = (await env.caches.keys()).find((n) => n.startsWith(cacheName)) ?? `${cacheName}${RELEASE}-sw-network-first-test`;
   await (await env.caches.open(name)).put(`${ORIGIN}${path}`, new MockResponse(body));
 }
 

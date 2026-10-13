@@ -5525,9 +5525,15 @@ function clockWidgetParts(now = new Date()) {
 function renderClockWidget({ wall = false } = {}) {
   const { time, date, machineTime } = clockWidgetParts();
   const cls = wall ? 'clock-widget clock-widget--wall' : 'widget widget--clock clock-widget';
+  // SPERRZONE FUER MELDUNGEN, NUR AN DER WAND (#1917): dort steht der Stapel
+  // oben (#1559) und lag bis rund 834px Breite auf Uhrzeit und Datum. Das
+  // Attribut liest utils/toast-placement.js; ausgezeichnet sind die beiden
+  // Zeilen selbst, nicht ihr Rahmen - der ist so breit wie die Flaeche, und
+  // der Hinweis wiche ihm auch dort, wo er neben der Uhr Platz hat.
+  const keepout = wall ? ' data-toast-keepout' : '';
   const body = `
-    <time class="clock-widget__time" id="clock-widget-time" datetime="${esc(machineTime)}">${esc(time)}</time>
-    <p class="clock-widget__date" id="clock-widget-date">${esc(date)}</p>`;
+    <time class="clock-widget__time" id="clock-widget-time" datetime="${esc(machineTime)}"${keepout}>${esc(time)}</time>
+    <p class="clock-widget__date" id="clock-widget-date"${keepout}>${esc(date)}</p>`;
   // Kachel-Form bekommt seit dem Polish-Batch (PLAN.md #7) denselben
   // Siegel+Titel-Kopf wie ihre 15 Geschwister-Widgets - vorher eines von zwei
   // Widgets ganz ohne Kopf (das andere war das Wetter). Die Wand-Form bleibt
@@ -6010,8 +6016,8 @@ function createWallFit(win, signal) {
  * Einpassen stand zuerst als lose Zeile in `rebuildDashboard`, und kein Test
  * merkte, wenn sie fehlte.
  */
-function rebuildWall(container, shell, { data, weather, failed, updatedAt, rerender, signal, fit }) {
-  setHtml(shell, renderWallSurface(data, weather, { failed, updatedAt }));
+function rebuildWall(container, shell, { data, weather, failed, updatedAt, rerender, signal, fit, screensaverEnabled = false }) {
+  setHtml(shell, renderWallSurface(data, weather, { failed, updatedAt, screensaverEnabled }));
   if (globalThis.window?.lucide) globalThis.window.lucide.createIcons({ el: shell });
   wireWallSurface(container, rerender, signal);
   // Die Titel unter den Gesichtern folgen dem Platz: nach jedem Aufbau von der
@@ -6091,7 +6097,7 @@ function renderWallError() {
  * sollte, keinen Timer startet, weckt der erste Zeiger auf eine schlafende
  * Wand dort nur (wall-timer.js).
  */
-function renderWallSurface(data, weather, { failed = false, loading = false, updatedAt = null, now = new Date() } = {}) {
+function renderWallSurface(data, weather, { failed = false, loading = false, updatedAt = null, now = new Date(), screensaverEnabled = false } = {}) {
   // Der Kuechentimer (#844). Er wird auch im Lade- und Fehlerzustand gebaut: er
   // haengt an nichts, was geladen werden koennte, und ein laufender Timer, der
   // beim naechsten Netzfehler verschwaende, waere schlimmer als gar keiner.
@@ -6126,13 +6132,20 @@ function renderWallSurface(data, weather, { failed = false, loading = false, upd
       ${renderClockWidget({ wall: true })}
       <div class="wall__stage${failed || loading ? ' wall__stage--single' : ''}">${main}</div>
       ${timer.display}
-      <div class="wall__foot">
+      <div class="wall__foot" data-toast-keepout>
         ${stamp}
         ${timer.controls}
-        <button type="button" class="wall__foot-btn" id="wall-exit" aria-label="${esc(t('dashboard.wallExit'))}">
-          <i data-lucide="minimize-2" aria-hidden="true"></i>
-          <span class="wall__foot-btn-label" aria-hidden="true">${esc(t('dashboard.wallExit'))}</span>
-        </button>
+        <div class="wall__foot-end">${screensaverEnabled && !timer.display ? `
+          <button type="button" class="wall__foot-btn wall__foot-btn--icon" id="wall-screensaver-start"
+                  aria-label="${esc(t('dashboard.wallScreensaverStart'))}"
+                  title="${esc(t('dashboard.wallScreensaverStart'))}">
+            <i data-lucide="image" aria-hidden="true"></i>
+          </button>` : ''}
+          <button type="button" class="wall__foot-btn" id="wall-exit" aria-label="${esc(t('dashboard.wallExit'))}">
+            <i data-lucide="minimize-2" aria-hidden="true"></i>
+            <span class="wall__foot-btn-label" aria-hidden="true">${esc(t('dashboard.wallExit'))}</span>
+          </button>
+        </div>
       </div>
     </div>`;
 }
@@ -6161,6 +6174,11 @@ function wireWallSurface(container, rerender, signal) {
   signal.addEventListener('abort', () => clearTimeout(awakeTimer));
 
   wireWallTimer(wall, rerender, signal, { announce: announceDashboard });
+
+  wall.querySelector('#wall-screensaver-start')?.addEventListener('click', async () => {
+    const { preview } = await import('/components/photo-screensaver.js');
+    if (!await preview()) window.yuvomi?.showToast(t('dashboard.wallScreensaverNone'), 'info');
+  }, { signal });
 }
 
 /**
@@ -6780,9 +6798,12 @@ export async function render(container, { user, signal: routeSignal = null } = {
   // Die Wand fragt die Haushaltsfassung der Uebersicht ab (#1817,
   // `dashboardRequest`). JEDER Abruf dieser Seite geht hier durch - auch der
   // stille Refresh, sonst stuende nach einer Viertelstunde wieder die
-  // persoenliche Fassung an der Wand.
+  // persoenliche Fassung an der Wand. Die faelligen Erinnerungen ebenso
+  // (`loadPendingReminders`): sie sind die zweite Antwort, die davon abhaengt,
+  // wer fragt.
   const overviewRequest = (query) => dashboardRequest(query, { wall: wallMode });
   let isCustomizing = false;
+  let screensaverEnabled = false;
   let currency     = 'EUR';
   let visibleMealTypes = MEAL_ORDER;
   let loadFailed   = false;
@@ -6799,7 +6820,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       // sie herein (utils/start-handoff.js) - sonst zwei `/preferences` je
       // Kaltstart. Danach gibt es nichts mehr abzuholen, und die Seite fragt selbst.
       (window.yuvomi?.takeStartPreferences?.() ?? api.get('/preferences')).catch(() => ({ data: {} })),
-      loadPendingReminders(),
+      loadPendingReminders(overviewRequest),
     ]);
     // Ueberholt oder verlassen, waehrend die Antworten unterwegs waren (#977):
     // dieser Aufbau gehoert niemandem mehr und faesst die Flaeche nicht an.
@@ -6854,6 +6875,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     followsDefault = prefsRes.data?.dashboard_follows_default !== false;
     // Das Skelett des NAECHSTEN Aufrufs lernt hier seine Kachelform.
     rememberLayoutHint(widgetConfig, dashboardQuery(widgetConfig));
+    screensaverEnabled = Boolean(prefsRes.data?.screensaver_enabled);
     currency     = prefsRes.data?.currency ?? 'EUR';
     visibleMealTypes = normalizeVisibleMealTypes(prefsRes.data?.visible_meal_types);
     lastLoadedAt = new Date();
@@ -7484,7 +7506,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
     if (!shell) return;
     if (wallMode) {
       rebuildWall(container, shell, {
-        data, weather, failed: loadFailed, updatedAt: lastLoadedAt, rerender, signal, fit: wallFit,
+        data, weather, failed: loadFailed, updatedAt: lastLoadedAt, rerender, signal, fit: wallFit, screensaverEnabled,
       });
       return;
     }
@@ -7674,7 +7696,7 @@ export async function render(container, { user, signal: routeSignal = null } = {
       }
       fresh.schedule = data.schedule;
       fresh.waste = data.waste;
-      fresh.pendingReminders = await loadPendingReminders();
+      fresh.pendingReminders = await loadPendingReminders(overviewRequest);
       if (signal.aborted) return;
       data = fresh;
       lastLoadedAt = new Date();
@@ -7807,10 +7829,14 @@ function todayFingerprint(data, cfg, now = new Date()) {
  * Modulrecht und Token-Scope (`mayTouchOrigin`), das Blatt waehlt daraus nur
  * noch, welche Herkunft eine Zeile ist. Ein Fehler kostet die Zeilen, nicht
  * die Uebersicht: die Erinnerung spricht weiter ueber Toast und Glocke.
+ *
+ * `request` IST DIE EINE REGEL DER SEITE (`overviewRequest`): die Wand fragt
+ * auch hier die Haushaltsfassung ab, und die ist leer - eine Erinnerung gilt
+ * der Person, die um sie gebeten hat, nicht der Kueche (#1817).
  */
-async function loadPendingReminders() {
+async function loadPendingReminders(request = (path) => path, get = (path) => api.get(path)) {
   try {
-    const res = await api.get('/reminders/pending');
+    const res = await get(request('/reminders/pending'));
     return Array.isArray(res?.data) ? res.data : [];
   } catch {
     return [];
@@ -7904,7 +7930,7 @@ function wireWeatherRefresh(container, onUpdated = null, signal) {
 // Test-Tor fuer die Klarheits-Runde (test/test-dashboard-clarity.js): eigene
 // Zeile statt Verlaengerung der langen `__test`-Liste oben, damit parallele
 // Aenderungen an beiden nicht in derselben Zeile kollidieren.
-Object.assign(__test, { renderUpcomingEvents, renderShoppingLists, renderShoppingTile, loadShoppingLists, renderDashboardLayout, wireLinks });
+Object.assign(__test, { renderUpcomingEvents, renderShoppingLists, renderShoppingTile, loadShoppingLists, loadPendingReminders, renderDashboardLayout, wireLinks });
 
 // Test-Tor fuer die Uebersichts-Bugs vom 2026-09-29 (#1449, #1451-#1457).
 Object.assign(__test, { renderBudgetWidget });

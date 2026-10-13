@@ -23,8 +23,62 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
   abgehakte Einkaufsartikel in einem eingeklappten Abschnitt, Budget-Filter über die
   Kategoriebalken, Gravatar-Profilbild, Bildschirmschoner mit Uhr, Datumsformat TT-MM-JJJJ und
   eine Reihe CalDAV-Fixes rund um verlorene und abgelehnte Uploads).
+- **Der siebte Abgleich mit dem Ursprungsprojekt** (31 weitere Commits bis zu deren Stand vom
+  13. Oktober 2026: mehrere lokale Kalender, eigene Reihenfolge von Aufgaben je Kategorie,
+  Einkaufsartikel in eine andere Liste verschieben, Module aus GitHub oder ZIP installieren
+  (nur mit `MODULES_ALLOW_WEB_INSTALL`), Bildschirmschoner-Knopf im Wandmodus, Migrationen 242 bis
+  245 und weitere CalDAV-, Google- und Einkaufs-Fixes).
 
 ### Added
+
+- **Organize events in several local calendars** (#1243, from D#1231). Create and rename household
+  calendars, reorder them through the manager's More menu, choose the destination when importing an ICS
+  file, and share a separate ICS subscription link for each calendar. Calendar links include only events
+  visible to everyone in the household. Legacy iCloud auto-upload continues for the default calendar,
+  including when explicitly selected; events in other local calendars stay local. Deleting a calendar
+  moves its events to the default calendar, so with the legacy Apple Calendar connection they then
+  upload to iCloud; the delete confirmation says so when that connection is set up.
+- **Tasks can be put in an order of your own within a category.** In the task list grouped by
+  category, every row has a grip: drag it, or press the arrow keys at the focused grip, and the
+  order is saved for the whole household. Tasks you never placed keep the old order (due date,
+  then priority) and sort after the placed ones, so a new task lands at the end of its category.
+  A recurring task passes its place on to its next occurrence; a task that moves to another
+  category loses its place. A "Sort automatically" button in the group header returns a category
+  to the automatic order. Grouping by due date, the board, selection mode, `tasks: read` and the
+  wall display are unchanged. The API gets `PATCH /api/v1/tasks/reorder` and
+  `POST /api/v1/tasks/reorder/reset`, and `sort_order` on each task (migration 242).
+- **Custom modules can be installed from Settings, from GitHub or as a ZIP file, where the operator
+  allows it.** Until now a third-party module reached myCrib only as a folder copied into `modules/`
+  on the server. The new page Settings → Modules → Add custom module (admin only) takes the address
+  of a public GitHub repository or an uploaded `.zip` and installs the module from it. **The feature
+  is off unless the operator sets `MODULES_ALLOW_WEB_INSTALL`**: a module is JavaScript that runs
+  with the session of every member who opens it, so installing one is the operator's choice. A
+  module installed this way arrives disabled until an admin approves it in Active modules from a
+  browser session, and the web interface removes or replaces only what it installed. Limits, checks
+  and the API are in `MODULES.md` under "Installing From Settings".
+- **Move a shopping item to another list** (#1700, from D#998). The edit dialog has a list
+  selector under amount and category when there is more than one list. The item moves as it is -
+  name, amount, category, note, link, price and shop - and lands at the end of its category on
+  the other list, so nothing has to be typed again. Between two lists mirrored from a CalDAV
+  server the entry itself moves: myCrib reads it in the old list, stores it unchanged in the new
+  one and only then removes it from the old one, so its tags, alarms and everything another app
+  keeps on it come along - also from one account to another. If the server does not accept it
+  in the new list, the entry stays untouched where it was, and after the fifth refusal the item
+  is back on the list it came from, with a line in the sync log. The same happens when the new
+  list no longer exists on the server. While the new list is switched off in the reminder sync,
+  the move waits until it is switched on again. Moving an item to a
+  list that is not mirrored removes it on the server without deleting it in myCrib.
+  `PATCH /api/v1/shopping/items/:itemId` takes `list_id` for the same move (migration 243).
+- **Wall mode: a button in the footer starts the photo screensaver by hand** (#1766). When
+  Immich is connected, a picture symbol sits in the wall footer next to the exit button. Tapping
+  it starts the screensaver at once, the same as the idle timer would. The button shows the
+  symbol only and carries its name, "Screensaver", as a tooltip and for screen readers, so it
+  takes the same room in every language and does not push the timer buttons aside. While a
+  kitchen timer is running the button is not there: a photo covering the countdown is not a
+  timer. If the screensaver cannot start (no photos configured, Immich unreachable, or a
+  connection error), the button answers with one line instead. For a paired display the button
+  appears only when an administrator has switched the photo screensaver on for it under
+  Settings → Household → Wall tablets.
 
 - **Checked-off shopping items collect in one section at the end of the list** (#1816, from D#1624).
   Ticking an item moves it out of its category into "Checked off", a collapsed section at the
@@ -866,6 +920,164 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
   before this change keep their balances; only their trace is missing. (#1382)
 
 ### Fixed
+
+- **A photo screensaver started with the mouse stays open** (#1766). Started from the wall footer
+  or as the preview in the Immich settings, it closed again as soon as the mouse left the button,
+  if the pointer had rested on it for more than a second before the click. While the photos were
+  still loading, that same move cancelled the start and the app said the screensaver was not
+  available. Moving the mouse now leaves it alone while the photos load and for the first second
+  after it appears; after that a move closes it as before. A key, a click, a touch or the wheel
+  close it at once, and the screensaver that starts by itself is unchanged.
+- **Sign-in and setup: a form you are filling in is no longer cleared after a few minutes** (#1919).
+  The photo screensaver started its idle timer on every page, also where nobody is signed in. Once
+  the idle delay had passed it asked for its photos, was refused, and the app took that for an
+  expired session and drew the sign-in page again - over whatever had been typed so far. The
+  screensaver now waits for somebody to be signed in, or for a paired wall display, and stops when
+  you sign out. After signing in it is ready without a reload.
+- **Waste: an address that stops serving its calendar no longer wipes your pickups** (#1938). A
+  subscribed waste calendar is fetched on its own. When the other side answered with something
+  that holds no calendar entry - a maintenance or login page, an empty calendar - myCrib took
+  that for a calendar with zero pickups: every imported pickup of the source was removed, the
+  reminders for them went with it, and the source looked healthy. Now such an answer is a failed
+  fetch like any other. The pickups and reminders stay, the source records the error and tries
+  again sooner, and the page says that no calendar with entries arrived. Adding a new address
+  that serves no calendar says so instead of showing a working source, and a file without a
+  single calendar entry is refused in the import assistant before anything can be confirmed.
+  A calendar that has entries is applied as before, also when it has fewer than last time.
+  For API clients: `POST /waste/sources/{id}/refresh` answers 200 with `outcome: "error"` and
+  `reason: "waste_source_fetch_no_events"` where it answered `outcome: "committed"` with
+  `diff.removed`; `POST /waste/sources` answers 201 with the same outcome and reason. The four
+  import endpoints (`/waste/import/preview`, `/waste/import/commit` and
+  `/waste/sources/{id}/reimport/preview`, `.../reimport/commit`) refuse a file without calendar
+  entries with 400 and `reason: "waste_import_no_events"` where they answered 200 or 201, and a
+  URL source's re-import answers 502 with `reason: "waste_source_fetch_no_events"`. Re-importing
+  an empty calendar no longer empties a source; delete the source instead.
+- **Calendar: an event moved away while it was uploading stays where you put it** (#1926). The
+  legacy Apple Calendar connection uploads the events of the default calendar to iCloud. If an
+  event was moved to another local calendar in the moment its upload was running, it was recorded
+  as uploaded anyway: it was on iCloud and had lost the calendar it had just been given. The same
+  could happen with Google when an event gave up its Google calendar during the upload, and an
+  event deleted in that moment stayed behind at Google. Now such an event stays local and keeps
+  its calendar, and the copy that reached the provider is removed on the next sync.
+- **Google Calendar: an edit made while the event is uploading is sent afterwards** (#1932).
+  Sending a new event to Google takes a moment. If you changed its title, time or another
+  detail in that moment, Google kept the event as it was before the edit and myCrib recorded it
+  as up to date, so the change never reached Google - and the next sync could write Google's
+  older version back over your edit. myCrib now looks at the event again after Google has
+  answered and sends an edit made in the meantime with the next sync. CalDAV and iCloud already
+  did this (#1862).
+- **Shopping: an error message is in your language** (#1909). When something could not be
+  saved, the note showed the server's own sentence, in English or German whatever the app was set
+  to - "Unbekannte Liste." in an English session, when an item was moved to a list somebody had
+  just deleted. The shopping page now says it in the language of the app: the list, item, shop or
+  category no longer exists, or a shop of that name already exists (choose a different name). The
+  same goes for the dialogs that manage shops and shopping categories. Anything else on the shopping page shows the general sentence instead of a server
+  text. The other pages are unchanged for now and follow module by module. For API clients: the
+  affected answers of `/api/v1/shopping` carry a
+  `reason` next to `error` (`shopping_list_not_found`, `shopping_item_not_found`,
+  `shopping_store_not_found`, `shopping_store_exists`, `shopping_category_not_found`,
+  `category_exists`, `category_last`); status codes are unchanged, and three German `error`
+  sentences are now English ("Unknown list.", "Unknown store.", "Store already exists.").
+- **Shopping: the page catches up by itself when something is gone** (#1909). If somebody else
+  in the household deleted a list, an item, a shop or a category while your page was open, the
+  next thing you did with it failed, and the note told you to reload the page. The page now does
+  that for you: it fetches the lists, shops, categories and items again and shows the current
+  state, and the note only says what happened ("This item no longer exists."). If the list you
+  were looking at is gone, you land on the first remaining one. An edit dialog for an item that
+  no longer exists closes; in any other case it stays open with what you typed and offers the
+  current lists, shops and categories. The dialogs that manage shops and shopping categories
+  refresh their rows the same way. One case stays quiet: if you delete an item that somebody else
+  has already deleted, it is simply gone - no note, and the row does not come back for a moment.
+  The same holds for a list, a shop or a shopping category that somebody else deleted first: the
+  list stays gone without a note, and the dialog confirms the shop or category as deleted instead
+  of reporting an error.
+- **Waste collection: an error message is in your language and names the cause** (#1909). The
+  waste page showed the server's own English sentence when something could not be saved, for
+  example "anchor_date must fall on month_day itself (its day-of-month must equal month_day)."
+  for a monthly schedule whose first pickup is not on the chosen day. Types, schedules, moved or
+  skipped pickups, one-off pickups, the rename and mapping of a source and the reminder settings
+  now say it in the language of the app, each cause with its own sentence: no weekday chosen, the
+  end date before the first pickup, an interval or day of the month out of range, a first pickup
+  that does not fall on the chosen day, a missing date, a pickup moved to the day it is already
+  on, a reminder outside 0 to 14 days or without a time. If somebody else in the household
+  deleted the type, schedule, pickup or source in the meantime, the note says so, an open dialog
+  closes and the page fetches the current state by itself. Deleting something that is already
+  deleted, or resetting a pickup that is already back on its day, simply succeeds. Saving a
+  reminder with an emptied time field no longer ends in a server error. The ICS import, the
+  mapping profile and sources with an address say it the same way, with the number where the
+  cause has one: a calendar larger than the upload limit, with more entries, pickups or labels
+  than the import takes, an address that is none or does not start with https://, an interval
+  out of range, a source that is being refreshed right now. A calendar that could not be fetched
+  says why by its kind - the address answered but delivered no calendar, the calendar is too
+  large, the address is on a private network, or it cannot be reached - instead of
+  "Fetching the source URL failed: HTTP 404". A file over the limit is refused before it is
+  sent. If only the type you picked in a dialog is gone (a schedule, a one-off pickup, a mapping
+  of a source, an import decision), the dialog stays open with everything you entered, the list
+  of types is fetched again and the focus is on it; nothing else is chosen in its place. The
+  failure text a source keeps from its last automatic fetch, shown in the source dialog, is
+  still the server's. For API clients: the affected answers of `/api/v1/waste` carry a `reason`
+  next to `error` (`waste_*_not_found`, `waste_type_in_use`, `waste_pickup_exists`,
+  `waste_schedule_*`, `waste_pickup_date_invalid`, `waste_override_*`, `waste_reminder_*`,
+  `waste_import_*`, `waste_profile_*`, `waste_source_*`, listed in the OpenAPI description), and
+  `params` with the number where the cause has one (`{ "limit_mb": 5 }`); a refresh or create
+  that ends with `outcome: "error"` names the class of the failed fetch as `reason` in `data`.
+  Status codes and `error` texts are unchanged, except that an empty `delivery_time` on
+  `PUT /waste/reminder-settings/{typeId}` now answers 400 instead of 500.
+- **Two texts no longer suggest that wall mode follows the arrangement of the overview** (#1908).
+  Wall mode always shows the same four things - the time, today's schedule, who's up today and
+  the weather - on every device. The hint under Settings → Household → Wall tablets now names
+  them, and the note shown when entering wall mode calls it a fixed programme, independent of
+  your overview. The household default still sets a wall tablet's normal overview, as before;
+  nothing about the behaviour changes.
+- **Dutch wording corrections from daily use** (#1892). The notes module was called "Bord" in the
+  navigation, as its page title and in the API token scopes, and "Notities" elsewhere; it is
+  "Notities" in all three now. The due labels on the dashboard, in Tasks, Housekeeping and health
+  prevention read "Vervalt vandaag" and "Vervalt morgen" instead of "Vandaag vervallen" and
+  "Morgen vervallen", and the dashboard's "Due soon" label has its own text, "Vervalt
+  binnenkort", where it repeated the one for today. The empty housekeeping tile says
+  "huishoudhulp" instead of "huishoudelijke hulp".
+- **Deleting an entry of a switched-off CalDAV calendar or reminder list no longer deletes it on
+  the server, and is no longer lost or stuck** (#1884). Switching a calendar or reminder list off
+  in Settings is meant to leave everything in it alone. A deletion made in myCrib for an entry of
+  such a calendar was sent to the server right away all the same; if the server refused it five
+  times, myCrib gave up, and the deleted event came back when you switched the calendar on
+  again. For tasks and shopping items the deletion always went through.
+  In other cases the deletion waited for good, also after the calendar itself had been deleted on
+  the server. Now the deletion waits while the calendar or list is switched off: nothing is
+  deleted there, and waiting does not use up its retries. It is carried out when you switch the
+  calendar or list on again, so the entry does not come back, and it is dropped when the
+  calendar or list no longer exists on the server or the account is removed. The sync log names
+  how many deletions are waiting. For iCloud, a deletion for a calendar that no longer exists is
+  dropped the same way.
+- **A paired wall tablet can show the photo screensaver** (#1766). Its account could not read the
+  screensaver photos, so the screensaver never started on the one device it was built for. An
+  administrator now switches it on per tablet under Settings → Household → Wall tablets; it is off
+  until then, so a wall that shows the calendar today keeps showing it after the update. A tablet
+  that has it on reads the same photos every signed-in device shows - with their date, city and
+  country - and nothing else of the screensaver: the Immich connection stays out of its reach.
+  The switch reaches a tablet nobody touches in both directions: a screensaver that could not
+  get its photos asks again after the next idle period instead of waiting for a touch, and one
+  whose next photo is refused closes instead of leaving a black screen.
+- **Shopping: deleting a shop no longer says "Category deleted"** (#1929). The shop manager
+  borrowed three messages from the category managers: adding, renaming and deleting a shop each
+  ended with "Category ...", and a screen reader announced the delete button as "Delete category
+  <name>". All four now name the shop, in every language; the category managers read as before.
+  A deleted shopping list also no longer leaves its "Checked off is open" entry behind in the
+  browser's storage.
+- **Health: a switched-off medication no longer shows a dose as due today** (#1950). The Health page
+  listed a dose under "Due today" and among the next reminders for a medication that was no longer
+  active, while the Overview tile and the reminders left it out. The page now leaves it out too,
+  so both show the same number, and adherence and the streak count only the medications still
+  being taken. The medication stays in the list, and the doses already logged stay in the intake
+  log.
+- **Wall mode on a phone: the note on entering no longer covers the clock, and the footer shows
+  that the list goes on** (#1917). Up to a width of about 834 px the note that explains wall mode
+  lay on the time and date for eight seconds; it now sits directly below them and still clear of
+  the timer buttons, and on wider screens it stays where it was, next to the clock. Any later
+  message on the wall keeps the clock and the footer free in the same way. "Who's up today" was
+  never cut off, but the footer that stays at the bottom covered faces behind a hard edge; on a
+  phone the content now fades out softly above the footer, and at the end of the list the last
+  entry stands clear of it. On a tablet or a wall display the layout is unchanged.
 
 - **A task due late tomorrow evening is no longer labelled "Due today" on the dashboard.** A task
   due tomorrow at 22:00 or later and less than 24 hours away gets its own label next to the date,

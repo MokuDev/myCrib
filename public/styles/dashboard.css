@@ -5413,8 +5413,17 @@ button.today-cockpit__more--link {
  * Ausstieg und Timer-Startknoepfen, und der Stapel rechnet dort mit einer
  * Tab-Leiste, die hier gar nicht steht: der Hinweis beim Einschalten lag am
  * Telefon acht Sekunden lang auf „5 Min" und nahm den Tipp. Oben steht nur die
- * Uhr, die nichts annimmt. Die Lage neben einem offenen Dialog
- * (`[data-dock]`, utils/toast-placement.js) bleibt dessen Sache. */
+ * Uhr, die nichts annimmt.
+ *
+ * DAS IST DIE AUSGANGSLAGE, NICHT DAS LETZTE WORT (#1917). Die Uhr nimmt
+ * keinen Tipp, aber sie ist das, wofuer die Flaeche da ist, und bis rund 834px
+ * Breite lag der Hinweis acht Sekunden auf ihr (390x844: Uhrzeit und Datum zu
+ * 100 % verdeckt). Uhr und Fuss tragen deshalb `data-toast-keepout`
+ * (pages/dashboard.js), und utils/toast-placement.js schiebt den Stapel von
+ * hier aus an die naechste freie Kante - am Telefon direkt unter das Datum,
+ * am Desktop bleibt er stehen, weil er neben der Uhr Platz hat. Gesetzt wird
+ * die Lage wie neben einem Dialog ueber `[data-dock]`; diese Regel gilt, solange
+ * der Platzierer nichts zu sagen hat. */
 [data-wall-mode] .shell-bottom-stack:not([data-dock]) {
   top: calc(var(--safe-area-inset-top) + var(--space-4));
   bottom: auto;
@@ -5450,9 +5459,14 @@ button.today-cockpit__more--link {
    * zwei Metern ablesbar sein, ohne der Uhr den Rang abzulaufen. */
   --wall-timer:      clamp(var(--text-4xl), 7vw, var(--text-5xl));
 
+  /* Der Abstand zwischen Uhr, Buehne und Fuss. Als Variable, weil der Fuss
+   * aus ihm die Hoehe seiner Scroll-Kante und seinen Endabstand rechnet
+   * (`.wall__foot`, #1917). */
+  --wall-gap:        clamp(var(--space-4), 3vmin, var(--space-8));
+
   display: flex;
   flex-direction: column;
-  gap: clamp(var(--space-4), 3vmin, var(--space-8));
+  gap: var(--wall-gap);
   min-height: 100dvh;
   padding: var(--wall-pad);
   background: var(--color-bg);
@@ -6057,13 +6071,74 @@ button.today-cockpit__more--link {
    * Kante hindurch -, und unten haelt er den Abstand der Flaeche, mindestens
    * aber die Safe-Area (Home-Indikator). `--nav-tail` ist im Wandmodus 0
    * (layout.css, Leiste ausgeblendet) - dieselbe Regel wie jede klebende
-   * Fusszeile im Inhalt (test:mobile-chrome). */
+   * Fusszeile im Inhalt (test:mobile-chrome).
+   *
+   * OBEN HAT ER KEIN POLSTER MEHR, DAFUER DEN ENDABSTAND DER FLAECHE (#1917).
+   * Dort stand ein deckender Streifen von `--space-2` mit Gegenrand, und er
+   * machte die Oberkante hart. Jetzt haelt der Fuss zum Inhalt davor genau die
+   * Hoehe seiner Scroll-Kante: der Abstand der Flaeche (`gap`) plus dieser
+   * Rand ergeben `--wall-foot-edge`. Am Scrollende und bei passender Wand
+   * steht der letzte Eintrag damit frei UEBER der Kante.
+   *
+   * ER WOHNT HIER UND NICHT AM SCROLLPORT (`.app-content`): ein Nachlauf dort
+   * laege HINTER dem Fuss. Der Fuss klebt nur innerhalb der Flaeche; endete
+   * die Flaeche ueber der Unterkante des Scrollports, hoebe sie den Fuss am
+   * Scrollende mit an, und die Kante laege weiter auf der letzten Zeile. Der
+   * Endabstand des Inhalts ist der Abstand VOR dem Fuss.
+   *
+   * `--wall-foot-edge` IST DIE EINE ZAHL FUER BEIDES: die Kante liest sie als
+   * Hoehe, der Rand hier als Endabstand - sie koennen nicht auseinanderlaufen.
+   * Auf der Wand ist sie der Abstand der Flaeche selbst: der Rand ist dann 0,
+   * die Flaeche keinen Pixel hoeher als zuvor (1280x800 passt weiter - eine
+   * Wand scrollt nicht), und die Kante liegt im leeren Streifen. Am Telefon
+   * hebt die Containerregel darunter sie auf die Hoehe eines Gesichts. */
+  --wall-foot-edge: var(--wall-gap);
+
   position: sticky;
   bottom: var(--nav-tail);
   z-index: 1;
-  margin-block: calc(-1 * var(--space-2)) calc(-1 * var(--wall-pad));
-  padding-block: var(--space-2) max(var(--wall-pad), var(--safe-area-inset-bottom));
+  margin-block: calc(var(--wall-foot-edge) - var(--wall-gap)) calc(-1 * var(--wall-pad));
+  padding-block: 0 max(var(--wall-pad), var(--safe-area-inset-bottom));
   background: var(--color-bg);
+}
+
+/* Das Telefon - dieselbe Grenze wie bei Zeilentitel und Zeitspanne oben:
+ * schmaler als jedes Wandtablet, alles gestapelt, die Flaeche scrollt ohnehin
+ * (`wallIsStacked`). Nur dort kostet der Endabstand nichts, was die Wand
+ * braucht, und nur dort verdeckte der Fuss Gesichter. */
+@container wall (max-width: 519px) {
+  .wall__foot {
+    --wall-foot-edge: var(--space-12);
+  }
+}
+
+/* DIE SCROLL-KANTE DES FUSSES (#1917). Am Telefon ist die Flaeche laenger als
+ * das Bild, der Fuss klebt, und sein deckender Grund schnitt "Wer heute dran
+ * ist" an einer unsichtbaren harten Kante ab: bei 390x844 ein Gesicht ganz
+ * und eines halb verdeckt, ohne jedes Zeichen, dass es darunter weitergeht.
+ * Abgeschnitten war nichts - es fehlte die Kante. Jetzt laeuft der Inhalt in
+ * einem Verlauf vom Grund der Flaeche unter die Leiste aus.
+ *
+ * EINE FESTE KANTE, IN JEDEM BROWSER DIESELBE (`--wall-foot-edge`): am Telefon
+ * so hoch wie ein Gesicht. Niedriger traegt sie dort nicht - mit dem Abstand
+ * der Flaeche allein (16px) sah man von ihr nichts, sobald die Kante des
+ * Fusses in eine Luecke zwischen zwei Zeilen fiel (gemessen 390x844). Sie
+ * braucht keinen Zustand, kein Skript und keine Bewegung: der Endabstand des
+ * Fusses ist genau ihre Hoehe, am Ende des Scrollwegs und bei passender Wand
+ * liegt sie also auf leerem Grund derselben Farbe und ist unsichtbar.
+ *
+ * Kein Tipp bleibt an ihr haengen (`pointer-events: none`). Die Farbe ist die
+ * des Grundes selbst, in beiden Themen und nachts dieselbe Variable; es
+ * entsteht keine neue Flaeche und kein Licht (DESIGN.md, Der Wand-Modus:
+ * genau ein gefuellter Traeger). Die Achse ist die Blockachse, in RTL gleich. */
+.wall__foot::before {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  block-size: var(--wall-foot-edge);
+  background: linear-gradient(to bottom, transparent, var(--color-bg));
+  pointer-events: none;
 }
 
 .wall__foot > :first-child {
@@ -6074,13 +6149,31 @@ button.today-cockpit__more--link {
   justify-self: end;
 }
 
+.wall__foot-end {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 /* Eine Zeile braucht Platz fuer beides: fuenf Startknoepfe (340px) und je
- * Aussenspalte einen wachen Ausstieg samt Beschriftung (220px, de). Fehlt er,
- * werden die Aussenspalten ungleich und die Mitte rutscht wieder (gemessen: bei
- * einer 800px breiten Flaeche um 26px). Die Bedienung bekommt dann eine eigene
- * Zeile ueber Stand und Ausstieg; der alte Fuss lief bei 390px sogar rechts
- * aus dem Bild (Ausstieg wach bei 356-478). Gefragt wird die FLAECHE
- * (`container: wall`, siehe `.wall`), nicht das Fenster. */
+ * Aussenspalte die Gruppe am Ende - den Ausstieg samt Beschriftung (220px, de)
+ * und seit #1766 daneben den Schoner-Knopf (48px plus 8px Abstand), zusammen
+ * 276px. Fehlt der Platz, werden die Aussenspalten ungleich und die Mitte
+ * rutscht wieder (gemessen: bei einer 800px breiten Flaeche um 26px). Die
+ * Bedienung bekommt dann eine eigene Zeile ueber Stand und Ausstieg; der alte
+ * Fuss lief bei 390px sogar rechts aus dem Bild (Ausstieg wach bei 356-478).
+ * Gefragt wird die FLAECHE (`container: wall`, siehe `.wall`), nicht das
+ * Fenster.
+ *
+ * DIE SCHWELLE BLEIBT, DIE RESERVE SCHRUMPFT. Ab 1024px Flaeche hat jede
+ * Aussenspalte 326px (1024 - 340 - 2 x 16, halbiert): fuer de 50px Luft statt
+ * 106. Gemessen mit Knopf, alle Sprachen: bei 1024px Flaeche stehen die
+ * Startknoepfe in 23 von 26 mittig, ab 1192px in allen. Dazwischen reicht es
+ * den drei laengsten Ausstiegen nicht (ru bis 14px, pt-BR bis 9px, el bis
+ * 58px versetzt; el rutschte dort schon ohne Knopf). Der Versatz steht still -
+ * die Gruppe ist schlafend und wach gleich breit -, der Nachtipp trifft also
+ * denselben Knopf. Eine hoehere Schwelle naehme dafuer jeder Sprache bis
+ * rund 1140px die eine Zeile. */
 @container wall (max-width: 1023px) {
   .wall__foot {
     grid-template-columns: minmax(0, 1fr) auto;
@@ -6091,6 +6184,37 @@ button.today-cockpit__more--link {
     grid-column: 1 / -1;
     grid-row: 1;
     justify-self: center;
+  }
+
+  /* MIT DEM SCHONER-KNOPF REICHT DIE ZWEITE ZEILE NICHT MEHR IN JEDER SPRACHE
+   * (#1766). Auf 390px bleiben 342px: Stand, Knopf und Ausstieg brauchen in de
+   * 366. Das Raster oben drueckt die Stand-Spalte dann unter die Breite ihres
+   * laengsten Wortes, und der Stand liegt UNTER dem Knopf (gemessen: ru 43px,
+   * uk 20px). Hier bricht deshalb der Inhalt um, nicht die Spalte: der Stand
+   * gibt zuerst nach und laeuft auf zwei Zeilen (die Fusshoehe bleibt, er ist
+   * auch zweizeilig niedriger als der Knopf), aber nie unter sein laengstes
+   * Wort. Reicht selbst das nicht, rutscht die Gruppe als Ganzes in eine
+   * dritte Zeile. Ohne den Knopf - also auch solange ein Timer laeuft - gilt
+   * das Raster wie bisher. */
+  .wall__foot:has(.wall__foot-btn--icon) {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :first-child {
+    flex: 1 1 0;
+    min-inline-size: min-content;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :nth-child(2) {
+    order: -1;
+    flex: 0 0 100%;
+    min-inline-size: 0;
+    justify-content: center;
+  }
+
+  .wall__foot:has(.wall__foot-btn--icon) > :last-child {
+    margin-inline-start: auto;
   }
 }
 
@@ -6154,6 +6278,23 @@ button.today-cockpit__more--link {
 .wall__foot-btn:focus-visible {
   outline: var(--focus-ring-width) solid var(--focus-ring-color);
   outline-offset: var(--focus-ring-offset);
+}
+
+/* DER SCHONER-START TRAEGT NUR SEIN ZEICHEN, IN JEDER BREITE (#1766). Mit Wort
+ * war die Gruppe aus Schoner und Ausstieg in de 416px breit und in jeder Sprache
+ * anders: die Aussenspalten wurden ungleich und die Startknoepfe rutschten
+ * (gemessen bis 100px, el bei 1280), auf 390px lag der Stand unter dem Knopf.
+ * Ein Kreis von `--target-lg` ist in jeder Sprache gleich breit.
+ *
+ * Das widerspricht dem Satz oben nicht: „mit Wort" gilt dem AUSSTIEG, weil ein
+ * namenloses Zeichen dort der einzige Weg hinaus war. Der Schoner ist ein
+ * Zusatzweg - wer ihn nicht erkennt, verliert nichts, er startet nach der
+ * Wartezeit ohnehin von selbst. Den Namen tragen `aria-label` und `title`. */
+.wall__foot-btn--icon {
+  justify-content: center;
+  inline-size: var(--target-lg);
+  padding: 0;
+  flex-shrink: 0;
 }
 
 /* ── Küchentimer (#844) ──────────────────────────────────────────────────────

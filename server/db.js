@@ -10704,6 +10704,113 @@ const MIGRATIONS = [
         ON caldav_upload_attempts(uid);
     `,
   },
+  {
+    version: 242,
+    description: 'Tasks: manual order within a category (tasks.sort_order)',
+    // NULL = nie von Hand eingeordnet. Solche Aufgaben behalten die bisherige
+    // Reihenfolge (Faelligkeit, dann Prioritaet) und stehen HINTER den von Hand
+    // eingeordneten: eine neue Aufgabe landet damit am Ende ihrer Kategorie,
+    // statt eine bestehende Handordnung zu verschieben. Kein Backfill - bis zum
+    // ersten Zug aendert sich nichts an der Anzeige.
+    //
+    // Der Rang gilt in der Kategorie, in der er vergeben wurde: wechselt eine
+    // Aufgabe die Kategorie, setzt PUT /tasks/:id ihn auf NULL zurueck, und sie
+    // steht dort, wo jede neue Aufgabe steht. Die Folgeinstanz einer
+    // Wiederholung erbt den Rang ihrer Vorgaengerin. Gelesen wird er nur beim
+    // Gruppieren nach Kategorie.
+    up(db) {
+      const has = (table, column) => db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+      if (!has('tasks', 'sort_order')) db.exec('ALTER TABLE tasks ADD COLUMN sort_order INTEGER');
+    },
+  },
+  {
+    version: 243,
+    description: 'Shopping: a mirrored item waits to be carried to the list it was moved to',
+    // Ein gespiegelter Artikel, der auf eine andere gespiegelte Liste umzieht
+    // (#1700), nimmt sein Objekt auf dem CalDAV-Server mit. `outbound_move = 1`
+    // heisst: die Zeile steht schon auf der neuen Liste, ihr Objekt liegt noch
+    // in der Collection der alten (`external_object_url`) und soll in die
+    // Collection, die der Liste zugeordnet ist, in der die Zeile JETZT steht.
+    // Das Ziel steht deshalb nicht hier - es folgt aus `list_id`. Solange die
+    // Vormerkung steht, ordnet der Abruf die Zeile nicht nach dem Server um.
+    // `outbound_move_attempts` zaehlt die Absagen des Ziels; nach der fuenften
+    // faellt die Vormerkung, und die Zeile steht wieder auf der Liste ihres
+    // Objekts. Ein eigener Zaehler, weil `outbound_attempts` der Bearbeitung
+    // gehoert und mit ihr zurueckgesetzt wird.
+    up(db) {
+      const has = (column) => db.prepare('PRAGMA table_info(shopping_items)').all().some((c) => c.name === column);
+      if (!has('outbound_move')) {
+        db.exec('ALTER TABLE shopping_items ADD COLUMN outbound_move INTEGER NOT NULL DEFAULT 0');
+      }
+      if (!has('outbound_move_attempts')) {
+        db.exec('ALTER TABLE shopping_items ADD COLUMN outbound_move_attempts INTEGER NOT NULL DEFAULT 0');
+      }
+    },
+  },
+  {
+    version: 244,
+    description: 'Displays: the photo screensaver is switched on per display by an administrator (#1766)',
+    // OB EIN WANDTABLETT DEN FOTO-SCHONER ZEIGT, ENTSCHEIDET EIN ADMINISTRATOR,
+    // JE DISPLAY (#1766, PR #1793). Ohne diese Spalte haette jedes gekoppelte
+    // Tablett in einem Haushalt mit Immich nach fuenf Minuten Fotos gezeigt -
+    // und ein Display aendert keine Einstellungen: die Wartezeit kennt kein
+    // "nie", und die Display-Oberflaeche hat keine Einstellungen. Ein
+    // Haushaltsschalter (Modul) koennte die Kueche nicht vom Flur
+    // unterscheiden, deshalb steht die Wahl am Display.
+    //
+    // DEFAULT 0, KEIN BACKFILL: ein Display, das bisher den Kalender zeigte,
+    // zeigt ihn nach dem Update weiter. Bei 0 sperrt das Gate in
+    // server/index.js die beiden Bildrouten, nicht erst die Seite.
+    //
+    // Der CHECK geht mit ADD COLUMN, weil der Default konstant ist und den
+    // Ausdruck erfuellt. Ein kuenftiger Rebuild von display_accounts muss die
+    // Spalte samt CHECK mitnehmen.
+    up: `
+      ALTER TABLE display_accounts ADD COLUMN show_screensaver INTEGER NOT NULL DEFAULT 0 CHECK(show_screensaver IN (0, 1));
+    `,
+  },
+  {
+    version: 245,
+    description: 'Calendar: first-class local calendars with per-calendar feeds',
+    up: `
+      CREATE TABLE local_calendars (
+        id          INTEGER PRIMARY KEY AUTOINCREMENT,
+        name        TEXT    NOT NULL,
+        color       TEXT    NOT NULL DEFAULT '#007AFF',
+        is_default  INTEGER NOT NULL DEFAULT 0 CHECK(is_default IN (0,1)),
+        sort_order  INTEGER NOT NULL DEFAULT 0,
+        feed_token  TEXT UNIQUE,
+        created_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+        updated_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+      );
+      CREATE UNIQUE INDEX idx_local_calendars_default
+        ON local_calendars(is_default) WHERE is_default = 1;
+      CREATE INDEX idx_local_calendars_sort ON local_calendars(sort_order, name);
+      CREATE TRIGGER trg_local_calendars_updated_at
+        AFTER UPDATE ON local_calendars FOR EACH ROW
+        BEGIN UPDATE local_calendars SET updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = OLD.id; END;
+
+      -- Local calendar moves never push outward (see MIRRORED_FIELDS).
+      ALTER TABLE calendar_events ADD COLUMN local_calendar_id INTEGER
+        REFERENCES local_calendars(id) ON DELETE SET NULL;
+      CREATE INDEX IF NOT EXISTS idx_calendar_local_calendar ON calendar_events(local_calendar_id);
+
+      INSERT INTO local_calendars (name, color, is_default, sort_order, created_by)
+      SELECT 'myCrib', '#007AFF', 1, 0, NULL
+      WHERE NOT EXISTS (SELECT 1 FROM local_calendars WHERE is_default = 1);
+      CREATE TRIGGER IF NOT EXISTS trg_event_local_calendar_insert
+      BEFORE INSERT ON calendar_events
+      WHEN NEW.local_calendar_id IS NOT NULL AND (NEW.external_source IS NOT 'local'
+        OR NEW.target_google_calendar_id IS NOT NULL OR NEW.target_caldav_account_id IS NOT NULL)
+      BEGIN SELECT RAISE(ABORT, 'Local and sync calendars are mutually exclusive'); END;
+      CREATE TRIGGER IF NOT EXISTS trg_event_local_calendar_update
+      BEFORE UPDATE OF local_calendar_id, external_source, target_google_calendar_id, target_caldav_account_id ON calendar_events
+      WHEN NEW.local_calendar_id IS NOT NULL AND (NEW.external_source IS NOT 'local'
+        OR NEW.target_google_calendar_id IS NOT NULL OR NEW.target_caldav_account_id IS NOT NULL)
+      BEGIN SELECT RAISE(ABORT, 'Local and sync calendars are mutually exclusive'); END;
+    `,
+  },
 ];
 
 /**
@@ -10932,6 +11039,12 @@ const CRITICAL_COLUMNS = [
   // #1883: v240 traegt den ETag eines Loeschauftrags nach; ohne die Spalte
   // scheitert das Lesen der Auftraege und damit jeder ausgehende Durchgang.
   { table: 'calendar_pending_deletions', column: 'etag', type: 'TEXT' },
+  // #1700: v243 traegt die Vormerkung eines Umzugs zwischen gespiegelten
+  // Einkaufslisten nach; ohne die Spalten scheitert der Abruf jedes
+  // Einkaufsartikels (er liest sie, bevor er die Zeile anfasst) und jeder
+  // Sofortversuch.
+  { table: 'shopping_items', column: 'outbound_move', type: 'INTEGER NOT NULL DEFAULT 0' },
+  { table: 'shopping_items', column: 'outbound_move_attempts', type: 'INTEGER NOT NULL DEFAULT 0' },
 ];
 
 /**

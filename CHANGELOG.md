@@ -13,6 +13,8 @@ myCrib's own patches - including the ones it takes over from upstream, in its ow
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-14
+
 - **Der fünfte Abgleich mit dem Ursprungsprojekt** (`ulsklyc/yuvomi`, 65 weitere Commits bis zu deren
   Stand vom 9. Oktober 2026, nach v2.75.0: Taschengeld, wiederkehrende Split-Ausgaben, Köchin oder
   Koch je Mahlzeit, Konto deaktivieren statt löschen, Migrationen 231 bis 235, der
